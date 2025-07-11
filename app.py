@@ -358,7 +358,7 @@ def notifications():
 
 @app.route('/local/api/matterhub/id', methods=["GET"])
 def matterhub_id():
-    matterhub_id = os.environ.get('matterhub_id')
+    matterhub_id = os.environ.get('matterhub_id', '').strip('"')
     return jsonify({"matterhub_id": matterhub_id})
 
 

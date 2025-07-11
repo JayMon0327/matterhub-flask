@@ -280,6 +280,34 @@ def handle_ha_request(endpoint, method, request_func, response_id=None):
     )
     return
 
+def handle_group_ha_request(endpoint, method, request_func, response_id=None):
+    try:
+        response = request_func()
+        res = {
+            "endpoint": endpoint,
+            "method": method,
+            "status": "success",
+            "data": response.json()
+        }
+    except Exception as e:
+        print(f"[Group] Error: {e}")
+        res = {
+            "endpoint": endpoint,
+            "method": method,
+            "status": "error",
+            "data": []
+        }
+
+    res["response_id"] = "matterhub/group/all/api/response"
+
+    print(f"[Group] Response: {res}")
+    global_mqtt_connection.publish(
+        topic="matterhub/group/all/api/response",
+        payload=json.dumps(res),
+        qos=mqtt.QoS.AT_LEAST_ONCE
+    )
+
+
 def mqtt_callback(topic, payload, **kwargs):
     _message = json.loads(payload.decode('utf-8'))
     try:
@@ -306,6 +334,7 @@ def mqtt_callback(topic, payload, **kwargs):
         )
         return
 
+    # ✅ [1] 기존 개별 전체 상태 조회
     if endpoint == "/states" and method == "get":
         print(f"Received message: {payload} from topic: {topic} endpoint: {endpoint} method: {method}")
         handle_ha_request(
@@ -315,6 +344,20 @@ def mqtt_callback(topic, payload, **kwargs):
             response_id
         )
         return
+
+
+    # ✅ [2] 그룹용 전체 상태 조회 처리
+    if endpoint == "/states" and method == "get" and topic == "matterhub/group/all/api":
+        print(f"[Group] Received group /states request from topic: {topic}")
+        handle_group_ha_request(
+            endpoint,
+            method,
+            lambda: requests.get(f"{HA_host}/api/states", headers=headers),
+            response_id
+        )
+        return
+
+
 
     check_res = check_dynamic_endpoint("/states/_",endpoint,"get",method)
     if(check_res):
@@ -342,6 +385,28 @@ def mqtt_callback(topic, payload, **kwargs):
                                 headers=headers),
             response_id
         )
+        return
+
+    # ✅ [3] 그룹 제어 처리
+    if endpoint.startswith("/devices/") and endpoint.endswith("/command") and method == "post" and topic == "matterhub/group/all/api":
+        print(f"[Group] Received group command from topic: {topic}")
+        check_res = check_dynamic_endpoint("/devices/_/command", endpoint, "post", method)
+        if check_res:
+            domain = _message['payload']['domain']
+            service = _message['payload']['service']
+            res = {
+                "entity_id": check_res[0]
+            }
+            handle_ha_request(
+                endpoint,
+                method,
+                lambda: requests.post(
+                    f"{HA_host}/api/services/{domain}/{service}",
+                    data=json.dumps(res),
+                    headers=headers
+                ),
+                response_id
+            )
         return
 
     check_res = check_dynamic_endpoint("/devices/_/status",endpoint,"get",method)
@@ -505,6 +570,16 @@ if __name__ == "__main__":
     )
     subscribe_result = subscribe_future.result()
     print(f"matterhub/api 토픽 구독 완료")
+
+ # 전체 그룹 토픽 구독
+    GROUP_TOPIC = "matterhub/group/all/api"
+    subscribe_future, packet_id = global_mqtt_connection.subscribe(
+        topic=GROUP_TOPIC,
+        qos=mqtt.QoS.AT_LEAST_ONCE,
+        callback=mqtt_callback
+    )
+    subscribe_result = subscribe_future.result()
+    print(f"{GROUP_TOPIC} 토픽 구독 완료")
 
 
     # 테스트용 데이터 publish
