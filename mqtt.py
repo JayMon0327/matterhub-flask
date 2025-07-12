@@ -280,34 +280,6 @@ def handle_ha_request(endpoint, method, request_func, response_id=None):
     )
     return
 
-def handle_group_ha_request(endpoint, method, request_func, response_id=None):
-    try:
-        response = request_func()
-        res = {
-            "endpoint": endpoint,
-            "method": method,
-            "status": "success",
-            "data": response.json()
-        }
-    except Exception as e:
-        print(f"[Group] Error: {e}")
-        res = {
-            "endpoint": endpoint,
-            "method": method,
-            "status": "error",
-            "data": []
-        }
-
-    res["response_id"] = "matterhub/group/all/api/response"
-
-    print(f"[Group] Response: {res}")
-    global_mqtt_connection.publish(
-        topic="matterhub/group/all/api/response",
-        payload=json.dumps(res),
-        qos=mqtt.QoS.AT_LEAST_ONCE
-    )
-
-
 def mqtt_callback(topic, payload, **kwargs):
     _message = json.loads(payload.decode('utf-8'))
     try:
@@ -344,20 +316,6 @@ def mqtt_callback(topic, payload, **kwargs):
             response_id
         )
         return
-
-
-    # ✅ [2] 그룹용 전체 상태 조회 처리
-    if endpoint == "/states" and method == "get" and topic == "matterhub/group/all/api":
-        print(f"[Group] Received group /states request from topic: {topic}")
-        handle_group_ha_request(
-            endpoint,
-            method,
-            lambda: requests.get(f"{HA_host}/api/states", headers=headers),
-            response_id
-        )
-        return
-
-
 
     check_res = check_dynamic_endpoint("/states/_",endpoint,"get",method)
     if(check_res):
