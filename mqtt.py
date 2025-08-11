@@ -495,6 +495,43 @@ def mqtt_callback(topic, payload, **kwargs):
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
     
+    if (endpoint == "/notifications" and method in ["get","post","delete","put"]):
+        try:
+            with open(notifications_file_path, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+        except FileNotFoundError:
+            data = []
+
+        if method == "post":
+            new_data = _message['payload']
+            data.append(new_data)
+
+        if method == "delete":
+            target_value = _message['payload']['id']
+            data = deleteItem(data, "id", target_value)
+
+        if method == "put":
+            target_value = _message['payload']['id']
+            data = putItem(data, "id", target_value, _message['payload'])
+
+        with open(notifications_file_path, 'w', encoding='utf-8') as file:
+            json.dump(data, file, indent=4, ensure_ascii=False)
+
+        # app.py와 동일하게 변경 알림 훅 호출(옵션)
+        try:
+            file_changed_request("notifications_file_changed")
+        except Exception as e:
+            print(f"[warn] notifications_file_changed 호출 실패: {e}")
+
+        def mock_request():
+            class MockResponse:
+                def json(self):
+                    return data
+            return MockResponse()
+
+        handle_ha_request(endpoint, method, mock_request, response_id)
+        return
+
     if endpoint == "/" and method == "get":
         def mock_request():
             class MockResponse:
