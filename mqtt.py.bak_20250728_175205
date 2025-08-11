@@ -423,11 +423,7 @@ def mqtt_callback(topic, payload, **kwargs):
             json.dump(data, file, indent=4, ensure_ascii=False)
 
         def mock_request():
-            class MockResponse:
-                def json(self):
-                    return data
-            return MockResponse()
-            # return type('Response', (), {'json': lambda: data})()
+            return type('Response', (), {'json': lambda: data})()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
@@ -456,11 +452,7 @@ def mqtt_callback(topic, payload, **kwargs):
             schedule_config(one_time)
 
         def mock_request():
-            class MockResponse:
-                def json(self):
-                    return data
-            return MockResponse()
-            # return type('Response', (), {'json': lambda: data})()
+            return type('Response', (), {'json': lambda: data})()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
@@ -486,21 +478,7 @@ def mqtt_callback(topic, payload, **kwargs):
             json.dump(data, file, indent=4, ensure_ascii=False)
 
         def mock_request():
-            class MockResponse:
-                def json(self):
-                    return data
-            return MockResponse()
-            # return type('Response', (), {'json': lambda: data})()
-
-        handle_ha_request(endpoint, method, mock_request, response_id)
-        return
-    
-    if endpoint == "/" and method == "get":
-        def mock_request():
-            class MockResponse:
-                def json(self):
-                    return {"status": "ok"}
-            return MockResponse()
+            return type('Response', (), {'json': lambda: data})()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
         return

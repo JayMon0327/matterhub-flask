@@ -15,6 +15,13 @@
       "autorestart": true
     },
     {
+      "name": "wm-localIp",
+      "script": "sub/localIp.py",
+      "interpreter": "python3",
+      "instances": 1,
+      "autorestart": true
+    },
+    {
       "name": "wm-app",
       "script": "app.py",
       "interpreter": "python3",

@@ -3,7 +3,6 @@ import os
 import threading
 import time
 import uuid
-import sys
 from awscrt import io, mqtt
 from awsiot import mqtt_connection_builder
 from dotenv import load_dotenv
@@ -11,9 +10,6 @@ import requests
 
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
-
-print("mqtt.py 실행 전 대기 중 ...")
-time.sleep(10) 
 
 load_dotenv()
 res_file_path= os.environ.get('res_file_path')
@@ -423,11 +419,7 @@ def mqtt_callback(topic, payload, **kwargs):
             json.dump(data, file, indent=4, ensure_ascii=False)
 
         def mock_request():
-            class MockResponse:
-                def json(self):
-                    return data
-            return MockResponse()
-            # return type('Response', (), {'json': lambda: data})()
+            return type('Response', (), {'json': lambda: data})()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
@@ -456,11 +448,7 @@ def mqtt_callback(topic, payload, **kwargs):
             schedule_config(one_time)
 
         def mock_request():
-            class MockResponse:
-                def json(self):
-                    return data
-            return MockResponse()
-            # return type('Response', (), {'json': lambda: data})()
+            return type('Response', (), {'json': lambda: data})()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
@@ -486,21 +474,7 @@ def mqtt_callback(topic, payload, **kwargs):
             json.dump(data, file, indent=4, ensure_ascii=False)
 
         def mock_request():
-            class MockResponse:
-                def json(self):
-                    return data
-            return MockResponse()
-            # return type('Response', (), {'json': lambda: data})()
-
-        handle_ha_request(endpoint, method, mock_request, response_id)
-        return
-    
-    if endpoint == "/" and method == "get":
-        def mock_request():
-            class MockResponse:
-                def json(self):
-                    return {"status": "ok"}
-            return MockResponse()
+            return type('Response', (), {'json': lambda: data})()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
@@ -533,13 +507,9 @@ if __name__ == "__main__":
     o = threading.Thread(target=one_time_scheduler, args=[one_time])
     o.start()
 
-    try:
-        aws_client = AWSIoTClient()
-        global_mqtt_connection = aws_client.connect_mqtt()
-        print("MQTT 연결 성공")
-    except Exception as e:
-        print(f"[에러] MQTT 연결 실패: {e}")
-        sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
+    aws_client = AWSIoTClient()
+    global_mqtt_connection = aws_client.connect_mqtt()  # global 키워드 제거
+    print("MQTT 연결 성공")
     
     # hello 토픽 구독
     subscribe_future, packet_id = global_mqtt_connection.subscribe(
@@ -585,4 +555,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("프로그램 종료")
         global_mqtt_connection.disconnect()
-        
