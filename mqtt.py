@@ -30,6 +30,10 @@ matterhub_id = os.environ.get('matterhub_id')
 # 전역 변수로 선언
 mqtt_connection = None
 
+# 섀도우 업데이트 관련 전역 변수
+last_state_update = 0
+STATE_UPDATE_INTERVAL = 180  # 3분마다 상태 업데이트
+
 class AWSIoTClient:
     def __init__(self):
         self.cert_path = "certificates/"
@@ -231,6 +235,63 @@ class AWSIoTClient:
         print("새 인증서로 MQTT 연결 성공")
         
         return mqtt_connection
+
+def update_device_shadow():
+    """디바이스 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
+    global last_state_update, global_mqtt_connection
+    
+    try:
+        if not global_mqtt_connection:
+            return
+            
+        current_time = time.time()
+        if current_time - last_state_update < STATE_UPDATE_INTERVAL:
+            return
+            
+        # Home Assistant에서 현재 상태 가져오기
+        headers = {"Authorization": f"Bearer {hass_token}"}
+        response = requests.get(f"{HA_host}/api/states", headers=headers)
+        
+        if response.status_code == 200:
+            states = response.json()
+            
+            # 상태 데이터 정리
+            shadow_state = {
+                "state": {
+                    "reported": {
+                        "hub_id": matterhub_id,
+                        "timestamp": int(current_time),
+                        "device_count": len(states),
+                        "online": True,
+                        "ha_reachable": True,
+                        "devices": {}
+                    }
+                }
+            }
+            
+            # 주요 디바이스 상태만 포함 (전체 상태는 너무 클 수 있음)
+            for state in states[:20]:  # 최대 20개 디바이스만
+                entity_id = state.get('entity_id', '')
+                if entity_id:
+                    shadow_state["state"]["reported"]["devices"][entity_id] = {
+                        "state": state.get('state'),
+                        "last_changed": state.get('last_changed'),
+                        "attributes": state.get('attributes', {})
+                    }
+            
+            # 섀도우 업데이트 토픽으로 발행
+            shadow_topic = f"$aws/things/{matterhub_id}/shadow/update"
+            global_mqtt_connection.publish(
+                topic=shadow_topic,
+                payload=json.dumps(shadow_state),
+                qos=mqtt.QoS.AT_LEAST_ONCE
+            )
+            
+            last_state_update = current_time
+            print(f"섀도우 업데이트 완료: {len(states)}개 디바이스 상태")
+            
+    except Exception as e:
+        print(f"섀도우 업데이트 실패: {e}")
 
 def check_dynamic_endpoint(target_endpoint, endpoint, target_method, method): 
     url_var_list = []
@@ -616,8 +677,10 @@ if __name__ == "__main__":
 
     
     try:
-        # 무한 루프로 메시지 수신 대기
+        # 무한 루프로 메시지 수신 대기 및 섀도우 업데이트
         while True:
+            # 섀도우 업데이트 실행
+            update_device_shadow()
             time.sleep(1)
     except KeyboardInterrupt:
         print("프로그램 종료")
