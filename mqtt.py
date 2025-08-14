@@ -31,8 +31,115 @@ matterhub_id = os.environ.get('matterhub_id')
 mqtt_connection = None
 
 # 섀도우 업데이트 관련 전역 변수
-last_state_update = 0
-STATE_UPDATE_INTERVAL = 180  # 3분마다 상태 업데이트
+# last_state_update = 0  # 변경사항 감지 기반으로 변경되어 사용하지 않음
+# STATE_UPDATE_INTERVAL = 180  # 3분마다 상태 업데이트 - 변경사항 감지 기반으로 변경되어 사용하지 않음
+
+# 변경사항 감지 기반 섀도우 업데이트
+class StateChangeDetector:
+    def __init__(self):
+        self.last_states = {}
+        self.change_threshold = 5  # 5초 내 변경사항이 있으면 업데이트
+        
+    def detect_changes(self, current_states):
+        """상태 변경사항 감지"""
+        changes = []
+        current_time = time.time()
+        
+        for state in current_states:
+            entity_id = state.get('entity_id')
+            current_state = state.get('state')
+            last_changed = state.get('last_changed')
+            
+            if entity_id not in self.last_states:
+                # 새로운 디바이스
+                changes.append({
+                    'type': 'new_device',
+                    'entity_id': entity_id,
+                    'state': current_state
+                })
+            elif self.last_states[entity_id] != current_state:
+                # 상태 변경
+                changes.append({
+                    'type': 'state_change',
+                    'entity_id': entity_id,
+                    'previous': self.last_states[entity_id],
+                    'current': current_state
+                })
+            
+            self.last_states[entity_id] = current_state
+        
+        return len(changes) > 0, changes
+
+# 전역 변수
+state_detector = StateChangeDetector()
+last_heartbeat = 0
+HEARTBEAT_INTERVAL = 20000  # 약 5.5시간마다 heartbeat (변경사항이 없어도)
+reconnect_attempts = 0
+MAX_RECONNECT_ATTEMPTS = 5
+RECONNECT_DELAY = 30  # 30초 후 재연결 시도
+
+def check_mqtt_connection():
+    """MQTT 연결 상태 확인 및 재연결"""
+    global global_mqtt_connection, reconnect_attempts
+    
+    try:
+        if not global_mqtt_connection or not global_mqtt_connection.is_connected():
+            print(f"🔌 MQTT 연결 끊김, 재연결 시도... (시도 {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
+            
+            if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                reconnect_attempts += 1
+                
+                # 기존 연결 정리
+                if global_mqtt_connection:
+                    try:
+                        global_mqtt_connection.disconnect()
+                    except:
+                        pass
+                
+                # 재연결 시도
+                try:
+                    aws_client = AWSIoTClient()
+                    global_mqtt_connection = aws_client.connect_mqtt()
+                    
+                    # 토픽 재구독
+                    subscribe_future, packet_id = global_mqtt_connection.subscribe(
+                        topic=f"matterhub/{matterhub_id}/api",
+                        qos=mqtt.QoS.AT_LEAST_ONCE,
+                        callback=mqtt_callback
+                    )
+                    subscribe_future.result()
+                    
+                    subscribe_future, packet_id = global_mqtt_connection.subscribe(
+                        topic="matterhub/api",
+                        qos=mqtt.QoS.AT_LEAST_ONCE,
+                        callback=mqtt_callback
+                    )
+                    subscribe_future.result()
+                    
+                    subscribe_future, packet_id = global_mqtt_connection.subscribe(
+                        topic="matterhub/group/all/api",
+                        qos=mqtt.QoS.AT_LEAST_ONCE,
+                        callback=mqtt_callback
+                    )
+                    subscribe_future.result()
+                    
+                    print("✅ MQTT 재연결 성공!")
+                    reconnect_attempts = 0  # 성공 시 카운터 리셋
+                    return True
+                    
+                except Exception as e:
+                    print(f"❌ MQTT 재연결 실패: {e}")
+                    return False
+            else:
+                print(f"🚨 최대 재연결 시도 횟수 초과 ({MAX_RECONNECT_ATTEMPTS}회)")
+                return False
+        else:
+            reconnect_attempts = 0  # 연결 상태 정상 시 카운터 리셋
+            return True
+            
+    except Exception as e:
+        print(f"❌ 연결 상태 확인 실패: {e}")
+        return False
 
 class AWSIoTClient:
     def __init__(self):
@@ -237,17 +344,17 @@ class AWSIoTClient:
         return mqtt_connection
 
 def update_device_shadow():
-    """디바이스 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
-    global last_state_update, global_mqtt_connection
+    """변경사항 감지 기반 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
+    global last_heartbeat
     
     try:
-        if not global_mqtt_connection:
+        # MQTT 연결 상태 확인
+        if not check_mqtt_connection():
+            print("❌ MQTT 연결 실패로 섀도우 업데이트 스킵")
             return
             
         current_time = time.time()
-        if current_time - last_state_update < STATE_UPDATE_INTERVAL:
-            return
-            
+        
         # Home Assistant에서 현재 상태 가져오기
         headers = {"Authorization": f"Bearer {hass_token}"}
         response = requests.get(f"{HA_host}/api/states", headers=headers)
@@ -255,41 +362,76 @@ def update_device_shadow():
         if response.status_code == 200:
             states = response.json()
             
-            # 상태 데이터 정리
-            shadow_state = {
-                "state": {
-                    "reported": {
-                        "hub_id": matterhub_id,
-                        "timestamp": int(current_time),
-                        "device_count": len(states),
-                        "online": True,
-                        "ha_reachable": True,
-                        "devices": {}
+            # devices.json에서 관리하는 entity_id 목록 가져오기
+            managed_devices = set()
+            try:
+                with open(devices_file_path, 'r', encoding='utf-8') as f:
+                    devices_data = json.load(f)
+                    for device in devices_data:
+                        if 'entity_id' in device:
+                            managed_devices.add(device['entity_id'])
+            except Exception as e:
+                print(f"⚠️ devices.json 읽기 실패: {e}")
+                managed_devices = set()  # 실패 시 빈 set으로 처리
+            
+            # 관리되는 디바이스만 필터링
+            filtered_states = []
+            for state in states:
+                entity_id = state.get('entity_id', '')
+                if entity_id in managed_devices:
+                    filtered_states.append(state)
+            
+            print(f"📊 전체 디바이스: {len(states)}개, 관리 대상: {len(filtered_states)}개")
+            
+            # 변경사항 감지 (관리되는 디바이스만)
+            has_changes, changes = state_detector.detect_changes(filtered_states)
+            
+            # 변경사항이 있거나 heartbeat 시간이 되었으면 업데이트
+            should_update = has_changes or (current_time - last_heartbeat >= HEARTBEAT_INTERVAL)
+            
+            if should_update:
+                # 상태 데이터 정리
+                shadow_state = {
+                    "state": {
+                        "reported": {
+                            "hub_id": matterhub_id,
+                            "timestamp": int(current_time),
+                            "device_count": len(filtered_states),  # 관리되는 디바이스 수만
+                            "total_devices": len(states),  # 전체 디바이스 수
+                            "managed_devices": len(managed_devices),  # 관리 대상 디바이스 수
+                            "online": True,
+                            "ha_reachable": True,
+                            "devices": {},
+                            "has_changes": has_changes,
+                            "change_count": len(changes) if has_changes else 0
+                        }
                     }
                 }
-            }
-            
-            # 주요 디바이스 상태만 포함 (전체 상태는 너무 클 수 있음)
-            for state in states[:20]:  # 최대 20개 디바이스만
-                entity_id = state.get('entity_id', '')
-                if entity_id:
-                    shadow_state["state"]["reported"]["devices"][entity_id] = {
-                        "state": state.get('state'),
-                        "last_changed": state.get('last_changed'),
-                        "attributes": state.get('attributes', {})
-                    }
-            
-            # 섀도우 업데이트 토픽으로 발행
-            shadow_topic = f"$aws/things/{matterhub_id}/shadow/update"
-            global_mqtt_connection.publish(
-                topic=shadow_topic,
-                payload=json.dumps(shadow_state),
-                qos=mqtt.QoS.AT_LEAST_ONCE
-            )
-            
-            last_state_update = current_time
-            print(f"섀도우 업데이트 완료: {len(states)}개 디바이스 상태")
-            
+                
+                # 관리되는 디바이스 상태만 포함
+                for state in filtered_states:
+                    entity_id = state.get('entity_id', '')
+                    if entity_id:
+                        shadow_state["state"]["reported"]["devices"][entity_id] = {
+                            "state": state.get('state'),
+                            "last_changed": state.get('last_changed'),
+                            "attributes": state.get('attributes', {})
+                        }
+                
+                # 섀도우 업데이트 토픽으로 발행
+                shadow_topic = f"$aws/things/{matterhub_id}/shadow/update"
+                global_mqtt_connection.publish(
+                    topic=shadow_topic,
+                    payload=json.dumps(shadow_state),
+                    qos=mqtt.QoS.AT_LEAST_ONCE
+                )
+                
+                if has_changes:
+                    print(f"🔔 변경사항 감지로 섀도우 업데이트: {len(changes)}개 변경")
+                else:
+                    last_heartbeat = current_time
+                    print(f"💓 Heartbeat 섀도우 업데이트 (5.5시간 간격)")
+                    
     except Exception as e:
         print(f"섀도우 업데이트 실패: {e}")
 
@@ -677,11 +819,22 @@ if __name__ == "__main__":
 
     
     try:
-        # 무한 루프로 메시지 수신 대기 및 섀도우 업데이트
+        # 최적화된 메인 루프
+        connection_check_counter = 0
+        
         while True:
-            # 섀도우 업데이트 실행
+            # 섀도우 업데이트 실행 (변경사항 감지 기반)
             update_device_shadow()
-            time.sleep(1)
+            
+            # 60초마다 MQTT 연결 상태 확인 (5초 × 12 = 60초)
+            connection_check_counter += 1
+            if connection_check_counter >= 12:
+                check_mqtt_connection()
+                connection_check_counter = 0
+            
+            # 더 긴 대기 시간으로 CPU 사용량 감소
+            time.sleep(5)  # 1초 → 5초로 변경
+            
     except KeyboardInterrupt:
         print("프로그램 종료")
         global_mqtt_connection.disconnect()
