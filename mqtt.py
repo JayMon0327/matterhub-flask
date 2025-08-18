@@ -610,6 +610,12 @@ def execute_external_update_script(branch='master', force_update=False, update_i
 
 def mqtt_callback(topic, payload, **kwargs):
     _message = json.loads(payload.decode('utf-8'))
+
+    # 기본값 설정
+    endpoint = None
+    method = None
+    response_id = None
+
     try:
         endpoint = _message['endpoint']
         method = _message['method']
