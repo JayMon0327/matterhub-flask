@@ -936,6 +936,21 @@ if __name__ == "__main__":
     subscribe_result = subscribe_future.result()
     print(f"{GROUP_TOPIC} 토픽 구독 완료")
 
+    # 원격 업데이트 명령 토픽 구독 (브로드캐스트/지역/개별)
+    update_topics = [
+        "matterhub/update/all",
+        f"matterhub/update/region/+",
+        f"matterhub/update/specific/{matterhub_id}",
+    ]
+    for ut in update_topics:
+        subscribe_future, packet_id = global_mqtt_connection.subscribe(
+            topic=ut,
+            qos=mqtt.QoS.AT_LEAST_ONCE,
+            callback=mqtt_callback
+        )
+        subscribe_future.result()
+        print(f"{ut} 토픽 구독 완료")
+
 
     # 테스트용 데이터 publish
     test_data = {
