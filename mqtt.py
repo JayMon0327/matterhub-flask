@@ -28,7 +28,8 @@ hass_token = os.environ.get('hass_token')
 matterhub_id = os.environ.get('matterhub_id')
 
 # 전역 변수로 선언
-mqtt_connection = None
+global_mqtt_connection = None
+is_connected_flag = False   # 연결 상태 플래그
 
 # 섀도우 업데이트 관련 전역 변수
 # last_state_update = 0  # 변경사항 감지 기반으로 변경되어 사용하지 않음
@@ -80,63 +81,65 @@ RECONNECT_DELAY = 30  # 30초 후 재연결 시도
 
 def check_mqtt_connection():
     """MQTT 연결 상태 확인 및 재연결"""
-    global global_mqtt_connection, reconnect_attempts
-    
+    global global_mqtt_connection, reconnect_attempts, is_connected_flag
+
     try:
-        if not global_mqtt_connection or not global_mqtt_connection.is_connected():
-            print(f"🔌 MQTT 연결 끊김, 재연결 시도... (시도 {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
-            
-            if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
-                reconnect_attempts += 1
-                
-                # 기존 연결 정리
-                if global_mqtt_connection:
-                    try:
-                        global_mqtt_connection.disconnect()
-                    except:
-                        pass
-                
-                # 재연결 시도
-                try:
-                    aws_client = AWSIoTClient()
-                    global_mqtt_connection = aws_client.connect_mqtt()
-                    
-                    # 토픽 재구독
-                    subscribe_future, packet_id = global_mqtt_connection.subscribe(
-                        topic=f"matterhub/{matterhub_id}/api",
-                        qos=mqtt.QoS.AT_LEAST_ONCE,
-                        callback=mqtt_callback
-                    )
-                    subscribe_future.result()
-                    
-                    subscribe_future, packet_id = global_mqtt_connection.subscribe(
-                        topic="matterhub/api",
-                        qos=mqtt.QoS.AT_LEAST_ONCE,
-                        callback=mqtt_callback
-                    )
-                    subscribe_future.result()
-                    
-                    subscribe_future, packet_id = global_mqtt_connection.subscribe(
-                        topic="matterhub/group/all/api",
-                        qos=mqtt.QoS.AT_LEAST_ONCE,
-                        callback=mqtt_callback
-                    )
-                    subscribe_future.result()
-                    
-                    print("✅ MQTT 재연결 성공!")
-                    reconnect_attempts = 0  # 성공 시 카운터 리셋
-                    return True
-                    
-                except Exception as e:
-                    print(f"❌ MQTT 재연결 실패: {e}")
-                    return False
-            else:
-                print(f"🚨 최대 재연결 시도 횟수 초과 ({MAX_RECONNECT_ATTEMPTS}회)")
+        # 간단한 헬스체크: 연결돼 있다고 믿지만 publish가 실패하면 끊긴 것으로 간주
+        def _health_check():
+            if global_mqtt_connection is None:
                 return False
-        else:
-            reconnect_attempts = 0  # 연결 상태 정상 시 카운터 리셋
+            try:
+                # QoS 0 ping 주제에 더미 페이로드
+                global_mqtt_connection.publish(
+                    topic=f"matterhub/{matterhub_id}/health",
+                    payload=b"{}",
+                    qos=mqtt.QoS.AT_MOST_ONCE
+                )
+                return True
+            except Exception:
+                return False
+
+        still_ok = is_connected_flag and _health_check()
+        if still_ok:
+            reconnect_attempts = 0
             return True
-            
+
+        print(f"🔌 MQTT 연결 끊김, 재연결 시도... (시도 {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
+
+        if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+            print(f"🚨 최대 재연결 시도 횟수 초과 ({MAX_RECONNECT_ATTEMPTS}회)")
+            return False
+
+        reconnect_attempts += 1
+
+        # 기존 연결 정리(예외 무시)
+        if global_mqtt_connection:
+            try:
+                global_mqtt_connection.disconnect()
+            except:
+                pass
+
+        # 재연결
+        aws_client = AWSIoTClient()
+        global_mqtt_connection = aws_client.connect_mqtt()
+
+        # 재구독
+        for t in (
+            f"matterhub/{matterhub_id}/api",
+            "matterhub/api",
+            "matterhub/group/all/api",
+        ):
+            subscribe_future, _ = global_mqtt_connection.subscribe(
+                topic=t,
+                qos=mqtt.QoS.AT_LEAST_ONCE,
+                callback=mqtt_callback
+            )
+            subscribe_future.result()
+
+        print("✅ MQTT 재연결 성공!")
+        reconnect_attempts = 0
+        return True
+
     except Exception as e:
         print(f"❌ 연결 상태 확인 실패: {e}")
         return False
@@ -327,21 +330,39 @@ class AWSIoTClient:
         host_resolver = io.DefaultHostResolver(event_loop_group)
         client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
         
-        mqtt_connection = mqtt_connection_builder.mtls_from_path(
+        # 연결 상태 콜백
+        def on_interrupted(connection, error, **kwargs):
+            global is_connected_flag
+            is_connected_flag = False
+            print(f"⚠️ MQTT 연결 끊김: {error}")
+
+        def on_resumed(connection, return_code, session_present, **kwargs):
+            global is_connected_flag
+            # 0(ACCEPTED)일 때 정상 복구
+            is_connected_flag = (return_code == 0)
+            print(f"✅ MQTT 연결 재개됨 (return_code={return_code}, session_present={session_present})")
+
+        mqtt_conn = mqtt_connection_builder.mtls_from_path(
             endpoint=self.endpoint,
             cert_filepath=cert_file,
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
-            keep_alive_secs=30  # keep_alive 설정 추가
+            keep_alive_secs=30,
+            on_connection_interrupted=on_interrupted,
+            on_connection_resumed=on_resumed,
         )
         
         print("새 인증서로 MQTT 연결 시도 중...")
-        connect_future = mqtt_connection.connect()
+        connect_future = mqtt_conn.connect()
         connect_future.result()
         print("새 인증서로 MQTT 연결 성공")
         
-        return mqtt_connection
+        # 최초 연결 성공 → 플래그 세팅
+        global is_connected_flag
+        is_connected_flag = True
+        
+        return mqtt_conn
 
 def update_device_shadow():
     """변경사항 감지 기반 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
