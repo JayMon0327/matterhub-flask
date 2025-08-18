@@ -83,7 +83,7 @@ def check_mqtt_connection():
     global global_mqtt_connection, reconnect_attempts
     
     try:
-        if not global_mqtt_connection or not global_mqtt_connection.is_connected:
+        if not global_mqtt_connection or not global_mqtt_connection.is_connected():
             print(f"🔌 MQTT 연결 끊김, 재연결 시도... (시도 {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
             
             if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:

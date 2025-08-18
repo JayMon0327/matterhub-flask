@@ -30,3 +30,4 @@ device.pem.crt
 private.pem.key
 
 __init__.py
+.env
