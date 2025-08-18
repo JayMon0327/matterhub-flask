@@ -487,6 +487,106 @@ def handle_ha_request(endpoint, method, request_func, response_id=None):
     )
     return
 
+def handle_update_command(message):
+    """업데이트 명령 처리"""
+    try:
+        command = message.get('command')
+        update_id = message.get('update_id')
+        branch = message.get('branch', 'master')
+        force_update = message.get('force_update', False)
+        
+        if command == 'git_update':
+            print(f"🚀 Git 업데이트 명령 수신: {update_id}")
+            
+            # 외부 스크립트 실행 (업데이트 ID와 Hub ID 전달)
+            result = execute_external_update_script(branch, force_update, update_id)
+            
+            # 응답 전송
+            response_topic = f"matterhub/{matterhub_id}/update/response"
+            response_data = {
+                'update_id': update_id,
+                'hub_id': matterhub_id,
+                'timestamp': int(time.time()),
+                'command': 'git_update',
+                'status': 'success' if result['success'] else 'failed',
+                'result': result
+            }
+            
+            global_mqtt_connection.publish(
+                topic=response_topic,
+                payload=json.dumps(response_data),
+                qos=mqtt.QoS.AT_LEAST_ONCE
+            )
+            
+            print(f"✅ Git 업데이트 응답 전송: {result}")
+            
+    except Exception as e:
+        print(f"❌ Git 업데이트 실패: {e}")
+        # 에러 응답 전송
+        error_response = {
+            'update_id': message.get('update_id'),
+            'hub_id': matterhub_id,
+            'timestamp': int(time.time()),
+            'command': 'git_update',
+            'status': 'failed',
+            'error': str(e)
+        }
+        
+        response_topic = f"matterhub/{matterhub_id}/update/response"
+        global_mqtt_connection.publish(
+            topic=response_topic,
+            payload=json.dumps(error_response),
+            qos=mqtt.QoS.AT_LEAST_ONCE
+        )
+
+def execute_external_update_script(branch='master', force_update=False, update_id='unknown'):
+    """외부 업데이트 스크립트 실행"""
+    try:
+        import subprocess
+        import os
+        
+        # 업데이트 스크립트 경로 (Git에서 가져온 최신 스크립트)
+        script_path = "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh"
+        
+        # 스크립트가 존재하는지 확인
+        if not os.path.exists(script_path):
+            return {
+                'success': False,
+                'error': 'Update script not found',
+                'timestamp': int(time.time())
+            }
+        
+        # 스크립트 실행 권한 확인 및 부여
+        os.chmod(script_path, 0o755)
+        
+        print(f"🚀 외부 업데이트 스크립트 실행: {script_path}")
+        print(f"📋 매개변수: branch={branch}, force_update={force_update}, update_id={update_id}, hub_id={matterhub_id}")
+        
+        # 백그라운드에서 스크립트 실행 (nohup 사용)
+        # 매개변수: branch, force_update, update_id, hub_id
+        force_flag = "true" if force_update else "false"
+        cmd = f"nohup bash {script_path} {branch} {force_flag} {update_id} {matterhub_id} > /dev/null 2>&1 &"
+        
+        result = subprocess.run(cmd, shell=True, check=True)
+        
+        return {
+            'success': True,
+            'message': f'Update script started in background',
+            'script_path': script_path,
+            'branch': branch,
+            'force_update': force_update,
+            'update_id': update_id,
+            'hub_id': matterhub_id,
+            'timestamp': int(time.time())
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'timestamp': int(time.time())
+        }
+
 def mqtt_callback(topic, payload, **kwargs):
     _message = json.loads(payload.decode('utf-8'))
     try:
@@ -743,6 +843,12 @@ def mqtt_callback(topic, payload, **kwargs):
             return MockResponse()
 
         handle_ha_request(endpoint, method, mock_request, response_id)
+        return
+
+    # Git 업데이트 명령 처리
+    if topic == f"matterhub/{matterhub_id}/git/update" or topic == "matterhub/update/all" or topic.startswith("matterhub/update/region/") or topic.startswith("matterhub/update/specific/"):
+        print(f"🚀 Git 업데이트 명령 수신: {topic}")
+        handle_update_command(_message)
         return
 
     print(_message)
