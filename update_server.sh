@@ -19,7 +19,7 @@
 # ========================================
 
 # 로그 파일 설정
-LOG_FILE="/home/hyodol/patch_mqtt.log"
+LOG_FILE="/home/hyodol/patch_matterhub.log"
 echo "=== MQTT 자동 업데이트 시작 $(date) ===" | tee -a "$LOG_FILE"
 
 # 매개변수 처리
@@ -48,6 +48,7 @@ echo "[INFO] 새로운 Git remote 추가: https://github.com/JayMon0327/matterhu
 git remote add origin https://github.com/JayMon0327/matterhub-flask.git
 
 # Remote 설정 확인
+git reset --hard origin/master
 echo "[INFO] Git remote 설정 확인:" | tee -a "$LOG_FILE"
 git remote -v | tee -a "$LOG_FILE"
 
