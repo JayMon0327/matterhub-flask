@@ -39,6 +39,7 @@ is_connected_flag = False   # 연결 상태 플래그
 class StateChangeDetector:
     def __init__(self):
         self.last_states = {}
+        self.is_initialized = False  # 초기화 여부 플래그
         self.change_threshold = 5  # 5초 내 변경사항이 있으면 업데이트
         
     def detect_changes(self, current_states):
@@ -46,11 +47,25 @@ class StateChangeDetector:
         changes = []
         current_time = time.time()
         
+        # 첫 번째 실행 시에는 초기 상태만 저장하고 변경사항 없음으로 처리
+        if not self.is_initialized:
+            for state in current_states:
+                entity_id = state.get('entity_id')
+                current_state = state.get('state')
+                if entity_id:
+                    self.last_states[entity_id] = current_state
+            self.is_initialized = True
+            print(f"🔧 StateChangeDetector 초기화 완료: {len(self.last_states)}개 디바이스 상태 저장")
+            return False, []  # 초기화 시에는 변경사항 없음
+        
+        # 실제 변경사항 감지
         for state in current_states:
             entity_id = state.get('entity_id')
             current_state = state.get('state')
-            last_changed = state.get('last_changed')
             
+            if not entity_id:
+                continue
+                
             if entity_id not in self.last_states:
                 # 새로운 디바이스
                 changes.append({
@@ -58,6 +73,7 @@ class StateChangeDetector:
                     'entity_id': entity_id,
                     'state': current_state
                 })
+                self.last_states[entity_id] = current_state
             elif self.last_states[entity_id] != current_state:
                 # 상태 변경
                 changes.append({
@@ -66,8 +82,7 @@ class StateChangeDetector:
                     'previous': self.last_states[entity_id],
                     'current': current_state
                 })
-            
-            self.last_states[entity_id] = current_state
+                self.last_states[entity_id] = current_state
         
         return len(changes) > 0, changes
 
@@ -410,6 +425,18 @@ def update_device_shadow():
             # 변경사항이 있거나 heartbeat 시간이 되었으면 업데이트
             should_update = has_changes or (current_time - last_heartbeat >= HEARTBEAT_INTERVAL)
             
+            # 디버깅 로그
+            if has_changes:
+                print(f"🔍 변경사항 감지: {len(changes)}개")
+                for change in changes[:3]:  # 처음 3개만 출력
+                    print(f"   - {change.get('type', 'unknown')}: {change.get('entity_id', 'unknown')}")
+                if len(changes) > 3:
+                    print(f"   ... 외 {len(changes) - 3}개")
+            elif current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                print(f"⏰ Heartbeat 시간 도달: {int(current_time - last_heartbeat)}초 경과")
+            else:
+                print(f"💤 변경사항 없음, Heartbeat 대기 중: {int(HEARTBEAT_INTERVAL - (current_time - last_heartbeat))}초 남음")
+            
             if should_update:
                 # 상태 데이터 정리
                 shadow_state = {
@@ -417,14 +444,19 @@ def update_device_shadow():
                         "reported": {
                             "hub_id": matterhub_id,
                             "timestamp": int(current_time),
-                            "device_count": len(filtered_states),  # 관리되는 디바이스 수만
-                            "total_devices": len(states),  # 전체 디바이스 수
-                            "managed_devices": len(managed_devices),  # 관리 대상 디바이스 수
+                            "device_count": len(filtered_states),  # 현재 연결된 관리 대상 디바이스 수
+                            "total_devices": len(states),  # Home Assistant 전체 디바이스 수
+                            "managed_devices": len(managed_devices),  # devices.json에 등록된 디바이스 수
                             "online": True,
                             "ha_reachable": True,
                             "devices": {},
                             "has_changes": has_changes,
-                            "change_count": len(changes) if has_changes else 0
+                            "change_count": len(changes) if has_changes else 0,
+                            "device_stats": {
+                                "connected": len(filtered_states),  # 현재 연결된 관리 대상
+                                "total_ha": len(states),  # Home Assistant 전체
+                                "configured": len(managed_devices)  # 설정 파일에 등록된
+                            }
                         }
                     }
                 }
