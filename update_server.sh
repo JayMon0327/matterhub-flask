@@ -37,19 +37,10 @@ echo "[INFO]   - Hub ID: $HUB_ID" | tee -a "$LOG_FILE"
 # 📌 대상 파일 경로
 cd /home/hyodol/whatsmatter-hub-flask-server/
 
-echo "[INFO] Git remote 설정 및 업데이트 시작" | tee -a "$LOG_FILE"
+echo "[INFO] Git 업데이트 시작" | tee -a "$LOG_FILE"
 
-# 기존 remote 제거
-echo "[INFO] 기존 Git remote 제거 중..." | tee -a "$LOG_FILE"
-git remote remove origin 2>/dev/null || echo "[INFO] 기존 remote가 없습니다."
-
-# 새로운 remote 추가
-echo "[INFO] 새로운 Git remote 추가: https://github.com/JayMon0327/matterhub-flask.git" | tee -a "$LOG_FILE"
-git remote add origin https://github.com/JayMon0327/matterhub-flask.git
-
-# Remote 설정 확인
-git reset --hard origin/master
-echo "[INFO] Git remote 설정 확인:" | tee -a "$LOG_FILE"
+# 현재 remote 설정 확인
+echo "[INFO] 현재 Git remote 설정:" | tee -a "$LOG_FILE"
 git remote -v | tee -a "$LOG_FILE"
 
 echo "[INFO] Git pull 시작 (브랜치: $BRANCH)" | tee -a "$LOG_FILE"
@@ -142,7 +133,7 @@ echo "[INFO] PM2 프로세스 재시작 시작" | tee -a "$LOG_FILE"
 # 1. wm-mqtt 프로세스 중지 (자기 자신)
 echo "[INFO] wm-mqtt 중지 중..." | tee -a "$LOG_FILE"
 $PM2 stop wm-mqtt
-sleep 3
+sleep 5
 
 # 2. wm-mqtt 프로세스 삭제
 echo "[INFO] wm-mqtt 삭제 중..." | tee -a "$LOG_FILE"
@@ -155,7 +146,7 @@ $PM2 delete wm-localIp
 $PM2 delete wm-notifier
 $PM2 delete wm-ruleEngine
 $PM2 delete wm-app
-sleep 5
+sleep 10
 
 # 4. 새로운 코드로 프로세스 시작
 echo "[INFO] 새로운 코드로 프로세스 시작 중..." | tee -a "$LOG_FILE"
@@ -165,16 +156,16 @@ cd /home/hyodol/whatsmatter-hub-flask-server
 if [ -f "startup.json" ]; then
     echo "[INFO] startup.json 사용하여 프로세스 시작" | tee -a "$LOG_FILE"
     
-    $PM2 start startup.json --only wm-mqtt
-    sleep 3
+    $PM2 start startup.json --only wm-app
+    sleep 10
     
     $PM2 start startup.json --only wm-notifier
-    sleep 2
+    sleep 5
     
     $PM2 start startup.json --only wm-ruleEngine
-    sleep 2
+    sleep 10
     
-    $PM2 start startup.json --only wm-app
+    $PM2 start startup.json --only wm-mqtt
     sleep 5
 else
     echo "[INFO] startup.json 없음 - 개별 프로세스 시작" | tee -a "$LOG_FILE"
