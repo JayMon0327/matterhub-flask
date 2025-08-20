@@ -12,6 +12,7 @@ import requests
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
 
+print("원격 업데이트 테스트 롤백")
 print("mqtt.py 실행 전 대기 중 ...")
 time.sleep(10) 
 
@@ -1077,7 +1078,6 @@ if __name__ == "__main__":
         "matterhub/update/all",
         f"matterhub/update/region/+",
         f"matterhub/update/specific/{matterhub_id}",
-        "matterhub/update/specific/+"
     ]
     for ut in update_topics:
         subscribe_future, packet_id = global_mqtt_connection.subscribe(
