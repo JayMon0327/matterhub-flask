@@ -11,8 +11,7 @@ import requests
 
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
-
-print("원격 업데이트 여부 테스트 중,,,0820 1214")
+print("원격 업데이트 테스트:1220")
 
 print("mqtt.py 실행 전 대기 중 ...")
 time.sleep(10) 
@@ -552,9 +551,16 @@ def handle_update_command(message):
         
         if command == 'git_update':
             print(f"🚀 Git 업데이트 명령 수신: {update_id}")
+            print(f"📋 업데이트 상세 정보:")
+            print(f"   - Branch: {branch}")
+            print(f"   - Force Update: {force_update}")
+            print(f"   - Hub ID: {matterhub_id}")
             
             # 외부 스크립트 실행 (업데이트 ID와 Hub ID 전달)
+            print(f"🔧 외부 업데이트 스크립트 실행 시작...")
             result = execute_external_update_script(branch, force_update, update_id)
+            
+            print(f"📊 스크립트 실행 결과: {result}")
             
             # 응답 전송
             response_topic = f"matterhub/{matterhub_id}/update/response"
@@ -573,7 +579,9 @@ def handle_update_command(message):
                 qos=mqtt.QoS.AT_LEAST_ONCE
             )
             
-            print(f"✅ Git 업데이트 응답 전송: {result}")
+            print(f"✅ Git 업데이트 응답 전송 완료")
+            print(f"📤 응답 토픽: {response_topic}")
+            print(f"📤 응답 데이터: {response_data}")
             
     except Exception as e:
         print(f"❌ Git 업데이트 실패: {e}")
@@ -600,42 +608,111 @@ def execute_external_update_script(branch='master', force_update=False, update_i
         import subprocess
         import os
         
-        # 업데이트 스크립트 경로 (Git에서 가져온 최신 스크립트)
-        script_path = "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh"
+        # 업데이트 스크립트 경로를 동적으로 찾기
+        possible_paths = [
+            "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh",
+            "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh",
+            "./update_server.sh",
+            "../update_server.sh",
+            os.path.join(os.path.dirname(__file__), "update_server.sh"),
+            os.path.join(os.path.dirname(__file__), "../update_server.sh")
+        ]
         
-        # 스크립트가 존재하는지 확인
-        if not os.path.exists(script_path):
+        script_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                script_path = path
+                break
+        
+        if not script_path:
             return {
                 'success': False,
-                'error': 'Update script not found',
+                'error': f'Update script not found in any of the expected paths: {possible_paths}',
                 'timestamp': int(time.time())
             }
         
         # 스크립트 실행 권한 확인 및 부여
-        os.chmod(script_path, 0o755)
+        try:
+            os.chmod(script_path, 0o755)
+            print(f"✅ 스크립트 권한 설정 완료: {script_path}")
+        except Exception as e:
+            print(f"⚠️ 스크립트 권한 설정 실패: {e}")
         
         print(f"🚀 외부 업데이트 스크립트 실행: {script_path}")
         print(f"📋 매개변수: branch={branch}, force_update={force_update}, update_id={update_id}, hub_id={matterhub_id}")
         
+        # 스크립트 내용 확인 (디버깅용)
+        try:
+            with open(script_path, 'r') as f:
+                script_content = f.read()
+                print(f"📄 스크립트 내용 (처음 200자): {script_content[:200]}...")
+        except Exception as e:
+            print(f"⚠️ 스크립트 내용 읽기 실패: {e}")
+        
         # 백그라운드에서 스크립트 실행 (nohup 사용)
-        # 매개변수: branch, force_update, update_id, hub_id
         force_flag = "true" if force_update else "false"
-        cmd = f"nohup bash {script_path} {branch} {force_flag} {update_id} {matterhub_id} > /dev/null 2>&1 &"
         
-        result = subprocess.run(cmd, shell=True, check=True)
+        # 로그 파일 경로 설정
+        log_file = f"/tmp/update_{update_id}.log"
         
-        return {
-            'success': True,
-            'message': f'Update script started in background',
-            'script_path': script_path,
-            'branch': branch,
-            'force_update': force_update,
-            'update_id': update_id,
-            'hub_id': matterhub_id,
-            'timestamp': int(time.time())
-        }
+        # 명령어 구성: 로그 파일에 출력 저장
+        cmd = f"nohup bash {script_path} {branch} {force_flag} {update_id} {matterhub_id} > {log_file} 2>&1 & echo $!"
+        
+        print(f"🔧 실행 명령어: {cmd}")
+        
+        # 스크립트 실행
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # 프로세스 ID 추출
+            try:
+                pid = int(result.stdout.strip())
+                print(f"✅ 업데이트 스크립트 시작됨 (PID: {pid})")
+                
+                # 잠시 대기 후 로그 확인
+                time.sleep(2)
+                if os.path.exists(log_file):
+                    try:
+                        with open(log_file, 'r') as f:
+                            log_content = f.read()
+                            print(f"📋 스크립트 로그: {log_content}")
+                    except Exception as e:
+                        print(f"⚠️ 로그 파일 읽기 실패: {e}")
+                
+                return {
+                    'success': True,
+                    'message': f'Update script started successfully (PID: {pid})',
+                    'script_path': script_path,
+                    'branch': branch,
+                    'force_update': force_update,
+                    'update_id': update_id,
+                    'hub_id': matterhub_id,
+                    'pid': pid,
+                    'log_file': log_file,
+                    'timestamp': int(time.time())
+                }
+            except ValueError:
+                print(f"⚠️ PID 추출 실패: {result.stdout}")
+                return {
+                    'success': True,
+                    'message': 'Update script started but PID extraction failed',
+                    'script_path': script_path,
+                    'branch': branch,
+                    'force_update': force_update,
+                    'update_id': update_id,
+                    'hub_id': matterhub_id,
+                    'timestamp': int(time.time())
+                }
+        else:
+            print(f"❌ 스크립트 실행 실패: {result.stderr}")
+            return {
+                'success': False,
+                'error': f'Script execution failed: {result.stderr}',
+                'timestamp': int(time.time())
+            }
         
     except Exception as e:
+        print(f"❌ 업데이트 스크립트 실행 중 예외 발생: {e}")
         return {
             'success': False,
             'error': str(e),
