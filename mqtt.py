@@ -12,6 +12,8 @@ import requests
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
 
+print("원격 업데이트 여부 테스트 중,,,0820 1214")
+
 print("mqtt.py 실행 전 대기 중 ...")
 time.sleep(10) 
 
