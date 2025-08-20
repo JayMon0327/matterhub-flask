@@ -12,7 +12,7 @@ import requests
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
 
-print("원격업데이트 테스트 ")
+print("원격 업데이트 테스트 1452")
 print("mqtt.py 실행 전 대기 중 ...")
 time.sleep(10) 
 
@@ -43,8 +43,24 @@ class StateChangeDetector:
         self.is_initialized = False  # 초기화 여부 플래그
         self.change_threshold = 5  # 5초 내 변경사항이 있으면 업데이트
         
+        # 섀도우 업데이트에서 제외할 센서 목록 (state 변화 감지만 제외)
+        self.excluded_sensors = {
+            'sensor.smart_ht_sensor_ondo',
+            'sensor.smart_ht_sensor_ondo_1', 
+            'sensor.smart_ht_sensor_ondo_2',
+            'sensor.smart_ht_sensor_ondo_3',
+            'sensor.smart_ht_sensor_seubdo',
+            'sensor.smart_ht_sensor_seubdo_1',
+            'sensor.smart_ht_sensor_seubdo_2', 
+            'sensor.smart_ht_sensor_seubdo_3',
+            'sensor.smart_presence_sensor_jodo',
+            'sensor.smart_presence_sensor_jodo_1',
+            'sensor.smart_presence_sensor_jodo_2',
+            'sensor.smart_presence_sensor_jodo_3'
+        }
+        
     def detect_changes(self, current_states):
-        """상태 변경사항 감지"""
+        """상태 변경사항 감지 (특정 센서는 state 변화 무시)"""
         changes = []
         current_time = time.time()
         
@@ -59,12 +75,16 @@ class StateChangeDetector:
             print(f"🔧 StateChangeDetector 초기화 완료: {len(self.last_states)}개 디바이스 상태 저장")
             return False, []  # 초기화 시에는 변경사항 없음
         
-        # 실제 변경사항 감지
+        # 실제 변경사항 감지 (제외된 센서는 state 변화 무시)
         for state in current_states:
             entity_id = state.get('entity_id')
             current_state = state.get('state')
             
             if not entity_id:
+                continue
+                
+            # 제외된 센서는 변경사항 감지에서 제외 (state 변화 무시)
+            if entity_id in self.excluded_sensors:
                 continue
                 
             if entity_id not in self.last_states:
