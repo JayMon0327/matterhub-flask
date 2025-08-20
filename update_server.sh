@@ -156,17 +156,8 @@ cd /home/hyodol/whatsmatter-hub-flask-server
 if [ -f "startup.json" ]; then
     echo "[INFO] startup.json 사용하여 프로세스 시작" | tee -a "$LOG_FILE"
     
-    $PM2 start startup.json --only wm-app
-    sleep 10
+    $PM2 start startup.json
     
-    $PM2 start startup.json --only wm-notifier
-    sleep 5
-    
-    $PM2 start startup.json --only wm-ruleEngine
-    sleep 10
-    
-    $PM2 start startup.json --only wm-mqtt
-    sleep 5
 else
     echo "[INFO] startup.json 없음 - 개별 프로세스 시작" | tee -a "$LOG_FILE"
     
