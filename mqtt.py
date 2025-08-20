@@ -1003,10 +1003,7 @@ def mqtt_callback(topic, payload, **kwargs):
         return
 
     # Git 업데이트 명령 처리
-    if (topic == f"matterhub/{matterhub_id}/git/update" or 
-        topic == "matterhub/update/all" or 
-        topic.startswith("matterhub/update/region/") or 
-        topic.startswith("matterhub/update/specific/")):
+    if topic == f"matterhub/{matterhub_id}/git/update" or topic == "matterhub/update/all" or topic.startswith("matterhub/update/region/") or topic.startswith("matterhub/update/specific/"):
         print(f"🚀 Git 업데이트 명령 수신: {topic}")
         handle_update_command(_message)
         return
@@ -1079,7 +1076,8 @@ if __name__ == "__main__":
     update_topics = [
         "matterhub/update/all",
         f"matterhub/update/region/+",
-        "matterhub/update/specific/+",  # 개별 업데이트를 위한 와일드카드
+        f"matterhub/update/specific/{matterhub_id}",
+        "matterhub/update/specific/+"
     ]
     for ut in update_topics:
         subscribe_future, packet_id = global_mqtt_connection.subscribe(
