@@ -1077,7 +1077,7 @@ if __name__ == "__main__":
     update_topics = [
         "matterhub/update/all",
         f"matterhub/update/region/+",
-        f"matterhub/update/specific/{matterhub_id}",
+        "matterhub/update/specific/+",
     ]
     for ut in update_topics:
         subscribe_future, packet_id = global_mqtt_connection.subscribe(
