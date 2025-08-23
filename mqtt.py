@@ -60,7 +60,7 @@ class StateChangeDetector:
         }
         
     def detect_changes(self, current_states):
-        """상태 변경사항 감지 (특정 센서는 state 변화 무시)"""
+        """상태 변경사항 감지 (sensor.로 시작하는 디바이스는 state 변화 무시)"""
         changes = []
         current_time = time.time()
         
@@ -75,7 +75,7 @@ class StateChangeDetector:
             print(f"🔧 StateChangeDetector 초기화 완료: {len(self.last_states)}개 디바이스 상태 저장")
             return False, []  # 초기화 시에는 변경사항 없음
         
-        # 실제 변경사항 감지 (제외된 센서는 state 변화 무시)
+        # 실제 변경사항 감지 (sensor.로 시작하는 디바이스는 state 변화 무시)
         for state in current_states:
             entity_id = state.get('entity_id')
             current_state = state.get('state')
@@ -83,8 +83,8 @@ class StateChangeDetector:
             if not entity_id:
                 continue
                 
-            # 제외된 센서는 변경사항 감지에서 제외 (state 변화 무시)
-            if entity_id in self.excluded_sensors:
+            # sensor.로 시작하는 디바이스는 변경사항 감지에서 제외 (state 변화 무시)
+            if entity_id.startswith('sensor.'):
                 continue
                 
             if entity_id not in self.last_states:
@@ -465,6 +465,7 @@ def update_device_shadow():
                         "reported": {
                             "hub_id": matterhub_id,
                             "timestamp": int(current_time),
+                            "status_key": f"{matterhub_id}#LATEST",  # 최신 상태 조회용 키
                             "device_count": len(filtered_states),  # 현재 연결된 관리 대상 디바이스 수
                             "total_devices": len(states),  # Home Assistant 전체 디바이스 수
                             "managed_devices": len(managed_devices),  # devices.json에 등록된 디바이스 수
@@ -1041,6 +1042,12 @@ if __name__ == "__main__":
         aws_client = AWSIoTClient()
         global_mqtt_connection = aws_client.connect_mqtt()
         print("MQTT 연결 성공")
+        
+        # ✅ 즉시 초기 섀도우 업데이트 실행
+        print("🚀 초기 섀도우 업데이트 실행...")
+        update_device_shadow()
+        print("✅ 초기 섀도우 업데이트 완료")
+        
     except Exception as e:
         print(f"[에러] MQTT 연결 실패: {e}")
         sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
