@@ -12,7 +12,7 @@ import requests
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
 
-print("원격 업데이트 테스트 롤백")
+print("DynamoDB GSI(StatusKey Index) 추가")
 print("mqtt.py 실행 전 대기 중 ...")
 time.sleep(10) 
 
