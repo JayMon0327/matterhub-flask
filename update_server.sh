@@ -43,8 +43,6 @@ echo "[INFO] Git 업데이트 시작" | tee -a "$LOG_FILE"
 echo "[INFO] 현재 Git remote 설정:" | tee -a "$LOG_FILE"
 git remote -v | tee -a "$LOG_FILE"
 
-echo "[INFO] Git pull 시작 (브랜치: $BRANCH)" | tee -a "$LOG_FILE"
-
 # 현재 브랜치 확인
 CURRENT_BRANCH=$(git branch --show-current)
 echo "[INFO] 현재 브랜치: $CURRENT_BRANCH" | tee -a "$LOG_FILE"
@@ -59,30 +57,135 @@ if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
     fi
 fi
 
-# Git pull 실행
-git pull origin $BRANCH
-sleep 10
+# 🛡️ Git 상태 정리 및 안전한 업데이트
+echo "[INFO] Git 상태 정리 및 안전한 업데이트 시작..." | tee -a "$LOG_FILE"
 
+# 1. .env 파일 특별 처리
+if [ -f .env ]; then
+    echo "[INFO] .env 파일 처리 중..." | tee -a "$LOG_FILE"
+    
+    # .env 백업
+    cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+    
+    # .env를 Git에서 제외 (임시)
+    git update-index --assume-unchanged .env
+    
+    # .env 변경사항 되돌리기
+    git checkout -- .env
+    
+    echo "[INFO] ✅ .env 파일 처리 완료" | tee -a "$LOG_FILE"
+fi
 
-if [ $? -eq 0 ]; then
-    echo "[INFO] Git pull 성공" | tee -a "$LOG_FILE"
+# 2. 다른 변경사항들 처리
+if git diff --quiet && git diff --cached --quiet; then
+    echo "[INFO] 작업 디렉토리 깨끗함. Git pull 진행..." | tee -a "$LOG_FILE"
+else
+    echo "[INFO] 변경사항 발견. 정리 중..." | tee -a "$LOG_FILE"
+    
+    # 변경사항 stash
+    git stash push -m "Auto-stash before update $(date)"
+    echo "[INFO] 변경사항을 stash에 저장 완료" | tee -a "$LOG_FILE"
+fi
+
+# 3. Git pull 실행
+echo "[INFO] Git pull 시작 (브랜치: $BRANCH)..." | tee -a "$LOG_FILE"
+if git pull origin $BRANCH; then
+    echo "[INFO] ✅ Git pull 성공!" | tee -a "$LOG_FILE"
     
     # 최신 커밋 정보 출력
     LATEST_COMMIT=$(git log -1 --oneline)
     echo "[INFO] 최신 커밋: $LATEST_COMMIT" | tee -a "$LOG_FILE"
+    
+    # 4. .env 보호 상태 복원
+    if [ -f .env.backup.* ]; then
+        echo "[INFO] .env 파일 보호 상태 복원 중..." | tee -a "$LOG_FILE"
+        git update-index --skip-worktree .env
+        
+        # 백업 파일 정리
+        rm -f .env.backup.*
+        echo "[INFO] ✅ .env 파일 보호 상태 복원 완료" | tee -a "$LOG_FILE"
+    fi
+    
+    # 5. stash된 변경사항 복원 시도
+    if git stash list | grep -q "Auto-stash before update"; then
+        echo "[INFO] stash된 변경사항 복원 시도 중..." | tee -a "$LOG_FILE"
+        
+        if git stash pop; then
+            echo "[INFO] ✅ stash된 변경사항 복원 성공" | tee -a "$LOG_FILE"
+        else
+            echo "[WARN] ⚠️ stash 복원 실패 (충돌 발생). 변경사항은 stash에 보존됨" | tee -a "$LOG_FILE"
+            git stash list | tee -a "$LOG_FILE"
+        fi
+    fi
+    
 else
-    echo "[ERROR] Git pull 실패" | tee -a "$LOG_FILE"
+    echo "[ERROR] ❌ Git pull 실패" | tee -a "$LOG_FILE"
+    
+    # 실패 시 .env 복구
+    if [ -f .env.backup.* ]; then
+        echo "[INFO] Git pull 실패. .env 파일 복구 중..." | tee -a "$LOG_FILE"
+        cp .env.backup.* .env
+        git update-index --skip-worktree .env
+        echo "[INFO] ✅ .env 파일 복구 완료" | tee -a "$LOG_FILE"
+    fi
+    
     exit 1
 fi
 
 # 강제 업데이트가 필요한 경우
 if [ "$FORCE_UPDATE" = "true" ]; then
-    echo "[INFO] 강제 업데이트 모드 - 하드 리셋 실행" | tee -a "$LOG_FILE"
+    echo "[INFO] 강제 업데이트 모드 - .env 파일 완전 보호" | tee -a "$LOG_FILE"
+    
+    # 1. .env 파일 백업
+    if [ -f .env ]; then
+        echo "[INFO] 강제 업데이트 전 .env 파일 백업..." | tee -a "$LOG_FILE"
+        cp .env .env.force_update.backup.$(date +%Y%m%d_%H%M%S)
+    fi
+    
+    # 2. .env 파일을 Git에서 완전히 제외
+    echo "[INFO] .env 파일을 Git에서 제외 중..." | tee -a "$LOG_FILE"
+    git update-index --assume-unchanged .env
+    
+    # 3. 하드 리셋 실행
+    echo "[INFO] 하드 리셋 실행 중..." | tee -a "$LOG_FILE"
     git reset --hard origin/$BRANCH
+    
     if [ $? -eq 0 ]; then
         echo "[INFO] 강제 업데이트 완료" | tee -a "$LOG_FILE"
+        
+        # 4. .env 파일 복구 및 보호 설정
+        if [ -f .env.force_update.backup.* ]; then
+            echo "[INFO] .env 파일 복구 및 보호 설정 중..." | tee -a "$LOG_FILE"
+            
+            # 가장 최근 백업 파일 찾기
+            LATEST_ENV_BACKUP=$(ls -t .env.force_update.backup.* | head -1)
+            if [ -n "$LATEST_ENV_BACKUP" ]; then
+                # 백업에서 .env 복구
+                cp "$LATEST_ENV_BACKUP" .env
+                
+                # .env 파일을 Git에서 보호
+                git update-index --skip-worktree .env
+                
+                echo "[INFO] ✅ .env 파일 복구 및 보호 완료" | tee -a "$LOG_FILE"
+                
+                # 백업 파일 정리
+                rm -f .env.force_update.backup.*
+            fi
+        fi
     else
         echo "[ERROR] 강제 업데이트 실패" | tee -a "$LOG_FILE"
+        
+        # 실패 시 .env 복구
+        if [ -f .env.force_update.backup.* ]; then
+            echo "[INFO] 강제 업데이트 실패. .env 파일 복구 중..." | tee -a "$LOG_FILE"
+            LATEST_ENV_BACKUP=$(ls -t .env.force_update.backup.* | head -1)
+            if [ -n "$LATEST_ENV_BACKUP" ]; then
+                cp "$LATEST_ENV_BACKUP" .env
+                git update-index --skip-worktree .env
+                echo "[INFO] ✅ .env 파일 복구 완료" | tee -a "$LOG_FILE"
+            fi
+        fi
+        
         exit 1
     fi
 fi
