@@ -432,20 +432,43 @@ def update_device_shadow():
             # devices.json에서 관리하는 entity_id 목록 가져오기
             managed_devices = set()
             try:
-                with open(devices_file_path, 'r', encoding='utf-8') as f:
-                    devices_data = json.load(f)
-                    for device in devices_data:
-                        if 'entity_id' in device:
-                            managed_devices.add(device['entity_id'])
+                if devices_file_path and os.path.exists(devices_file_path):
+                    with open(devices_file_path, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:  # 파일이 비어있지 않은 경우만
+                            devices_data = json.loads(content)
+                            for device in devices_data:
+                                if 'entity_id' in device:
+                                    managed_devices.add(device['entity_id'])
+                                # sub_entity_id도 고려 (배열 형태)
+                                if 'sub_entity_id' in device and isinstance(device['sub_entity_id'], list):
+                                    for sub_id in device['sub_entity_id']:
+                                        if sub_id:  # 빈 문자열이 아닌 경우만
+                                            managed_devices.add(sub_id)
+                        else:
+                            print(f"devices.json 파일이 비어있음: {devices_file_path}")
+                elif devices_file_path:
+                    print(f"devices.json 파일이 존재하지 않음: {devices_file_path}")
+                else:
+                    print("devices_file_path 환경변수가 설정되지 않음 - 모든 디바이스 관리")
+            except json.JSONDecodeError as e:
+                print(f"devices.json JSON 형식 오류: {e}")
+                print(f"파일 경로: {devices_file_path}")
             except Exception as e:
-                print(f"⚠️ devices.json 읽기 실패: {e}")
-                managed_devices = set()  # 실패 시 빈 set으로 처리
+                print(f"devices.json 읽기 실패: {e}")
+                print(f"파일 경로: {devices_file_path}")
+            finally:
+                # devices.json이 없거나 오류가 있어도 모든 디바이스를 관리하도록 설정
+                if not managed_devices:
+                    print("모든 디바이스를 관리 대상으로 설정")
+                    managed_devices = None  # None으로 설정하여 모든 디바이스 포함
             
             # 관리되는 디바이스만 필터링
             filtered_states = []
             for state in states:
                 entity_id = state.get('entity_id', '')
-                if entity_id in managed_devices:
+                # managed_devices가 None이면 모든 디바이스 포함, 아니면 필터링
+                if managed_devices is None or entity_id in managed_devices:
                     filtered_states.append(state)
             
             print(f"디바이스 상태: 전체 {len(states)}개, 관리 {len(filtered_states)}개")
@@ -486,7 +509,7 @@ def update_device_shadow():
                             "status_key": f"{matterhub_id}#LATEST",  # 최신 상태 조회용 키
                             "device_count": len(filtered_states),  # 현재 연결된 관리 대상 디바이스 수
                             "total_devices": len(states),  # Home Assistant 전체 디바이스 수
-                            "managed_devices": len(managed_devices),  # devices.json에 등록된 디바이스 수
+                            "managed_devices": len(managed_devices) if managed_devices else len(states),  # devices.json에 등록된 디바이스 수
                             "online": True,
                             "ha_reachable": True,
                             "devices": {},
@@ -495,7 +518,7 @@ def update_device_shadow():
                             "device_stats": {
                                 "connected": len(filtered_states),  # 현재 연결된 관리 대상
                                 "total_ha": len(states),  # Home Assistant 전체
-                                "configured": len(managed_devices)  # 설정 파일에 등록된
+                                "configured": len(managed_devices) if managed_devices else len(states)  # 설정 파일에 등록된
                             }
                         }
                     }
@@ -1063,18 +1086,23 @@ def mqtt_callback(topic, payload, **kwargs):
     print(_message)
 
 def config():
+    # resource 디렉토리 생성
     if not os.path.exists(res_file_path):
         os.makedirs(res_file_path)
         print(f"폴더 생성: {res_file_path}")
 
-
     file_list = [schedules_file_path, rules_file_path, rooms_file_path, devices_file_path, notifications_file_path]
     
-    for f in file_list:
-        if not os.path.exists(f):
-            with open(f, 'w') as f:
-                json.dump([], f)
-            print(f"{f} 파일이 생성되었습니다.")
+    for file_path in file_list:
+        if not os.path.exists(file_path):
+            try:
+                # 디렉토리가 없으면 생성
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump([], f, ensure_ascii=False)
+                print(f"파일 생성: {file_path}")
+            except Exception as e:
+                print(f"파일 생성 실패 {file_path}: {e}")
 
 # 사용 예시
 if __name__ == "__main__":
