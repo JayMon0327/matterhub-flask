@@ -110,7 +110,11 @@ class StateChangeDetector:
 # 전역 변수
 state_detector = StateChangeDetector()
 last_heartbeat = 0
-HEARTBEAT_INTERVAL = 20000  # 약 5.5시간마다 heartbeat (변경사항이 없어도)
+HEARTBEAT_INTERVAL = 1800  # 30분마다 heartbeat (변경사항이 없어도) - 클라우드 모니터링을 위해 단축
+last_shadow_update = 0  # Shadow 업데이트 rate-limit용
+MIN_SHADOW_INTERVAL = 30  # Shadow 업데이트 최소 간격 (30초)
+last_health_check = 0  # 헬스체크용
+HEALTH_CHECK_INTERVAL = 600  # 10분마다 간단한 헬스체크 (비용 최소화)
 reconnect_attempts = 0
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 30  # 30초 후 재연결 시도
@@ -120,20 +124,12 @@ def check_mqtt_connection():
     global global_mqtt_connection, reconnect_attempts, is_connected_flag
 
     try:
-        # 간단한 헬스체크: 연결돼 있다고 믿지만 publish가 실패하면 끊긴 것으로 간주
+        # 헬스체크 publish 제거: 연결 플래그와 연결 객체 존재 여부만 확인
         def _health_check():
             if global_mqtt_connection is None:
                 return False
-            try:
-                # QoS 0 ping 주제에 더미 페이로드
-                global_mqtt_connection.publish(
-                    topic=f"matterhub/{matterhub_id}/health",
-                    payload=b"{}",
-                    qos=mqtt.QoS.AT_MOST_ONCE
-                )
-                return True
-            except Exception:
-                return False
+            # publish 없이 연결 상태만 확인 (비용 절감)
+            return is_connected_flag
 
         still_ok = is_connected_flag and _health_check()
         if still_ok:
@@ -211,7 +207,7 @@ class AWSIoTClient:
                 pri_key_filepath=os.path.join(self.cert_path, self.claim_key),
                 client_bootstrap=client_bootstrap,
                 client_id=self.client_id,
-                keep_alive_secs=30
+                keep_alive_secs=300  # 30초 → 300초로 변경
             )
 
             print("MQTT 연결 시도 중...")
@@ -384,7 +380,7 @@ class AWSIoTClient:
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
-            keep_alive_secs=30,
+            keep_alive_secs=300,  # 30초 → 300초로 변경하여 유휴 트래픽 감소
             on_connection_interrupted=on_interrupted,
             on_connection_resumed=on_resumed,
         )
@@ -402,7 +398,7 @@ class AWSIoTClient:
 
 def update_device_shadow():
     """변경사항 감지 기반 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
-    global last_heartbeat
+    global last_heartbeat, last_shadow_update
     
     try:
         # MQTT 연결 상태 확인
@@ -445,6 +441,11 @@ def update_device_shadow():
             
             # 변경사항이 있거나 heartbeat 시간이 되었으면 업데이트
             should_update = has_changes or (current_time - last_heartbeat >= HEARTBEAT_INTERVAL)
+            
+            # Rate-limit 체크: 최소 간격 보장 (비용 절감)
+            if should_update and (current_time - last_shadow_update < MIN_SHADOW_INTERVAL):
+                print(f"⏳ Shadow 업데이트 rate-limit: {int(MIN_SHADOW_INTERVAL - (current_time - last_shadow_update))}초 남음")
+                return
             
             # 디버깅 로그
             if has_changes:
@@ -501,6 +502,9 @@ def update_device_shadow():
                     qos=mqtt.QoS.AT_LEAST_ONCE
                 )
                 
+                # Shadow 업데이트 성공 시 시간 기록 (rate-limit용)
+                last_shadow_update = current_time
+                
                 if has_changes:
                     print(f"🔔 변경사항 감지로 섀도우 업데이트: {len(changes)}개 변경")
                 else:
@@ -509,6 +513,35 @@ def update_device_shadow():
                     
     except Exception as e:
         print(f"섀도우 업데이트 실패: {e}")
+
+def send_health_check():
+    """간단한 헬스체크 전송 (비용 최소화)"""
+    global last_health_check
+    
+    try:
+        current_time = time.time()
+        
+        # 10분마다만 헬스체크 전송
+        if current_time - last_health_check >= HEALTH_CHECK_INTERVAL:
+            if check_mqtt_connection():
+                # 최소한의 헬스체크 메시지 (QoS0으로 비용 절감)
+                health_data = {
+                    "status": "alive",
+                    "timestamp": int(current_time),
+                    "hub_id": matterhub_id
+                }
+                
+                global_mqtt_connection.publish(
+                    topic=f"matterhub/{matterhub_id}/health",
+                    payload=json.dumps(health_data),
+                    qos=mqtt.QoS.AT_MOST_ONCE  # QoS0으로 비용 최소화
+                )
+                
+                last_health_check = current_time
+                print(f"💓 헬스체크 전송: {int(current_time)}")
+                
+    except Exception as e:
+        print(f"헬스체크 전송 실패: {e}")
 
 def check_dynamic_endpoint(target_endpoint, endpoint, target_method, method): 
     url_var_list = []
@@ -558,7 +591,7 @@ def handle_ha_request(endpoint, method, request_func, response_id=None):
     global_mqtt_connection.publish(
         topic=f"matterhub/{matterhub_id}/api/response",
         payload=json.dumps(res),
-        qos=mqtt.QoS.AT_LEAST_ONCE
+        qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경하여 ACK 패킷 감소
     )
     return
 
@@ -597,7 +630,7 @@ def handle_update_command(message):
             global_mqtt_connection.publish(
                 topic=response_topic,
                 payload=json.dumps(response_data),
-                qos=mqtt.QoS.AT_LEAST_ONCE
+                qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경
             )
             
             print(f"✅ Git 업데이트 응답 전송 완료")
@@ -620,7 +653,7 @@ def handle_update_command(message):
         global_mqtt_connection.publish(
             topic=response_topic,
             payload=json.dumps(error_response),
-            qos=mqtt.QoS.AT_LEAST_ONCE
+            qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경
         )
 
 def execute_external_update_script(branch='master', force_update=False, update_id='unknown'):
@@ -1111,6 +1144,9 @@ if __name__ == "__main__":
         while True:
             # 섀도우 업데이트 실행 (변경사항 감지 기반)
             update_device_shadow()
+            
+            # 간단한 헬스체크 전송 (10분 간격)
+            send_health_check()
             
             # 60초마다 MQTT 연결 상태 확인 (5초 × 12 = 60초)
             connection_check_counter += 1
