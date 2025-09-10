@@ -440,11 +440,6 @@ def update_device_shadow():
                             for device in devices_data:
                                 if 'entity_id' in device:
                                     managed_devices.add(device['entity_id'])
-                                # sub_entity_id도 고려 (배열 형태)
-                                if 'sub_entity_id' in device and isinstance(device['sub_entity_id'], list):
-                                    for sub_id in device['sub_entity_id']:
-                                        if sub_id:  # 빈 문자열이 아닌 경우만
-                                            managed_devices.add(sub_id)
                         else:
                             print(f"devices.json 파일이 비어있음: {devices_file_path}")
                 elif devices_file_path:

@@ -285,7 +285,10 @@ $PM2 save
 echo "[INFO] PM2 상태 확인" | tee -a "$LOG_FILE"
 $PM2 list
 
+sleep 10
+
 $PM2 restart wm-mqtt
+
 sleep 10
 # 업데이트 완료 확인
 echo "[INFO] 업데이트 완료 확인 중..." | tee -a "$LOG_FILE"
