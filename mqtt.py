@@ -9,6 +9,20 @@ from awsiot import mqtt_connection_builder
 from dotenv import load_dotenv
 import requests
 
+def format_duration(seconds):
+    """초를 시간/분/초 형태로 포맷팅"""
+    if seconds < 60:
+        return f"{int(seconds)}초"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}분 {secs}초"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{hours}시간 {minutes}분 {secs}초"
+
 from sub.scheduler import one_time_schedule, one_time_scheduler, periodic_scheduler, schedule_config
 from libs.edit import deleteItem, file_changed_request, putItem  # type: ignore
 
@@ -72,7 +86,7 @@ class StateChangeDetector:
                 if entity_id:
                     self.last_states[entity_id] = current_state
             self.is_initialized = True
-            print(f"🔧 StateChangeDetector 초기화 완료: {len(self.last_states)}개 디바이스 상태 저장")
+            print(f"디바이스 상태 초기화 완료: {len(self.last_states)}개")
             return False, []  # 초기화 시에는 변경사항 없음
         
         # 실제 변경사항 감지 (sensor.로 시작하는 디바이스는 state 변화 무시)
@@ -136,10 +150,10 @@ def check_mqtt_connection():
             reconnect_attempts = 0
             return True
 
-        print(f"🔌 MQTT 연결 끊김, 재연결 시도... (시도 {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
+        print(f"MQTT 재연결 시도: {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS}")
 
         if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-            print(f"🚨 최대 재연결 시도 횟수 초과 ({MAX_RECONNECT_ATTEMPTS}회)")
+            print(f"MQTT 재연결 실패: 최대 시도 횟수 초과")
             return False
 
         reconnect_attempts += 1
@@ -168,12 +182,12 @@ def check_mqtt_connection():
             )
             subscribe_future.result()
 
-        print("✅ MQTT 재연결 성공!")
+        print("MQTT 재연결 성공")
         reconnect_attempts = 0
         return True
 
     except Exception as e:
-        print(f"❌ 연결 상태 확인 실패: {e}")
+        print(f"연결 상태 확인 실패: {e}")
         return False
 
 class AWSIoTClient:
@@ -434,7 +448,7 @@ def update_device_shadow():
                 if entity_id in managed_devices:
                     filtered_states.append(state)
             
-            print(f"📊 전체 디바이스: {len(states)}개, 관리 대상: {len(filtered_states)}개")
+            print(f"디바이스 상태: 전체 {len(states)}개, 관리 {len(filtered_states)}개")
             
             # 변경사항 감지 (관리되는 디바이스만)
             has_changes, changes = state_detector.detect_changes(filtered_states)
@@ -444,20 +458,23 @@ def update_device_shadow():
             
             # Rate-limit 체크: 최소 간격 보장 (비용 절감)
             if should_update and (current_time - last_shadow_update < MIN_SHADOW_INTERVAL):
-                print(f"⏳ Shadow 업데이트 rate-limit: {int(MIN_SHADOW_INTERVAL - (current_time - last_shadow_update))}초 남음")
+                remaining = MIN_SHADOW_INTERVAL - (current_time - last_shadow_update)
+                print(f"Shadow 업데이트 대기: {format_duration(remaining)} 남음")
                 return
             
             # 디버깅 로그
             if has_changes:
-                print(f"🔍 변경사항 감지: {len(changes)}개")
+                print(f"변경사항 감지: {len(changes)}개")
                 for change in changes[:3]:  # 처음 3개만 출력
-                    print(f"   - {change.get('type', 'unknown')}: {change.get('entity_id', 'unknown')}")
+                    print(f"  - {change.get('type', 'unknown')}: {change.get('entity_id', 'unknown')}")
                 if len(changes) > 3:
-                    print(f"   ... 외 {len(changes) - 3}개")
+                    print(f"  ... 외 {len(changes) - 3}개")
             elif current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
-                print(f"⏰ Heartbeat 시간 도달: {int(current_time - last_heartbeat)}초 경과")
+                elapsed = current_time - last_heartbeat
+                print(f"Heartbeat 시간 도달: {format_duration(elapsed)} 경과")
             else:
-                print(f"💤 변경사항 없음, Heartbeat 대기 중: {int(HEARTBEAT_INTERVAL - (current_time - last_heartbeat))}초 남음")
+                remaining = HEARTBEAT_INTERVAL - (current_time - last_heartbeat)
+                print(f"변경사항 없음, Heartbeat 대기: {format_duration(remaining)} 남음")
             
             if should_update:
                 # 상태 데이터 정리
@@ -506,13 +523,13 @@ def update_device_shadow():
                 last_shadow_update = current_time
                 
                 if has_changes:
-                    print(f"🔔 변경사항 감지로 섀도우 업데이트: {len(changes)}개 변경")
+                    print(f"Shadow 업데이트: {len(changes)}개 변경사항")
                 else:
                     last_heartbeat = current_time
-                    print(f"💓 Heartbeat 섀도우 업데이트 (5.5시간 간격)")
+                    print(f"Heartbeat Shadow 업데이트")
                     
     except Exception as e:
-        print(f"섀도우 업데이트 실패: {e}")
+        print(f"Shadow 업데이트 실패: {e}")
 
 def send_health_check():
     """간단한 헬스체크 전송 (비용 최소화)"""
@@ -538,7 +555,7 @@ def send_health_check():
                 )
                 
                 last_health_check = current_time
-                print(f"💓 헬스체크 전송: {int(current_time)}")
+                print(f"헬스체크 전송")
                 
     except Exception as e:
         print(f"헬스체크 전송 실패: {e}")
@@ -1076,13 +1093,13 @@ if __name__ == "__main__":
         global_mqtt_connection = aws_client.connect_mqtt()
         print("MQTT 연결 성공")
         
-        # ✅ 즉시 초기 섀도우 업데이트 실행
-        print("🚀 초기 섀도우 업데이트 실행...")
+        # 초기 Shadow 업데이트 실행
+        print("초기 Shadow 업데이트 실행...")
         update_device_shadow()
-        print("✅ 초기 섀도우 업데이트 완료")
+        print("초기 Shadow 업데이트 완료")
         
     except Exception as e:
-        print(f"[에러] MQTT 연결 실패: {e}")
+        print(f"MQTT 연결 실패: {e}")
         sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
     
     # hello 토픽 구독
@@ -1142,20 +1159,20 @@ if __name__ == "__main__":
         connection_check_counter = 0
         
         while True:
-            # 섀도우 업데이트 실행 (변경사항 감지 기반)
+            # Shadow 업데이트 실행 (변경사항 감지 기반)
             update_device_shadow()
             
             # 간단한 헬스체크 전송 (10분 간격)
             send_health_check()
             
-            # 60초마다 MQTT 연결 상태 확인 (5초 × 12 = 60초)
+            # 60초마다 MQTT 연결 상태 확인
             connection_check_counter += 1
             if connection_check_counter >= 12:
                 check_mqtt_connection()
                 connection_check_counter = 0
             
-            # 더 긴 대기 시간으로 CPU 사용량 감소
-            time.sleep(5)  # 1초 → 5초로 변경
+            # CPU 사용량 감소를 위한 대기
+            time.sleep(5)
             
     except KeyboardInterrupt:
         print("프로그램 종료")
