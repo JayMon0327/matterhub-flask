@@ -124,11 +124,11 @@ class StateChangeDetector:
 # 전역 변수
 state_detector = StateChangeDetector()
 last_heartbeat = 0
-HEARTBEAT_INTERVAL = 1800  # 30분마다 heartbeat (변경사항이 없어도) - 클라우드 모니터링을 위해 단축
+HEARTBEAT_INTERVAL = 3600  # 30분 → 60분으로 변경 (비용 절감)
 last_shadow_update = 0  # Shadow 업데이트 rate-limit용
-MIN_SHADOW_INTERVAL = 30  # Shadow 업데이트 최소 간격 (30초)
+MIN_SHADOW_INTERVAL = 120  # 30초 → 120초로 변경 (비용 절감)
 last_health_check = 0  # 헬스체크용
-HEALTH_CHECK_INTERVAL = 600  # 10분마다 간단한 헬스체크 (비용 최소화)
+HEALTH_CHECK_INTERVAL = 1800  # 10분 → 30분으로 변경 (비용 절감)
 reconnect_attempts = 0
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 30  # 30초 후 재연결 시도
@@ -169,18 +169,27 @@ def check_mqtt_connection():
         aws_client = AWSIoTClient()
         global_mqtt_connection = aws_client.connect_mqtt()
 
-        # 재구독
-        for t in (
+        # 재구독 (모든 토픽)
+        subscribe_topics = [
             f"matterhub/{matterhub_id}/api",
             "matterhub/api",
             "matterhub/group/all/api",
-        ):
-            subscribe_future, _ = global_mqtt_connection.subscribe(
-                topic=t,
-                qos=mqtt.QoS.AT_LEAST_ONCE,
-                callback=mqtt_callback
-            )
-            subscribe_future.result()
+            "matterhub/update/all",
+            f"matterhub/update/region/+",
+            f"matterhub/update/specific/{matterhub_id}",
+        ]
+        
+        for t in subscribe_topics:
+            try:
+                subscribe_future, _ = global_mqtt_connection.subscribe(
+                    topic=t,
+                    qos=mqtt.QoS.AT_LEAST_ONCE,
+                    callback=mqtt_callback
+                )
+                subscribe_future.result()
+                print(f"✅ 토픽 재구독 성공: {t}")
+            except Exception as e:
+                print(f"❌ 토픽 재구독 실패: {t} - {e}")
 
         print("MQTT 재연결 성공")
         reconnect_attempts = 0
@@ -221,7 +230,7 @@ class AWSIoTClient:
                 pri_key_filepath=os.path.join(self.cert_path, self.claim_key),
                 client_bootstrap=client_bootstrap,
                 client_id=self.client_id,
-                keep_alive_secs=300  # 30초 → 300초로 변경
+                keep_alive_secs=120  # 300초 → 120초로 변경 (비용 최적화)
             )
 
             print("MQTT 연결 시도 중...")
@@ -378,15 +387,20 @@ class AWSIoTClient:
         
         # 연결 상태 콜백
         def on_interrupted(connection, error, **kwargs):
-            global is_connected_flag
+            global is_connected_flag, reconnect_attempts
             is_connected_flag = False
-            print(f"⚠️ MQTT 연결 끊김: {error}")
+            print(f"⚠️ MQTT 연결 끊김 감지: {error}")
+            print(f"🔄 자동 재연결 시도 준비 중... (현재 시도: {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
 
         def on_resumed(connection, return_code, session_present, **kwargs):
-            global is_connected_flag
+            global is_connected_flag, reconnect_attempts
             # 0(ACCEPTED)일 때 정상 복구
             is_connected_flag = (return_code == 0)
-            print(f"✅ MQTT 연결 재개됨 (return_code={return_code}, session_present={session_present})")
+            if return_code == 0:
+                reconnect_attempts = 0  # 재연결 성공 시 카운터 리셋
+                print(f"✅ MQTT 연결 재개됨 (return_code={return_code}, session_present={session_present})")
+            else:
+                print(f"❌ MQTT 재연결 실패 (return_code={return_code})")
 
         mqtt_conn = mqtt_connection_builder.mtls_from_path(
             endpoint=self.endpoint,
@@ -394,7 +408,7 @@ class AWSIoTClient:
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
-            keep_alive_secs=300,  # 30초 → 300초로 변경하여 유휴 트래픽 감소
+            keep_alive_secs=120,  # 300초 → 120초로 변경 (비용 최적화)
             on_connection_interrupted=on_interrupted,
             on_connection_resumed=on_resumed,
         )
@@ -453,10 +467,9 @@ def update_device_shadow():
                 print(f"devices.json 읽기 실패: {e}")
                 print(f"파일 경로: {devices_file_path}")
             finally:
-                # devices.json이 없거나 오류가 있어도 모든 디바이스를 관리하도록 설정
+                # 실패 시에도 빈 set으로 처리하여 프로그램 중단 방지
                 if not managed_devices:
-                    print("모든 디바이스를 관리 대상으로 설정")
-                    managed_devices = None  # None으로 설정하여 모든 디바이스 포함
+                    managed_devices = set()
             
             # 관리되는 디바이스만 필터링
             filtered_states = []
@@ -492,7 +505,8 @@ def update_device_shadow():
                 print(f"Heartbeat 시간 도달: {format_duration(elapsed)} 경과")
             else:
                 remaining = HEARTBEAT_INTERVAL - (current_time - last_heartbeat)
-                print(f"변경사항 없음, Heartbeat 대기: {format_duration(remaining)} 남음")
+                # 로그 출력 빈도 감소 (비용 절감을 위해 주석 처리)
+                # print(f"변경사항 없음, Heartbeat 대기: {format_duration(remaining)} 남음")
             
             if should_update:
                 # 상태 데이터 정리
@@ -504,7 +518,7 @@ def update_device_shadow():
                             "status_key": f"{matterhub_id}#LATEST",  # 최신 상태 조회용 키
                             "device_count": len(filtered_states),  # 현재 연결된 관리 대상 디바이스 수
                             "total_devices": len(states),  # Home Assistant 전체 디바이스 수
-                            "managed_devices": len(managed_devices) if managed_devices else len(states),  # devices.json에 등록된 디바이스 수
+                            "managed_devices": len(managed_devices),  # devices.json에 등록된 디바이스 수
                             "online": True,
                             "ha_reachable": True,
                             "devices": {},
@@ -513,7 +527,7 @@ def update_device_shadow():
                             "device_stats": {
                                 "connected": len(filtered_states),  # 현재 연결된 관리 대상
                                 "total_ha": len(states),  # Home Assistant 전체
-                                "configured": len(managed_devices) if managed_devices else len(states)  # 설정 파일에 등록된
+                                "configured": len(managed_devices)  # 설정 파일에 등록된
                             }
                         }
                     }
@@ -529,12 +543,12 @@ def update_device_shadow():
                             "attributes": state.get('attributes', {})
                         }
                 
-                # 섀도우 업데이트 토픽으로 발행
+                # 섀도우 업데이트 토픽으로 발행 (QoS0으로 비용 절감)
                 shadow_topic = f"$aws/things/{matterhub_id}/shadow/update"
                 global_mqtt_connection.publish(
                     topic=shadow_topic,
                     payload=json.dumps(shadow_state),
-                    qos=mqtt.QoS.AT_LEAST_ONCE
+                    qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경하여 비용 절감
                 )
                 
                 # Shadow 업데이트 성공 시 시간 기록 (rate-limit용)
@@ -1169,11 +1183,11 @@ if __name__ == "__main__":
         print(f"{ut} 토픽 구독 완료")
 
 
-    # 테스트용 데이터 publish
-    test_data = {
-        "message": "테스트 메시지",
-        "timestamp": time.time()
-    }
+    # 테스트용 데이터 publish 제거 (비용 절감)
+    # test_data = {
+    #     "message": "테스트 메시지",
+    #     "timestamp": time.time()
+    # }
     
 
     
@@ -1188,9 +1202,9 @@ if __name__ == "__main__":
             # 간단한 헬스체크 전송 (10분 간격)
             send_health_check()
             
-            # 60초마다 MQTT 연결 상태 확인
+            # 60초마다 MQTT 연결 상태 확인 (비용 절감을 위해 빈도 감소)
             connection_check_counter += 1
-            if connection_check_counter >= 12:
+            if connection_check_counter >= 12:  # 5초 * 12 = 60초마다
                 check_mqtt_connection()
                 connection_check_counter = 0
             
