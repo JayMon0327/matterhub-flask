@@ -169,14 +169,12 @@ def check_mqtt_connection():
         aws_client = AWSIoTClient()
         global_mqtt_connection = aws_client.connect_mqtt()
 
-        # 재구독 (모든 토픽)
+        # 재구독 (필요한 토픽만)
         subscribe_topics = [
             f"matterhub/{matterhub_id}/api",
             "matterhub/api",
             "matterhub/group/all/api",
-            "matterhub/update/all",
-            f"matterhub/update/region/+",
-            f"matterhub/update/specific/{matterhub_id}",
+            f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 업데이트 토픽만
         ]
         
         for t in subscribe_topics:
@@ -1086,8 +1084,8 @@ def mqtt_callback(topic, payload, **kwargs):
         handle_ha_request(endpoint, method, mock_request, response_id)
         return
 
-    # Git 업데이트 명령 처리
-    if topic == f"matterhub/{matterhub_id}/git/update" or topic == "matterhub/update/all" or topic.startswith("matterhub/update/region/") or topic.startswith("matterhub/update/specific/"):
+    # Git 업데이트 명령 처리 (specific 토픽만 처리)
+    if topic == f"matterhub/{matterhub_id}/git/update" or topic.startswith("matterhub/update/specific/"):
         print(f"🚀 Git 업데이트 명령 수신: {topic}")
         handle_update_command(_message)
         return
@@ -1167,11 +1165,9 @@ if __name__ == "__main__":
     subscribe_result = subscribe_future.result()
     print(f"{GROUP_TOPIC} 토픽 구독 완료")
 
-    # 원격 업데이트 명령 토픽 구독 (브로드캐스트/지역/개별)
+    # 원격 업데이트 명령 토픽 구독 (개별만 - Lambda에서 모든 업데이트를 specific로 발행)
     update_topics = [
-        "matterhub/update/all",
-        f"matterhub/update/region/+",
-        f"matterhub/update/specific/{matterhub_id}",
+        f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 토픽만 구독
     ]
     for ut in update_topics:
         subscribe_future, packet_id = global_mqtt_connection.subscribe(
