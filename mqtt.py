@@ -642,66 +642,136 @@ def handle_ha_request(endpoint, method, request_func, response_id=None):
     )
     return
 
-def handle_update_command(message):
-    """업데이트 명령 처리"""
+def send_immediate_response(message, status="processing"):
+    """즉시 응답 전송 (처리 중 상태)"""
+    try:
+        update_id = message.get('update_id')
+        response_topic = f"matterhub/{matterhub_id}/update/response"
+        
+        response_data = {
+            'update_id': update_id,
+            'hub_id': matterhub_id,
+            'timestamp': int(time.time()),
+            'command': 'git_update',
+            'status': status,
+            'message': f'Update command received and {status}'
+        }
+        
+        global_mqtt_connection.publish(
+            topic=response_topic,
+            payload=json.dumps(response_data),
+            qos=mqtt.QoS.AT_MOST_ONCE
+        )
+        
+        print(f"📤 즉시 응답 전송: {status} - {update_id}")
+        
+    except Exception as e:
+        print(f"❌ 즉시 응답 전송 실패: {e}")
+
+def send_final_response(message, result):
+    """최종 응답 전송 (완료 상태)"""
+    try:
+        update_id = message.get('update_id')
+        response_topic = f"matterhub/{matterhub_id}/update/response"
+        
+        response_data = {
+            'update_id': update_id,
+            'hub_id': matterhub_id,
+            'timestamp': int(time.time()),
+            'command': 'git_update',
+            'status': 'success' if result['success'] else 'failed',
+            'result': result
+        }
+        
+        global_mqtt_connection.publish(
+            topic=response_topic,
+            payload=json.dumps(response_data),
+            qos=mqtt.QoS.AT_MOST_ONCE
+        )
+        
+        print(f"✅ 최종 응답 전송 완료: {update_id}")
+        print(f"📊 결과: {'성공' if result['success'] else '실패'}")
+        
+    except Exception as e:
+        print(f"❌ 최종 응답 전송 실패: {e}")
+
+def send_error_response(message, error_msg):
+    """에러 응답 전송"""
+    try:
+        update_id = message.get('update_id')
+        response_topic = f"matterhub/{matterhub_id}/update/response"
+        
+        error_response = {
+            'update_id': update_id,
+            'hub_id': matterhub_id,
+            'timestamp': int(time.time()),
+            'command': 'git_update',
+            'status': 'failed',
+            'error': error_msg
+        }
+        
+        global_mqtt_connection.publish(
+            topic=response_topic,
+            payload=json.dumps(error_response),
+            qos=mqtt.QoS.AT_MOST_ONCE
+        )
+        
+        print(f"❌ 에러 응답 전송: {update_id} - {error_msg}")
+        
+    except Exception as e:
+        print(f"❌ 에러 응답 전송 실패: {e}")
+
+def execute_update_async(message):
+    """비동기 업데이트 실행"""
     try:
         command = message.get('command')
         update_id = message.get('update_id')
         branch = message.get('branch', 'master')
         force_update = message.get('force_update', False)
         
+        print(f"🔧 백그라운드 업데이트 실행 시작: {update_id}")
+        print(f"📋 업데이트 상세 정보:")
+        print(f"   - Branch: {branch}")
+        print(f"   - Force Update: {force_update}")
+        print(f"   - Hub ID: {matterhub_id}")
+        
+        # 외부 스크립트 실행
+        result = execute_external_update_script(branch, force_update, update_id)
+        
+        print(f"📊 스크립트 실행 결과: {result}")
+        
+        # 최종 응답 전송
+        send_final_response(message, result)
+        
+    except Exception as e:
+        print(f"❌ 비동기 업데이트 실행 실패: {e}")
+        send_error_response(message, str(e))
+
+def handle_update_command(message):
+    """업데이트 명령 처리 - 비동기 방식"""
+    try:
+        command = message.get('command')
+        update_id = message.get('update_id')
+        
         if command == 'git_update':
             print(f"🚀 Git 업데이트 명령 수신: {update_id}")
-            print(f"📋 업데이트 상세 정보:")
-            print(f"   - Branch: {branch}")
-            print(f"   - Force Update: {force_update}")
-            print(f"   - Hub ID: {matterhub_id}")
             
-            # 외부 스크립트 실행 (업데이트 ID와 Hub ID 전달)
-            print(f"🔧 외부 업데이트 스크립트 실행 시작...")
-            result = execute_external_update_script(branch, force_update, update_id)
+            # 즉시 "처리 중" 응답 전송
+            send_immediate_response(message, "processing")
             
-            print(f"📊 스크립트 실행 결과: {result}")
-            
-            # 응답 전송
-            response_topic = f"matterhub/{matterhub_id}/update/response"
-            response_data = {
-                'update_id': update_id,
-                'hub_id': matterhub_id,
-                'timestamp': int(time.time()),
-                'command': 'git_update',
-                'status': 'success' if result['success'] else 'failed',
-                'result': result
-            }
-            
-            global_mqtt_connection.publish(
-                topic=response_topic,
-                payload=json.dumps(response_data),
-                qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경
+            # 백그라운드에서 업데이트 실행
+            update_thread = threading.Thread(
+                target=execute_update_async, 
+                args=(message,)
             )
+            update_thread.daemon = True
+            update_thread.start()
             
-            print(f"✅ Git 업데이트 응답 전송 완료")
-            print(f"📤 응답 토픽: {response_topic}")
-            print(f"📤 응답 데이터: {response_data}")
+            print(f"✅ 업데이트 스레드 시작됨: {update_id}")
             
     except Exception as e:
         print(f"❌ Git 업데이트 실패: {e}")
-        # 에러 응답 전송
-        error_response = {
-            'update_id': message.get('update_id'),
-            'hub_id': matterhub_id,
-            'timestamp': int(time.time()),
-            'command': 'git_update',
-            'status': 'failed',
-            'error': str(e)
-        }
-        
-        response_topic = f"matterhub/{matterhub_id}/update/response"
-        global_mqtt_connection.publish(
-            topic=response_topic,
-            payload=json.dumps(error_response),
-            qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경
-        )
+        send_error_response(message, str(e))
 
 def execute_external_update_script(branch='master', force_update=False, update_id='unknown'):
     """외부 업데이트 스크립트 실행"""
