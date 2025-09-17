@@ -140,7 +140,7 @@ MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 30  # 30초 후 재연결 시도
 
 def check_mqtt_connection():
-    """MQTT 연결 상태 확인 및 재연결"""
+    """MQTT 연결 상태 확인 및 재연결 - 동시성 문제 해결"""
     global global_mqtt_connection, reconnect_attempts, is_connected_flag
 
     try:
@@ -171,33 +171,57 @@ def check_mqtt_connection():
             except:
                 pass
 
-        # 재연결
-        aws_client = AWSIoTClient()
-        global_mqtt_connection = aws_client.connect_mqtt()
-
-        # 재구독 (필요한 토픽만)
-        subscribe_topics = [
-            f"matterhub/{matterhub_id}/api",
-            "matterhub/api",
-            "matterhub/group/all/api",
-            f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 업데이트 토픽만
-        ]
+        # 🚀 동시성 문제 해결: 재연결 시에도 지수 백오프 적용
+        max_retries = 3
+        base_delay = 1
         
-        for t in subscribe_topics:
+        for attempt in range(max_retries):
             try:
-                subscribe_future, _ = global_mqtt_connection.subscribe(
-                    topic=t,
-                    qos=mqtt.QoS.AT_LEAST_ONCE,
-                    callback=mqtt_callback
-                )
-                subscribe_future.result()
-                print(f"✅ 토픽 재구독 성공: {t}")
-            except Exception as e:
-                print(f"❌ 토픽 재구독 실패: {t} - {e}")
+                # 동시 재연결 방지를 위한 랜덤 지연
+                if attempt > 0:
+                    import random
+                    random_delay = random.uniform(0.5, 2.0)  # 0.5-2초 랜덤 지연
+                    print(f"🔄 재연결 지연: {random_delay:.1f}초")
+                    time.sleep(random_delay)
+                
+                # 재연결
+                aws_client = AWSIoTClient()
+                global_mqtt_connection = aws_client.connect_mqtt()
 
-        print("MQTT 재연결 성공")
-        reconnect_attempts = 0
-        return True
+                # 재구독 (필요한 토픽만)
+                subscribe_topics = [
+                    f"matterhub/{matterhub_id}/api",
+                    "matterhub/api",
+                    "matterhub/group/all/api",
+                    f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 업데이트 토픽만
+                ]
+                
+                for t in subscribe_topics:
+                    try:
+                        subscribe_future, _ = global_mqtt_connection.subscribe(
+                            topic=t,
+                            qos=mqtt.QoS.AT_LEAST_ONCE,
+                            callback=mqtt_callback
+                        )
+                        subscribe_future.result()
+                        print(f"✅ 토픽 재구독 성공: {t}")
+                    except Exception as e:
+                        print(f"❌ 토픽 재구독 실패: {t} - {e}")
+
+                print("MQTT 재연결 성공")
+                reconnect_attempts = 0
+                return True
+                
+            except Exception as e:
+                print(f"❌ 재연결 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⏳ 재연결 재시도 전 대기: {delay}초")
+                    time.sleep(delay)
+                else:
+                    print(f"❌ 재연결 최종 실패: {max_retries}회 시도 후 포기")
+                    return False
 
     except Exception as e:
         print(f"연결 상태 확인 실패: {e}")
@@ -373,7 +397,7 @@ class AWSIoTClient:
             return False
 
     def connect_mqtt(self):
-        """인증서를 사용하여 MQTT 연결"""
+        """인증서를 사용하여 MQTT 연결 - 동시성 문제 해결"""
         has_cert, cert_file, key_file = self.check_certificate()
         
         if not has_cert:
@@ -417,16 +441,46 @@ class AWSIoTClient:
             on_connection_resumed=on_resumed,
         )
         
-        print("새 인증서로 MQTT 연결 시도 중...")
-        connect_future = mqtt_conn.connect()
-        connect_future.result()
-        print("새 인증서로 MQTT 연결 성공")
+        # 🚀 동시성 문제 해결: 지수 백오프 재시도 로직
+        max_retries = 5
+        base_delay = 2  # 기본 지연 시간 (초)
         
-        # 최초 연결 성공 → 플래그 세팅
-        global is_connected_flag
-        is_connected_flag = True
+        for attempt in range(max_retries):
+            try:
+                print(f"새 인증서로 MQTT 연결 시도 중... (시도 {attempt + 1}/{max_retries})")
+                
+                # 동시 연결 방지를 위한 랜덤 지연
+                if attempt > 0:
+                    import random
+                    random_delay = random.uniform(1, 3)  # 1-3초 랜덤 지연
+                    print(f"🔄 동시 연결 방지를 위한 지연: {random_delay:.1f}초")
+                    time.sleep(random_delay)
+                
+                connect_future = mqtt_conn.connect()
+                connect_future.result(timeout=15)  # 타임아웃 15초
+                
+                print("새 인증서로 MQTT 연결 성공")
+                
+                # 최초 연결 성공 → 플래그 세팅
+                global is_connected_flag
+                is_connected_flag = True
+                
+                return mqtt_conn
+                
+            except Exception as e:
+                print(f"❌ MQTT 연결 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    # 지수 백오프: 2, 4, 8, 16초
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⏳ 재시도 전 대기: {delay}초")
+                    time.sleep(delay)
+                else:
+                    print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
+                    raise Exception(f"MQTT 연결 실패: {max_retries}회 시도 후 포기 - {e}")
         
-        return mqtt_conn
+        # 이 지점에 도달하면 안 되지만 안전장치
+        raise Exception("MQTT 연결 실패: 예상치 못한 오류")
 
 def update_device_shadow():
     """변경사항 감지 기반 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
@@ -842,14 +896,13 @@ def handle_update_command(message):
         send_error_response(message, str(e))
 
 def execute_external_update_script(branch='master', force_update=False, update_id='unknown'):
-    """외부 업데이트 스크립트 실행"""
+    """외부 업데이트 스크립트 실행 - mosquitto_pub 제거"""
     try:
         import subprocess
         import os
         
         # 업데이트 스크립트 경로를 동적으로 찾기
         possible_paths = [
-            "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh",
             "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh",
             "./update_server.sh",
             "../update_server.sh",
@@ -1279,48 +1332,86 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"MQTT 연결 실패: {e}")
-        sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
+        # 🚀 동시성 문제 해결: 연결 실패 시에도 재시도 로직 적용
+        print("🔄 연결 실패로 인한 재시도 로직 시작...")
+        
+        max_retries = 3
+        base_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                # 동시 연결 방지를 위한 랜덤 지연
+                import random
+                random_delay = random.uniform(2, 8)  # 2-8초 랜덤 지연
+                print(f"🔄 연결 재시도 전 지연: {random_delay:.1f}초")
+                time.sleep(random_delay)
+                
+                print(f"🔄 MQTT 연결 재시도: {attempt + 1}/{max_retries}")
+                aws_client = AWSIoTClient()
+                global_mqtt_connection = aws_client.connect_mqtt()
+                print("MQTT 연결 성공")
+                
+                # 초기 Shadow 업데이트 실행
+                print("초기 Shadow 업데이트 실행...")
+                update_device_shadow()
+                print("초기 Shadow 업데이트 완료")
+                break
+                
+            except Exception as retry_e:
+                print(f"❌ 연결 재시도 실패 (시도 {attempt + 1}/{max_retries}): {retry_e}")
+                
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⏳ 재시도 전 대기: {delay}초")
+                    time.sleep(delay)
+                else:
+                    print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
+                    sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
     
-    # hello 토픽 구독
-    subscribe_future, packet_id = global_mqtt_connection.subscribe(
-        topic=f"matterhub/{matterhub_id}/api",
-        qos=mqtt.QoS.AT_LEAST_ONCE,
-        callback=mqtt_callback
-    )
-    
-    subscribe_result = subscribe_future.result()
-    print(f"matterhub/{matterhub_id}/api 토픽 구독 완료")
-
-    subscribe_future, packet_id = global_mqtt_connection.subscribe(
-        topic=f"matterhub/api",
-        qos=mqtt.QoS.AT_LEAST_ONCE,
-        callback=mqtt_callback
-    )
-    subscribe_result = subscribe_future.result()
-    print(f"matterhub/api 토픽 구독 완료")
-
- # 전체 그룹 토픽 구독
-    GROUP_TOPIC = "matterhub/group/all/api"
-    subscribe_future, packet_id = global_mqtt_connection.subscribe(
-        topic=GROUP_TOPIC,
-        qos=mqtt.QoS.AT_LEAST_ONCE,
-        callback=mqtt_callback
-    )
-    subscribe_result = subscribe_future.result()
-    print(f"{GROUP_TOPIC} 토픽 구독 완료")
-
-    # 원격 업데이트 명령 토픽 구독 (개별만 - Lambda에서 모든 업데이트를 specific로 발행)
-    update_topics = [
+    # 🚀 동시성 문제 해결: 토픽 구독도 재시도 로직 적용
+    subscribe_topics = [
+        f"matterhub/{matterhub_id}/api",
+        "matterhub/api",
+        "matterhub/group/all/api",
         f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 토픽만 구독
     ]
-    for ut in update_topics:
-        subscribe_future, packet_id = global_mqtt_connection.subscribe(
-            topic=ut,
-            qos=mqtt.QoS.AT_LEAST_ONCE,
-            callback=mqtt_callback
-        )
-        subscribe_future.result()
-        print(f"{ut} 토픽 구독 완료")
+    
+    print("📡 토픽 구독 시작...")
+    for topic in subscribe_topics:
+        max_retries = 3
+        base_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                # 동시 구독 방지를 위한 랜덤 지연
+                if attempt > 0:
+                    import random
+                    random_delay = random.uniform(0.5, 1.5)  # 0.5-1.5초 랜덤 지연
+                    print(f"🔄 구독 재시도 전 지연: {random_delay:.1f}초")
+                    time.sleep(random_delay)
+                
+                subscribe_future, packet_id = global_mqtt_connection.subscribe(
+                    topic=topic,
+                    qos=mqtt.QoS.AT_LEAST_ONCE,
+                    callback=mqtt_callback
+                )
+                
+                subscribe_result = subscribe_future.result(timeout=10)
+                print(f"✅ {topic} 토픽 구독 완료")
+                break
+                
+            except Exception as e:
+                print(f"❌ 토픽 구독 실패 (시도 {attempt + 1}/{max_retries}): {topic} - {e}")
+                
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⏳ 구독 재시도 전 대기: {delay}초")
+                    time.sleep(delay)
+                else:
+                    print(f"❌ 토픽 구독 최종 실패: {topic}")
+                    # 구독 실패해도 프로그램 계속 실행 (일부 토픽만 실패할 수 있음)
+    
+    print("📡 모든 토픽 구독 완료")
 
 
     # 테스트용 데이터 publish 제거 (비용 절감)
