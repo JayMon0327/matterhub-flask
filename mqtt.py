@@ -46,6 +46,12 @@ matterhub_id = os.environ.get('matterhub_id')
 global_mqtt_connection = None
 is_connected_flag = False   # 연결 상태 플래그
 
+# 업데이트 큐 시스템
+import queue
+update_queue = queue.Queue()
+update_queue_lock = threading.Lock()
+is_processing_update = False
+
 # 섀도우 업데이트 관련 전역 변수
 # last_state_update = 0  # 변경사항 감지 기반으로 변경되어 사용하지 않음
 # STATE_UPDATE_INTERVAL = 180  # 3분마다 상태 업데이트 - 변경사항 감지 기반으로 변경되어 사용하지 않음
@@ -740,6 +746,41 @@ def execute_update_async(message):
         
         print(f"📊 스크립트 실행 결과: {result}")
         
+        # 스크립트가 백그라운드에서 실행된 경우 완료 대기
+        if result.get('success') and result.get('pid'):
+            print(f"⏳ 업데이트 스크립트 완료 대기 중... (PID: {result['pid']})")
+            
+            # 업데이트 완료 대기 (최대 5분)
+            max_wait_time = 300  # 5분
+            wait_interval = 10   # 10초마다 체크
+            waited_time = 0
+            
+            while waited_time < max_wait_time:
+                # 프로세스가 실행 중인지 확인
+                try:
+                    import subprocess
+                    check_result = subprocess.run(
+                        ['ps', '-p', str(result['pid'])],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if check_result.returncode != 0:
+                        # 프로세스가 종료됨
+                        print(f"✅ 업데이트 스크립트 완료 감지 (PID: {result['pid']})")
+                        break
+                        
+                except Exception as e:
+                    print(f"⚠️ 프로세스 체크 실패: {e}")
+                
+                time.sleep(wait_interval)
+                waited_time += wait_interval
+                print(f"⏳ 업데이트 대기 중... ({waited_time}/{max_wait_time}초)")
+            
+            if waited_time >= max_wait_time:
+                print(f"⚠️ 업데이트 타임아웃 ({max_wait_time}초)")
+                result['timeout'] = True
+        
         # 최종 응답 전송
         send_final_response(message, result)
         
@@ -747,8 +788,39 @@ def execute_update_async(message):
         print(f"❌ 비동기 업데이트 실행 실패: {e}")
         send_error_response(message, str(e))
 
+def process_update_queue():
+    """업데이트 큐 처리 (순차적 처리)"""
+    global is_processing_update
+    
+    while True:
+        try:
+            # 큐에서 업데이트 명령 가져오기 (블로킹)
+            message = update_queue.get()
+            
+            with update_queue_lock:
+                is_processing_update = True
+            
+            print(f"🔄 큐에서 업데이트 명령 처리 시작: {message.get('update_id')}")
+            
+            # 업데이트 실행
+            execute_update_async(message)
+            
+            with update_queue_lock:
+                is_processing_update = False
+            
+            # 작업 완료 표시
+            update_queue.task_done()
+            
+            print(f"✅ 큐 업데이트 완료: {message.get('update_id')}")
+            
+        except Exception as e:
+            print(f"❌ 큐 처리 중 오류: {e}")
+            with update_queue_lock:
+                is_processing_update = False
+            update_queue.task_done()
+
 def handle_update_command(message):
-    """업데이트 명령 처리 - 비동기 방식"""
+    """업데이트 명령 처리 - 큐 시스템 사용"""
     try:
         command = message.get('command')
         update_id = message.get('update_id')
@@ -756,18 +828,14 @@ def handle_update_command(message):
         if command == 'git_update':
             print(f"🚀 Git 업데이트 명령 수신: {update_id}")
             
-            # 즉시 "처리 중" 응답 전송
-            send_immediate_response(message, "processing")
+            # 즉시 "큐에 추가됨" 응답 전송
+            send_immediate_response(message, "queued")
             
-            # 백그라운드에서 업데이트 실행
-            update_thread = threading.Thread(
-                target=execute_update_async, 
-                args=(message,)
-            )
-            update_thread.daemon = True
-            update_thread.start()
+            # 큐에 업데이트 명령 추가
+            update_queue.put(message)
             
-            print(f"✅ 업데이트 스레드 시작됨: {update_id}")
+            print(f"📥 업데이트 명령이 큐에 추가됨: {update_id}")
+            print(f"📊 현재 큐 크기: {update_queue.qsize()}")
             
     except Exception as e:
         print(f"❌ Git 업데이트 실패: {e}")
@@ -1192,6 +1260,12 @@ if __name__ == "__main__":
     p.start()
     o = threading.Thread(target=one_time_scheduler, args=[one_time])
     o.start()
+    
+    # 업데이트 큐 처리 스레드 시작
+    q = threading.Thread(target=process_update_queue)
+    q.daemon = True
+    q.start()
+    print("✅ 업데이트 큐 처리 스레드 시작됨")
 
     try:
         aws_client = AWSIoTClient()

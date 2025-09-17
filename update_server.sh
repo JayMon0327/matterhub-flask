@@ -190,45 +190,8 @@ if [ "$FORCE_UPDATE" = "true" ]; then
     fi
 fi
 
-# 🚨 중요: Git 업데이트 완료 후 MQTT 응답 전송
-echo "[INFO] Git 업데이트 완료. MQTT 응답 전송 중..." | tee -a "$LOG_FILE"
-
-# MQTT 응답 전송 (Python 스크립트 사용)
-python3 << EOF
-import json
-import time
-import subprocess
-
-# 응답 데이터
-response_data = {
-    'update_id': '$UPDATE_ID',
-    'hub_id': '$HUB_ID',
-    'timestamp': int(time.time()),
-    'command': 'git_update',
-    'status': 'success',
-    'message': 'Git update completed successfully. Latest commit: $LATEST_COMMIT',
-    'branch': '$BRANCH',
-    'force_update': '$FORCE_UPDATE',
-    'latest_commit': '$LATEST_COMMIT'
-}
-
-# MQTT 응답 전송 (mosquitto_pub 사용)
-response_topic = f"matterhub/{'$HUB_ID'}/update/response"
-try:
-    subprocess.run([
-        'mosquitto_pub',
-        '-h', 'localhost',  # MQTT 브로커 주소
-        '-t', response_topic,
-        '-m', json.dumps(response_data)
-    ], check=True)
-    print(f"✅ MQTT 응답 전송 완료: success")
-except Exception as e:
-    print(f"❌ MQTT 응답 전송 실패: {e}")
-EOF
-
-# 🚨 중요: MQTT 응답 전송 후 20초 대기
-echo "[INFO] MQTT 응답 전송 완료. 20초 대기 중..." | tee -a "$LOG_FILE"
-sleep 20
+# 🚨 중요: Git 업데이트 완료 (MQTT 응답은 mqtt.py에서 처리)
+echo "[INFO] Git 업데이트 완료. PM2 재시작 준비 중..." | tee -a "$LOG_FILE"
 
 # PM2 경로 설정
 PM2="/home/hyodol/.nvm/versions/node/v22.17.0/bin/pm2"
