@@ -79,6 +79,9 @@ class StateChangeDetector:
             'sensor.smart_presence_sensor_jodo_3'
         }
         
+        # 알림 감지용 배터리 키 목록
+        self.battery_keys = ["battery", "battery_level", "battery_percentage"]
+        
     def detect_changes(self, current_states):
         """상태 변경사항 감지 (sensor.로 시작하는 디바이스는 state 변화 무시)"""
         changes = []
@@ -126,6 +129,188 @@ class StateChangeDetector:
                 self.last_states[entity_id] = current_state
         
         return len(changes) > 0, changes
+
+def detect_and_publish_alerts(states, managed_devices=None):
+    """
+    기기 상태에서 알림 조건을 감지하고 이벤트를 발행하는 함수
+    
+    Args:
+        states: HA /api/states 응답에서 필터링된 엔트리 리스트
+        managed_devices: devices.json에 등록된 entity_id set (없으면 전체 허용)
+    """
+    try:
+        alerts = []
+        now = int(time.time())
+        
+        for state in states:
+            entity_id = state.get('entity_id', '')
+            if not entity_id:
+                continue
+                
+            # 관리되는 디바이스만 처리 (managed_devices가 None이면 전체)
+            if managed_devices is not None and entity_id not in managed_devices:
+                continue
+            
+            current_state = state.get('state')
+            attributes = state.get('attributes', {}) or {}
+            
+            # 1) 기기 unavailable 감지
+            if isinstance(current_state, str) and current_state.lower() == "unavailable":
+                alerts.append({
+                    "entity_id": entity_id,
+                    "alert_type": "UNAVAILABLE",
+                    "current_state": current_state,
+                    "battery": None,
+                    "attributes": attributes
+                })
+            
+            # 2) 배터리 0% 감지
+            for battery_key in state_detector.battery_keys:
+                if battery_key in attributes:
+                    try:
+                        battery_value = int(attributes[battery_key])
+                        if battery_value == 0:
+                            alerts.append({
+                                "entity_id": entity_id,
+                                "alert_type": "BATTERY_EMPTY",
+                                "current_state": current_state,
+                                "battery": battery_value,
+                                "attributes": attributes
+                            })
+                            break  # 하나의 배터리 키에서 0% 발견하면 중단
+                    except (ValueError, TypeError):
+                        continue  # 숫자 변환 실패 시 무시
+        
+        # 감지된 알림 처리
+        for alert in alerts:
+            try:
+                # 알림 페이로드 구성
+                alert_payload = {
+                    "hub_id": matterhub_id,
+                    "ts": now,
+                    "entity_id": alert["entity_id"],
+                    "alert_type": alert["alert_type"],
+                    "prev_state": state_detector.last_states.get(alert["entity_id"]),
+                    "current_state": alert["current_state"],
+                    "battery": alert["battery"],
+                    "attributes": alert["attributes"]
+                }
+                
+                # 로컬 웹훅 즉시 호출 (notifications.json 기반)
+                send_local_webhook_notification(alert_payload)
+                
+                # AWS IoT Core로 이벤트 발행
+                publish_alert_event(alert_payload)
+                
+                print(f"🚨 알림 감지 및 발행: {alert['alert_type']} - {alert['entity_id']}")
+                
+            except Exception as e:
+                print(f"❌ 알림 처리 실패: {alert['entity_id']} - {e}")
+                
+    except Exception as e:
+        print(f"❌ 알림 감지 함수 실행 실패: {e}")
+
+def send_local_webhook_notification(alert_payload):
+    """
+    notifications.json 파일을 기반으로 로컬 웹훅 알림 전송
+    환경변수로 설정된 기본 웹훅도 함께 전송
+    """
+    try:
+        webhooks_to_call = []
+        
+        # 1. 환경변수에서 기본 웹훅 가져오기
+        default_webhook = os.environ.get('DEFAULT_ALERT_WEBHOOK')
+        if default_webhook:
+            webhooks_to_call.append({
+                "webhook": default_webhook,
+                "source": "environment"
+            })
+        
+        # 2. notifications.json에서 웹훅 가져오기
+        if notifications_file_path and os.path.exists(notifications_file_path):
+            with open(notifications_file_path, 'r', encoding='utf-8') as f:
+                notification_rules = json.load(f) or []
+        
+            for rule in notification_rules:
+                try:
+                    # 규칙 매칭 확인
+                    device_match = (
+                        rule.get("device") == alert_payload["entity_id"] or 
+                        rule.get("device") == "*"
+                    )
+                    
+                    status_match = (
+                        rule.get("status") == alert_payload["alert_type"] or
+                        rule.get("status") == alert_payload["current_state"] or
+                        rule.get("status") == "*"
+                    )
+                    
+                    if device_match and status_match and rule.get("webhook"):
+                        webhooks_to_call.append({
+                            "webhook": rule["webhook"],
+                            "source": f"notifications.json (rule: {rule.get('id', 'unknown')})"
+                        })
+                        
+                except Exception as e:
+                    print(f"❌ 알림 규칙 처리 실패: {rule.get('id', 'unknown')} - {e}")
+        
+        # 3. 모든 웹훅 호출
+        webhook_payload = {
+            "title": f"[{alert_payload['alert_type']}] {alert_payload['entity_id']}",
+            "hub_id": alert_payload["hub_id"],
+            "entity_id": alert_payload["entity_id"],
+            "alert_type": alert_payload["alert_type"],
+            "current_state": alert_payload["current_state"],
+            "battery": alert_payload["battery"],
+            "timestamp": alert_payload["ts"],
+            "attributes": alert_payload["attributes"]
+        }
+        
+        for webhook_info in webhooks_to_call:
+            try:
+                webhook_url = webhook_info["webhook"]
+                source = webhook_info["source"]
+                
+                response = requests.post(
+                    webhook_url, 
+                    json=webhook_payload, 
+                    timeout=3,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 200:
+                    print(f"✅ 로컬 웹훅 전송 성공: {source}")
+                else:
+                    print(f"⚠️ 로컬 웹훅 응답 오류: {source} - {response.status_code}")
+                    
+            except Exception as e:
+                print(f"❌ 로컬 웹훅 전송 실패: {webhook_info.get('source', 'unknown')} - {e}")
+                
+    except Exception as e:
+        print(f"❌ 로컬 알림 설정 읽기 실패: {e}")
+
+def publish_alert_event(alert_payload):
+    """
+    AWS IoT Core로 알림 이벤트 발행
+    """
+    try:
+        if not global_mqtt_connection or not is_connected_flag:
+            print("❌ MQTT 연결 없음 - 알림 이벤트 발행 스킵")
+            return
+            
+        # 알림 이벤트 토픽으로 발행
+        alert_topic = f"matterhub/{matterhub_id}/event/device_alerts"
+        
+        global_mqtt_connection.publish(
+            topic=alert_topic,
+            payload=json.dumps(alert_payload),
+            qos=mqtt.QoS.AT_MOST_ONCE  # QoS0으로 비용 최소화
+        )
+        
+        print(f"📡 AWS IoT Core 알림 이벤트 발행: {alert_topic}")
+        
+    except Exception as e:
+        print(f"❌ AWS IoT Core 알림 이벤트 발행 실패: {e}")
 
 # 전역 변수
 state_detector = StateChangeDetector()
@@ -541,6 +726,9 @@ def update_device_shadow():
             
             # 변경사항 감지 (관리되는 디바이스만)
             has_changes, changes = state_detector.detect_changes(filtered_states)
+            
+            # 🚨 알림 감지 및 발행 (관리되는 디바이스만)
+            detect_and_publish_alerts(filtered_states, managed_devices)
             
             # 변경사항이 있거나 heartbeat 시간이 되었으면 업데이트
             should_update = has_changes or (current_time - last_heartbeat >= HEARTBEAT_INTERVAL)

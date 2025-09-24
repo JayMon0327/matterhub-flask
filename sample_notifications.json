@@ -1,0 +1,30 @@
+[
+  {
+    "id": "alert_unavailable",
+    "device": "*",
+    "status": "UNAVAILABLE",
+    "webhook": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+    "description": "모든 기기 unavailable 상태 알림"
+  },
+  {
+    "id": "alert_battery_empty",
+    "device": "*", 
+    "status": "BATTERY_EMPTY",
+    "webhook": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+    "description": "모든 기기 배터리 0% 알림"
+  },
+  {
+    "id": "alert_specific_device",
+    "device": "binary_sensor.living_motion",
+    "status": "*",
+    "webhook": "https://example.com/webhook",
+    "description": "특정 기기 모든 상태 알림"
+  },
+  {
+    "id": "local_webhook",
+    "device": "*",
+    "status": "*",
+    "webhook": "http://localhost:8100/local/api/webhook",
+    "description": "로컬 웹훅 테스트"
+  }
+]
