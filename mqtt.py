@@ -181,9 +181,14 @@ def detect_and_publish_alerts(states, managed_devices=None):
                     except (ValueError, TypeError):
                         continue  # 숫자 변환 실패 시 무시
         
-        # 감지된 알림 처리
+        # 감지된 알림 처리 (상태 전이 기반 1회 트리거)
         for alert in alerts:
             try:
+                key = (alert["entity_id"], alert["alert_type"])
+                # 이미 활성 알림이면 스킵
+                if key in active_alerts:
+                    continue
+
                 # 알림 페이로드 구성
                 alert_payload = {
                     "hub_id": matterhub_id,
@@ -203,6 +208,9 @@ def detect_and_publish_alerts(states, managed_devices=None):
                 publish_alert_event(alert_payload)
                 
                 print(f"🚨 알림 감지 및 발행: {alert['alert_type']} - {alert['entity_id']}")
+
+                # 활성 알림으로 등록
+                active_alerts[key] = now
                 
             except Exception as e:
                 print(f"❌ 알림 처리 실패: {alert['entity_id']} - {e}")
@@ -314,6 +322,8 @@ def publish_alert_event(alert_payload):
 
 # 전역 변수
 state_detector = StateChangeDetector()
+# 알림 중복 방지용 캐시: {(entity_id, alert_type): first_detected_ts}
+active_alerts = {}
 last_heartbeat = 0
 HEARTBEAT_INTERVAL = 3600  # 30분 → 60분으로 변경 (비용 절감)
 last_shadow_update = 0  # Shadow 업데이트 rate-limit용
@@ -726,9 +736,41 @@ def update_device_shadow():
             
             # 변경사항 감지 (관리되는 디바이스만)
             has_changes, changes = state_detector.detect_changes(filtered_states)
-            
+
             # 🚨 알림 감지 및 발행 (관리되는 디바이스만)
             detect_and_publish_alerts(filtered_states, managed_devices)
+
+            # 🚨 활성 알림 해제 처리: 정상 상태로 복귀하면 캐시에서 제거
+            try:
+                to_remove = []
+                for (eid, atype), first_ts in active_alerts.items():
+                    # 현재 상태에서 해당 엔티티를 찾아 상태 확인
+                    found = next((s for s in filtered_states if s.get('entity_id') == eid), None)
+                    if not found:
+                        # 목록에 없으면 보류 (HA에서 사라진 상태일 수 있음)
+                        continue
+                    st = (found.get('state') or '').lower()
+                    attrs = found.get('attributes', {}) or {}
+                    if atype == 'UNAVAILABLE' and st != 'unavailable':
+                        to_remove.append((eid, atype))
+                    elif atype == 'BATTERY_EMPTY':
+                        # 배터리 키 중 하나라도 1 이상이면 해제
+                        ok = False
+                        for k in state_detector.battery_keys:
+                            if k in attrs:
+                                try:
+                                    if int(attrs[k]) > 0:
+                                        ok = True
+                                        break
+                                except (ValueError, TypeError):
+                                    pass
+                        if ok:
+                            to_remove.append((eid, atype))
+                for key in to_remove:
+                    active_alerts.pop(key, None)
+                    print(f"✅ 알림 해제: {key}")
+            except Exception as e:
+                print(f"⚠️ 알림 해제 처리 실패: {e}")
             
             # 변경사항이 있거나 heartbeat 시간이 되었으면 업데이트
             should_update = has_changes or (current_time - last_heartbeat >= HEARTBEAT_INTERVAL)
