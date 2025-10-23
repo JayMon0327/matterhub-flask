@@ -222,6 +222,7 @@ def send_local_webhook_notification(alert_payload):
     """
     notifications.json 파일을 기반으로 로컬 웹훅 알림 전송
     환경변수로 설정된 기본 웹훅도 함께 전송
+    새로운 구조와 기존 구조 모두 지원
     """
     try:
         webhooks_to_call = []
@@ -241,23 +242,48 @@ def send_local_webhook_notification(alert_payload):
         
             for rule in notification_rules:
                 try:
-                    # 규칙 매칭 확인
-                    device_match = (
-                        rule.get("device") == alert_payload["entity_id"] or 
-                        rule.get("device") == "*"
-                    )
+                    # 새로운 구조 지원 (trigger 기반)
+                    if "trigger" in rule and "action" in rule:
+                        trigger = rule.get("trigger", {})
+                        action = rule.get("action", {})
+                        
+                        # 트리거 조건 확인
+                        trigger_match = False
+                        if trigger.get("entity_id") == alert_payload["entity_id"] or trigger.get("entity_id") == "*":
+                            if trigger.get("state") == alert_payload["current_state"] or trigger.get("state") == "*":
+                                trigger_match = True
+                        
+                        # 조건 확인 (condition 배열)
+                        condition_match = True
+                        if "condition" in rule:
+                            for condition in rule["condition"]:
+                                # 현재는 단순히 조건이 있으면 통과 (향후 확장 가능)
+                                pass
+                        
+                        if trigger_match and condition_match and action.get("url"):
+                            webhooks_to_call.append({
+                                "webhook": action["url"],
+                                "source": f"notifications.json (rule: {rule.get('id', 'unknown')})"
+                            })
                     
-                    status_match = (
-                        rule.get("status") == alert_payload["alert_type"] or
-                        rule.get("status") == alert_payload["current_state"] or
-                        rule.get("status") == "*"
-                    )
-                    
-                    if device_match and status_match and rule.get("webhook"):
-                        webhooks_to_call.append({
-                            "webhook": rule["webhook"],
-                            "source": f"notifications.json (rule: {rule.get('id', 'unknown')})"
-                        })
+                    # 기존 구조 지원 (device/status 기반)
+                    elif "device" in rule and "status" in rule:
+                        device_match = (
+                            rule.get("device") == alert_payload["entity_id"] or 
+                            rule.get("device") == "*"
+                        )
+                        
+                        status_match = (
+                            rule.get("status") == alert_payload["alert_type"] or
+                            rule.get("status") == alert_payload["current_state"] or
+                            rule.get("status") == "*"
+                        )
+                        
+                        if device_match and status_match and rule.get("webhook"):
+                            webhooks_to_call.append({
+                                "webhook": rule["webhook"],
+                                "source": f"notifications.json (rule: {rule.get('id', 'unknown')})"
+                            })
                         
                 except Exception as e:
                     print(f"❌ 알림 규칙 처리 실패: {rule.get('id', 'unknown')} - {e}")
