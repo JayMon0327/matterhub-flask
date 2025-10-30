@@ -16,6 +16,8 @@ import json
 import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
+from sub.collector import start_collector
+from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs
 from dotenv import load_dotenv, find_dotenv
 import os, sys
 import subprocess
@@ -35,6 +37,12 @@ notifications_file_path = os.environ.get('notifications_file_path')
 
 HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
+
+# 로그 히스토리 설정
+EDGE_LOG_ROOT = os.environ.get('EDGE_LOG_ROOT', '/var/log/edge-history')
+DEFAULT_WINDOW_HOURS = int(os.environ.get('DEFAULT_WINDOW_HOURS', '24'))
+MAX_LIMIT = int(os.environ.get('MAX_LIMIT', '5000'))
+DEFAULT_LIMIT = int(os.environ.get('DEFAULT_LIMIT', '200'))
 
 
 def config():
@@ -362,6 +370,167 @@ def matterhub_id():
     return jsonify({"matterhub_id": matterhub_id})
 
 
+# ====== 로그 히스토리 조회 API ======
+
+@app.route('/local/api/logs', methods=["GET"])
+def logs():
+    """로그 조회 API"""
+    try:
+        from_str = request.args.get("from")
+        to_str = request.args.get("to")
+        device_ids = request.args.getlist("device_id")
+        status = request.args.get("status")
+        q = request.args.get("q")
+        cursor = request.args.get("cursor")
+        
+        try:
+            limit = int(request.args.get("limit", DEFAULT_LIMIT))
+        except ValueError:
+            limit = DEFAULT_LIMIT
+        limit = max(1, min(limit, MAX_LIMIT))
+        
+        result = read_logs(
+            from_str=from_str,
+            to_str=to_str,
+            device_ids=device_ids,
+            status=status,
+            q=q,
+            cursor=cursor,
+            limit=limit,
+            root=EDGE_LOG_ROOT,
+            default_window_hours=DEFAULT_WINDOW_HOURS
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/logs/tail', methods=["GET"])
+def logs_tail():
+    """최근 로그 조회 (tail)"""
+    try:
+        try:
+            since_sec = int(request.args.get("since", "3600"))
+        except ValueError:
+            since_sec = 3600
+        
+        try:
+            limit = int(request.args.get("limit", DEFAULT_LIMIT))
+        except ValueError:
+            limit = DEFAULT_LIMIT
+        limit = max(1, min(limit, MAX_LIMIT))
+        
+        device_ids = request.args.getlist("device_id")
+        status = request.args.get("status")
+        q = request.args.get("q")
+        
+        result = read_tail_logs(
+            since_sec=since_sec,
+            device_ids=device_ids,
+            status=status,
+            q=q,
+            limit=limit,
+            root=EDGE_LOG_ROOT
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/logs/stats', methods=["GET"])
+def logs_stats():
+    """로그 통계"""
+    try:
+        from_str = request.args.get("from")
+        to_str = request.args.get("to")
+        
+        result = get_log_stats(
+            from_str=from_str,
+            to_str=to_str,
+            root=EDGE_LOG_ROOT,
+            default_window_hours=DEFAULT_WINDOW_HOURS
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/logs/files', methods=["GET"])
+def logs_files():
+    """로그 파일 목록"""
+    try:
+        from_str = request.args.get("from")
+        to_str = request.args.get("to")
+        
+        result = list_log_files(
+            from_str=from_str,
+            to_str=to_str,
+            root=EDGE_LOG_ROOT,
+            default_window_hours=DEFAULT_WINDOW_HOURS
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/logs/weekly', methods=["GET"])
+def logs_weekly():
+    """최근 일주일 로그 조회 (매일 12:00시 대표 로그)"""
+    try:
+        try:
+            limit = int(request.args.get("limit", DEFAULT_LIMIT))
+        except ValueError:
+            limit = DEFAULT_LIMIT
+        limit = max(1, min(limit, MAX_LIMIT))
+        
+        device_ids = request.args.getlist("device_id")
+        status = request.args.get("status")
+        q = request.args.get("q")
+        
+        result = read_daily_sample_logs(
+            days=7,
+            device_ids=device_ids,
+            status=status,
+            q=q,
+            limit=limit,
+            root=EDGE_LOG_ROOT,
+            sample_hour=12
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/logs/monthly', methods=["GET"])
+def logs_monthly():
+    """최근 한달 로그 조회 (매일 12:00시 대표 로그)"""
+    try:
+        try:
+            limit = int(request.args.get("limit", DEFAULT_LIMIT))
+        except ValueError:
+            limit = DEFAULT_LIMIT
+        limit = max(1, min(limit, MAX_LIMIT))
+        
+        device_ids = request.args.getlist("device_id")
+        status = request.args.get("status")
+        q = request.args.get("q")
+        
+        result = read_daily_sample_logs(
+            days=30,
+            device_ids=device_ids,
+            status=status,
+            q=q,
+            limit=limit,
+            root=EDGE_LOG_ROOT,
+            sample_hour=12
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
     
 config()
 
@@ -371,6 +540,13 @@ p = threading.Thread(target=periodic_scheduler)
 p.start()
 o = threading.Thread(target=one_time_scheduler, args=[one_time])
 o.start()
+
+# 상태 히스토리 수집기 시작
+try:
+    collector_thread = start_collector()
+    print("상태 히스토리 수집기가 시작되었습니다.")
+except Exception as e:
+    print(f"상태 히스토리 수집기 시작 실패: {e}")
 
 if __name__ == '__main__':
     app.run('0.0.0.0',debug=True,port=8100)

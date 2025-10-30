@@ -1,0 +1,583 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "기기 상태 히스토리 API",
+    "description": "Home Assistant 기기 상태 히스토리 조회 API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8100",
+      "description": "로컬 개발 서버"
+    }
+  ],
+  "paths": {
+    "/local/api/logs": {
+      "get": {
+        "summary": "로그 조회",
+        "description": "시간 범위와 필터 조건으로 로그를 조회합니다",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "시작 시간 (ISO8601 형식)",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "example": "2025-10-29T00:00:00Z"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "종료 시간 (ISO8601 형식)",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "example": "2025-10-29T23:59:59Z"
+            }
+          },
+          {
+            "name": "device_id",
+            "in": "query",
+            "description": "기기 ID 필터 (다중 지정 가능)",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "상태 필터",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "문자열 포함 검색",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "페이지네이션 커서",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "반환 개수 제한 (기본: 200, 최대: 5000)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogItem"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "description": "다음 페이지 조회용 커서"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "잘못된 요청",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/local/api/logs/weekly": {
+      "get": {
+        "summary": "최근 일주일 로그 조회",
+        "description": "최근 7일 동안 매일 12:00시의 대표 로그를 조회합니다",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "query",
+            "description": "기기 ID 필터 (다중 지정 가능)",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "상태 필터",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "문자열 포함 검색",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "반환 개수 제한 (기본: 200, 최대: 5000)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogItem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/local/api/logs/monthly": {
+      "get": {
+        "summary": "최근 한달 로그 조회",
+        "description": "최근 30일 동안 매일 12:00시의 대표 로그를 조회합니다",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "query",
+            "description": "기기 ID 필터 (다중 지정 가능)",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "상태 필터",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "문자열 포함 검색",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "반환 개수 제한 (기본: 200, 최대: 5000)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogItem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/local/api/logs/tail": {
+      "get": {
+        "summary": "최근 로그 조회",
+        "description": "최근 N초간의 로그를 조회합니다 (최신순)",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "초 단위 (기본: 3600 = 1시간)",
+            "schema": {
+              "type": "integer",
+              "default": 3600
+            }
+          },
+          {
+            "name": "device_id",
+            "in": "query",
+            "description": "기기 ID 필터 (다중 지정 가능)",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "상태 필터",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "문자열 포함 검색",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "반환 개수 (기본: 200)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogItem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/local/api/logs/stats": {
+      "get": {
+        "summary": "로그 통계",
+        "description": "시간별 로그 개수 통계를 조회합니다",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "시작 시간 (ISO8601 형식)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "종료 시간 (ISO8601 형식)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "hour": {
+                            "type": "string",
+                            "format": "date-time",
+                            "example": "2025-10-29T13:00:00Z"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "example": 1500
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/local/api/logs/files": {
+      "get": {
+        "summary": "파일 목록",
+        "description": "시간 범위에 해당하는 로그 파일 목록을 조회합니다",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "시작 시간 (ISO8601 형식)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "종료 시간 (ISO8601 형식)",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "example": "/var/log/edge-history/2025/10/29/13.ndjson"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "example": 512000
+                          },
+                          "mtime": {
+                            "type": "string",
+                            "format": "date-time",
+                            "example": "2025-10-29T13:00:00Z"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LogItem": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC 타임스탬프 (ISO8601)",
+            "example": "2025-10-29T13:00:00Z"
+          },
+          "device_id": {
+            "type": "string",
+            "description": "기기 ID (entity_id)",
+            "example": "light.living_room"
+          },
+          "status": {
+            "type": "string",
+            "description": "현재 상태",
+            "example": "on"
+          },
+          "metrics": {
+            "type": ["object", "null"],
+            "description": "주요 메트릭 (states 모드에서만 주로 존재)",
+            "properties": {
+              "temperature": {
+                "type": "number",
+                "example": 22.5
+              },
+              "humidity": {
+                "type": "number",
+                "example": 55
+              },
+              "battery": {
+                "type": "number",
+                "example": 80
+              },
+              "brightness": {
+                "type": "integer",
+                "example": 255
+              }
+            }
+          },
+          "attributes": {
+            "type": ["object", "null"],
+            "description": "전체 속성 (History 모드에서 HISTORY_NO_ATTRIBUTES=true일 경우 null)",
+            "additionalProperties": true
+          },
+          "source": {
+            "type": "string",
+            "description": "데이터 소스",
+            "example": "ha-history-api",
+            "enum": ["edge-api", "ha-history-api"]
+          },
+          "version": {
+            "type": "string",
+            "description": "데이터 버전",
+            "example": "2.0",
+            "enum": ["1.0", "2.0"]
+          }
+        },
+        "required": ["ts", "device_id", "status", "source", "version"]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "오류 메시지"
+          }
+        }
+      }
+    }
+  }
+}
