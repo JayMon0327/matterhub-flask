@@ -399,18 +399,31 @@ def write_checkpoint(dt: datetime) -> None:
 
 
 def collect_history_window(start_dt: datetime, end_dt: datetime, entities: Set[str]) -> None:
+    if not entities:
+        print("경고: 수집할 엔티티가 없습니다")
+        logger.warning("수집할 엔티티가 없습니다")
+        return
     raw = fetch_history(start_dt, end_dt, entities)
     if raw is None:
+        print("경고: 히스토리 수집 실패 (API 호출 실패)")
         logger.warning("히스토리 수집 실패")
         return
     records = list(flatten_history(raw))
+    print(f"히스토리 이벤트: {len(records)}개")
+    logger.info(f"히스토리 이벤트: {len(records)}개")
     if not records:
+        print("히스토리 이벤트 없음 (해당 시간대에 변경사항 없음)")
         logger.info("히스토리 이벤트 없음")
         write_checkpoint(end_dt)
         return
     ok = dedup_and_atomic_append(start_dt, records)
     if ok:
+        print(f"히스토리 저장 성공: {len(records)}개 이벤트")
+        logger.info(f"히스토리 저장 성공: {len(records)}개 이벤트")
         write_checkpoint(end_dt)
+    else:
+        print("경고: 히스토리 저장 실패")
+        logger.warning("히스토리 저장 실패")
 
 
 def backfill_from_checkpoint(now_utc: datetime, entities: Set[str]) -> None:
@@ -435,34 +448,61 @@ def collect_hourly() -> None:
     # 현재 시각의 정시로 내림
     hour_floor = now.replace(minute=0, second=0, microsecond=0)
     
+    print(f"상태 수집 시작: {hour_floor.isoformat()}")
     logger.info(f"상태 수집 시작: {hour_floor.isoformat()}")
     
     # 상태 수집
     states = collect_device_states()
     if states is None:
+        print("경고: 상태 수집 실패 (None 반환)")
+        logger.warning("상태 수집 실패 (None 반환)")
         return
+    
+    print(f"수집된 상태: {len(states)}개")
+    logger.info(f"수집된 상태: {len(states)}개")
     
     # 필터링 (선택사항)
     filtered_states = filter_states(states)
+    print(f"필터링 후: {len(filtered_states)}개")
+    logger.info(f"필터링 후: {len(filtered_states)}개")
     
     # 파일 저장
-    save_to_file(filtered_states, hour_floor)
+    result = save_to_file(filtered_states, hour_floor)
+    if result:
+        print(f"저장 완료: {len(filtered_states)}개 레코드")
+        logger.info(f"저장 완료: {len(filtered_states)}개 레코드")
+    else:
+        print("경고: 저장 실패")
+        logger.warning("저장 실패")
 
 
 def collector_thread():
     """수집기 스레드 메인 루프 (History 모드/States 모드)"""
+    print("상태 히스토리 수집기 시작")
+    print(f"저장 경로: {EDGE_LOG_ROOT}")
     logger.info("상태 히스토리 수집기 시작")
     logger.info(f"저장 경로: {EDGE_LOG_ROOT}")
 
     if USE_HISTORY_MODE:
+        print("모드: HISTORY (Home Assistant /api/history/period)")
         logger.info("모드: HISTORY (Home Assistant /api/history/period)")
         try:
             entities = build_entity_list()
+            print(f"수집 대상 엔티티: {len(entities)}개")
+            logger.info(f"수집 대상 엔티티: {len(entities)}개")
+            if not entities:
+                print("경고: 수집할 엔티티가 없습니다. devices.json 또는 HISTORY_ENTITIES 확인 필요")
+                logger.warning("수집할 엔티티가 없습니다")
             now = datetime.now(timezone.utc)
             # 백필 먼저 수행
+            print("백필 시작...")
+            logger.info("백필 시작")
             backfill_from_checkpoint(now, entities)
+            print("백필 완료")
+            logger.info("백필 완료")
         except Exception as e:
-            logger.error(f"백필 초기화 실패: {e}")
+            print(f"백필 초기화 실패: {e}")
+            logger.error(f"백필 초기화 실패: {e}", exc_info=True)
 
         # 주기 실행: 매 정시 윈도우 수집
         while True:
@@ -476,17 +516,25 @@ def collector_thread():
                     time.sleep(wait_seconds)
                 # 수집 실행
                 entities = build_entity_list()
+                print(f"히스토리 수집 실행: {to_utc_iso(start_dt)} ~ {to_utc_iso(end_dt)}, 엔티티 {len(entities)}개")
+                logger.info(f"히스토리 수집 실행: {to_utc_iso(start_dt)} ~ {to_utc_iso(end_dt)}, 엔티티 {len(entities)}개")
                 collect_history_window(start_dt, end_dt, entities)
             except Exception as e:
                 logger.error(f"히스토리 수집 루프 오류: {e}", exc_info=True)
                 time.sleep(COLLECTION_INTERVAL)
     else:
+        print("모드: STATES (Home Assistant /api/states)")
         logger.info("모드: STATES (Home Assistant /api/states)")
         # 시작 시 즉시 한 번 수집
         try:
+            print("초기 수집 시작...")
+            logger.info("초기 수집 시작")
             collect_hourly()
+            print("초기 수집 완료")
+            logger.info("초기 수집 완료")
         except Exception as e:
-            logger.error(f"초기 수집 실패: {e}")
+            print(f"초기 수집 실패: {e}")
+            logger.error(f"초기 수집 실패: {e}", exc_info=True)
 
         # 주기적 수집
         while True:
@@ -497,10 +545,13 @@ def collector_thread():
                            timedelta(hours=1))
                 wait_seconds = (next_hour - now).total_seconds()
                 
+                print(f"다음 수집까지 {wait_seconds:.0f}초 대기")
                 logger.info(f"다음 수집까지 {wait_seconds:.0f}초 대기")
                 time.sleep(wait_seconds)
                 
                 # 수집 실행
+                print("정시 수집 실행")
+                logger.info("정시 수집 실행")
                 collect_hourly()
                 
             except Exception as e:
