@@ -388,15 +388,37 @@ python3 -m sub.collector
 ```
 
 ### 수집이 되지 않는 경우
+
+#### 권한 오류 해결 (Permission denied)
+```bash
+# 에러: [Errno 13] Permission denied: '/var/log/edge-history'
+
+# 해결 방법 1: 디렉토리 생성 및 권한 설정
+sudo mkdir -p /var/log/edge-history
+sudo chown -R $USER:$USER /var/log/edge-history
+sudo chmod -R 755 /var/log/edge-history
+
+# 해결 방법 2: 환경 변수로 다른 경로 지정 (권장)
+# .env 파일 또는 환경 변수 설정
+export EDGE_LOG_ROOT=$HOME/edge-history
+# 또는
+export EDGE_LOG_ROOT=/home/hyodol/edge-history
+
+# 디렉토리 생성
+mkdir -p $EDGE_LOG_ROOT
+```
+
+#### 기타 확인 사항
 1. 환경 변수 확인:
    ```bash
    echo $HA_host
    echo $hass_token
+   echo $EDGE_LOG_ROOT  # 로그 저장 경로 확인
    ```
 2. 권한 확인:
    ```bash
-   ls -ld /var/log/edge-history
-   mkdir -p /var/log/edge-history  # 디렉토리가 없으면 생성
+   ls -ld $EDGE_LOG_ROOT
+   mkdir -p $EDGE_LOG_ROOT  # 디렉토리가 없으면 생성
    ```
 3. 로그 확인: Flask 애플리케이션 로그에서 "상태 히스토리 수집기 시작됨" 메시지 확인
 4. PM2 재시작:
