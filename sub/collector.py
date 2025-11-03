@@ -31,9 +31,11 @@ COLLECTION_INTERVAL = int(os.environ.get('COLLECTION_INTERVAL', '3600'))  # 기�
 
 # History 모드 환경 변수 (기본값 포함)
 USE_HISTORY_MODE = os.environ.get('USE_HISTORY_MODE', 'false').lower() == 'true'
+USE_PERIOD_HISTORY_MODE = os.environ.get('USE_PERIOD_HISTORY_MODE', 'false').lower() == 'true'  # Period 히스토리 모드
+PERIOD_HISTORY_DAYS = 10  # 하드코딩: 10일치 히스토리
 HISTORY_WINDOW_MINUTES = int(os.environ.get('HISTORY_WINDOW_MINUTES', '60'))
-HISTORY_MINIMAL_RESPONSE = os.environ.get('HISTORY_MINIMAL_RESPONSE', 'true').lower() == 'true'
-HISTORY_NO_ATTRIBUTES = os.environ.get('HISTORY_NO_ATTRIBUTES', 'true').lower() == 'true'
+HISTORY_MINIMAL_RESPONSE = True  # 하드코딩: minimal_response 사용
+HISTORY_NO_ATTRIBUTES = True  # 하드코딩: no_attributes 사용
 HISTORY_SIGNIFICANT_ONLY = os.environ.get('HISTORY_SIGNIFICANT_ONLY', 'true').lower() == 'true'
 HISTORY_ENTITIES = os.environ.get('HISTORY_ENTITIES', '')  # comma-separated
 HISTORY_CHECKPOINT_PATH = os.environ.get('HISTORY_CHECKPOINT_PATH', os.path.join(EDGE_LOG_ROOT, '.checkpoint'))
@@ -61,6 +63,12 @@ def get_temp_path(dt: datetime) -> str:
     """임시 파일 경로 반환"""
     hour_path = get_hour_path(dt)
     return f"{hour_path}.part"
+
+
+def get_period_history_path(dt: datetime) -> str:
+    """기간 히스토리 JSON 파일 경로 반환 (예: 2025-11-03T05:00:00Z.json)"""
+    timestamp = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return os.path.join(EDGE_LOG_ROOT, f"{timestamp}.json")
 
 
 # =========================
@@ -461,6 +469,59 @@ def collect_history_window(start_dt: datetime, end_dt: datetime, entities: Set[s
         logger.warning("히스토리 저장 실패")
 
 
+def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
+    """최근 N일치 히스토리를 수집하여 JSON 파일로 저장"""
+    if not entities:
+        print("경고: 수집할 엔티티가 없습니다")
+        logger.warning("수집할 엔티티가 없습니다")
+        return False
+    
+    # 시작/종료 시간 계산
+    end_dt = hour_floor(dt)
+    start_dt = end_dt - timedelta(days=PERIOD_HISTORY_DAYS)
+    
+    start_iso = to_utc_iso(start_dt)
+    end_iso = to_utc_iso(end_dt)
+    
+    print(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개, {PERIOD_HISTORY_DAYS}일치")
+    logger.info(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개")
+    
+    # API 호출
+    raw = fetch_history(start_dt, end_dt, entities)
+    if raw is None:
+        print("경고: 기간 히스토리 수집 실패 (API 호출 실패)")
+        logger.warning("기간 히스토리 수집 실패")
+        return False
+    
+    # 파일 저장 경로
+    final_path = get_period_history_path(dt)
+    temp_path = f"{final_path}.part"
+    ensure_directory(os.path.dirname(final_path))
+    
+    try:
+        # JSON 파일로 저장 (pretty print)
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(raw, f, indent=2, ensure_ascii=False)
+        
+        # 원자적 rename
+        os.rename(temp_path, final_path)
+        
+        file_size = os.path.getsize(final_path)
+        print(f"기간 히스토리 저장 완료: {final_path} ({file_size} bytes)")
+        logger.info(f"기간 히스토리 저장 완료: {final_path} ({file_size} bytes)")
+        return True
+        
+    except Exception as e:
+        print(f"기간 히스토리 저장 실패: {e}")
+        logger.error(f"기간 히스토리 저장 실패: {e}", exc_info=True)
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except:
+            pass
+        return False
+
+
 def backfill_from_checkpoint(now_utc: datetime, entities: Set[str]) -> None:
     end_now = hour_floor(now_utc)
     last = read_checkpoint()
@@ -512,13 +573,59 @@ def collect_hourly() -> None:
 
 
 def collector_thread():
-    """수집기 스레드 메인 루프 (History 모드/States 모드)"""
+    """수집기 스레드 메인 루프 (Period History 모드/History 모드/States 모드)"""
     print("상태 히스토리 수집기 시작")
     print(f"저장 경로: {EDGE_LOG_ROOT}")
     logger.info("상태 히스토리 수집기 시작")
     logger.info(f"저장 경로: {EDGE_LOG_ROOT}")
 
-    if USE_HISTORY_MODE:
+    if USE_PERIOD_HISTORY_MODE:
+        print(f"모드: PERIOD HISTORY (최근 {PERIOD_HISTORY_DAYS}일치 JSON 파일로 저장)")
+        logger.info(f"모드: PERIOD HISTORY (최근 {PERIOD_HISTORY_DAYS}일치 JSON 파일로 저장)")
+        try:
+            entities = build_entity_list()
+            print(f"수집 대상 엔티티: {len(entities)}개")
+            logger.info(f"수집 대상 엔티티: {len(entities)}개")
+            if not entities:
+                print("경고: 수집할 엔티티가 없습니다. devices.json 또는 HISTORY_ENTITIES 확인 필요")
+                logger.warning("수집할 엔티티가 없습니다")
+            else:
+                # 시작 시 즉시 한 번 수집
+                now = datetime.now(timezone.utc)
+                print("초기 기간 히스토리 수집 시작...")
+                logger.info("초기 기간 히스토리 수집 시작")
+                collect_period_history(now, entities)
+                print("초기 기간 히스토리 수집 완료")
+                logger.info("초기 기간 히스토리 수집 완료")
+        except Exception as e:
+            print(f"기간 히스토리 초기화 실패: {e}")
+            logger.error(f"기간 히스토리 초기화 실패: {e}", exc_info=True)
+
+        # 주기 실행: 매 정시 기간 히스토리 수집
+        while True:
+            try:
+                # 다음 정시까지 대기
+                now = datetime.now(timezone.utc)
+                next_hour = (now.replace(minute=0, second=0, microsecond=0) + 
+                           timedelta(hours=1))
+                wait_seconds = (next_hour - now).total_seconds()
+                
+                print(f"다음 기간 히스토리 수집까지 {wait_seconds:.0f}초 대기")
+                logger.info(f"다음 기간 히스토리 수집까지 {wait_seconds:.0f}초 대기")
+                time.sleep(wait_seconds)
+                
+                # 수집 실행
+                now = datetime.now(timezone.utc)
+                entities = build_entity_list()
+                print("정시 기간 히스토리 수집 실행")
+                logger.info("정시 기간 히스토리 수집 실행")
+                collect_period_history(now, entities)
+                
+            except Exception as e:
+                print(f"기간 히스토리 수집 루프 오류: {e}")
+                logger.error(f"기간 히스토리 수집 루프 오류: {e}", exc_info=True)
+                time.sleep(COLLECTION_INTERVAL)
+    elif USE_HISTORY_MODE:
         print("모드: HISTORY (Home Assistant /api/history/period)")
         logger.info("모드: HISTORY (Home Assistant /api/history/period)")
         try:
