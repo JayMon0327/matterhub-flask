@@ -171,24 +171,59 @@ def format_state_record(state: Dict[str, Any], ts: datetime) -> Dict[str, Any]:
     current_state = state.get('state', '')
     attributes = state.get('attributes', {})
     
-    # metrics 추출 (attributes에서 주요 메트릭 선택)
+    # metrics 추출
     metrics = {}
+    
+    # 1) attributes에서 직접 메트릭 추출
     for key in ['temperature', 'humidity', 'battery', 'battery_level', 
-                'brightness', 'voltage', 'power', 'current']:
+                'brightness', 'voltage', 'power', 'current', 'current_position']:
         if key in attributes:
             try:
-                # 숫자 타입으로 변환 시도
                 value = attributes[key]
                 if isinstance(value, (int, float)):
                     metrics[key] = value
                 elif isinstance(value, str):
-                    # 문자열 숫자 변환 시도
                     try:
                         metrics[key] = float(value) if '.' in value else int(value)
                     except ValueError:
-                        metrics[key] = value
+                        pass
             except Exception:
                 pass
+    
+    # 2) state 값을 device_class 기준으로 metrics에 추가
+    device_class = attributes.get('device_class', '')
+    if current_state and current_state not in ['unavailable', 'unknown', 'on', 'off', 'open', 'closed']:
+        try:
+            # state를 숫자로 변환 시도
+            state_value = float(current_state) if '.' in current_state else int(current_state)
+            
+            # device_class 기반으로 metrics 키 결정
+            if device_class == 'temperature':
+                metrics['temperature'] = state_value
+            elif device_class == 'humidity':
+                metrics['humidity'] = state_value
+            elif device_class == 'illuminance':
+                metrics['brightness'] = state_value
+            elif device_class in ['current', 'voltage', 'power', 'energy']:
+                metrics[device_class] = state_value
+            elif entity_id.startswith('sensor.'):
+                # 센서이지만 device_class가 없는 경우, entity_id 기반으로 추정
+                if 'temp' in entity_id.lower() or 'temperature' in entity_id.lower() or 'ondo' in entity_id.lower():
+                    metrics['temperature'] = state_value
+                elif 'humid' in entity_id.lower() or 'seubdo' in entity_id.lower():
+                    metrics['humidity'] = state_value
+                elif 'bright' in entity_id.lower() or 'jodo' in entity_id.lower():
+                    metrics['brightness'] = state_value
+        except (ValueError, TypeError):
+            # state가 숫자가 아닌 경우 무시
+            pass
+    
+    # 3) attributes에서 추가 메트릭 추출 (current_position 등)
+    if 'current_position' in attributes:
+        try:
+            metrics['current_position'] = int(attributes['current_position'])
+        except (ValueError, TypeError):
+            pass
     
     return {
         "ts": ts.isoformat().replace('+00:00', 'Z'),
