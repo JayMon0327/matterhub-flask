@@ -337,6 +337,56 @@ du -sh /var/log/edge-history
 
 ## 문제 해결
 
+### API 응답이 비어있는 경우 (items: [])
+
+#### 1. 수집기 실행 상태 확인
+```bash
+# PM2 프로세스 확인
+pm2 list
+
+# app.py 로그 확인 (수집기 시작 메시지 확인)
+pm2 logs wm-app | grep -i "히스토리\|history\|수집"
+```
+
+#### 2. 로그 파일 생성 확인
+```bash
+# 로그 디렉토리 확인 (기본: /var/log/edge-history)
+ls -la /var/log/edge-history/
+
+# 또는 환경 변수로 지정한 경로 확인
+# EDGE_LOG_ROOT 환경 변수 확인 필요
+
+# 시간별 파일 확인
+find /var/log/edge-history -name "*.ndjson" -type f | head -10
+```
+
+#### 3. 환경 변수 확인
+```bash
+# .env 파일 확인 또는 환경 변수 확인
+echo $USE_HISTORY_MODE  # true면 History 모드, false면 States 모드
+echo $EDGE_LOG_ROOT     # 로그 저장 경로
+echo $HA_host
+echo $hass_token
+echo $devices_file_path  # 필터링 사용 시
+```
+
+#### 4. 수집 모드별 확인
+- **History 모드 (USE_HISTORY_MODE=true)**:
+  - 체크포인트 파일 확인: `/var/log/edge-history/.checkpoint`
+  - 백필이 정상 실행되었는지 로그 확인
+  - entities 필터 확인 (devices.json 또는 HISTORY_ENTITIES)
+  
+- **States 모드 (USE_HISTORY_MODE=false 또는 미설정)**:
+  - 매 정시마다 수집 실행 확인
+  - HA API 호출 성공 여부 확인
+
+#### 5. 즉시 수집 테스트
+```bash
+# Python으로 직접 수집 테스트
+cd /path/to/matterhub-flask
+python3 -m sub.collector
+```
+
 ### 수집이 되지 않는 경우
 1. 환경 변수 확인:
    ```bash
@@ -346,8 +396,14 @@ du -sh /var/log/edge-history
 2. 권한 확인:
    ```bash
    ls -ld /var/log/edge-history
+   mkdir -p /var/log/edge-history  # 디렉토리가 없으면 생성
    ```
 3. 로그 확인: Flask 애플리케이션 로그에서 "상태 히스토리 수집기 시작됨" 메시지 확인
+4. PM2 재시작:
+   ```bash
+   pm2 restart wm-app
+   pm2 logs wm-app  # 실시간 로그 확인
+   ```
 
 ### API 조회가 느린 경우
 - `limit` 파라미터로 조회 개수 제한

@@ -287,6 +287,40 @@ def save_to_file(states: List[Dict[str, Any]], dt: datetime) -> bool:
     if not states:
         logger.warning("저장할 상태 데이터가 없습니다")
         return False
+    
+    temp_path = get_temp_path(dt)
+    final_path = get_hour_path(dt)
+    
+    # 디렉토리 생성
+    ensure_directory(os.path.dirname(temp_path))
+    
+    # UTC 타임스탬프 생성
+    ts = dt.astimezone(timezone.utc)
+    
+    try:
+        # 임시 파일에 쓰기 (새로운 시간 단위 파일이므로 'w' 모드 사용)
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            for state in states:
+                record = format_state_record(state, ts)
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+        
+        # 원자적 rename
+        os.rename(temp_path, final_path)
+        
+        # 파일 정보 로깅
+        file_size = os.path.getsize(final_path)
+        logger.info(f"상태 저장 완료: {final_path} ({file_size} bytes, {len(states)}개 레코드)")
+        return True
+        
+    except Exception as e:
+        logger.error(f"파일 저장 실패: {e}")
+        # 임시 파일 정리
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except:
+            pass
+        return False
 
 
 def dedup_and_atomic_append(start_dt: datetime, new_records: List[Dict[str, Any]]) -> bool:
