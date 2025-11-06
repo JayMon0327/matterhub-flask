@@ -385,6 +385,9 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
     Period History 파일에서 최근 N일 동안 매일 특정 시간(sample_hour)의 데이터만 조회
     예: 최근 일주일 동안 매일 12:00시 데이터만 조회
     
+    정확히 sample_hour에 파일이 없으면, 해당 날짜의 가장 가까운 시간 파일을 사용
+    해당 날짜의 파일이 없으면 스킵
+    
     Args:
         root: Period History 파일 저장 경로
         days: 조회할 일수
@@ -395,6 +398,11 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
     """
     import glob
     
+    if not os.path.exists(root):
+        import logging
+        logging.warning(f"Period History 디렉토리가 없습니다: {root}")
+        return []  # 디렉토리가 없으면 빈 배열 반환
+    
     now = datetime.now(timezone.utc)
     results: List[Tuple[str, List[List[Dict[str, Any]]]]] = []  # (date_key, data)
     seen_dates = set()
@@ -402,6 +410,13 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
     # 모든 파일 목록 가져오기
     pattern = os.path.join(root, "*.json")
     all_files = glob.glob(pattern)
+    
+    import logging
+    logging.info(f"Period History 파일 조회: {root}에서 {len(all_files)}개 파일 발견")
+    
+    if not all_files:
+        logging.warning(f"Period History 파일이 없습니다: {root}")
+        return []  # 파일이 없으면 빈 배열 반환
     
     # 파일명에서 타임스탬프 추출하여 정렬
     file_timestamps = []
@@ -415,8 +430,16 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
         except Exception:
             continue
     
-    # 타임스탬프 기준으로 정렬 (최신순)
-    file_timestamps.sort(key=lambda x: x[0], reverse=True)
+    if not file_timestamps:
+        return []  # 유효한 파일이 없으면 빈 배열 반환
+    
+    # 날짜별로 파일 그룹화
+    files_by_date: Dict[str, List[Tuple[datetime, str]]] = {}
+    for dt, file_path in file_timestamps:
+        date_key = dt.strftime("%Y-%m-%d")
+        if date_key not in files_by_date:
+            files_by_date[date_key] = []
+        files_by_date[date_key].append((dt, file_path))
     
     # 역순으로 날짜 순회 (오늘부터 과거로)
     for day_offset in range(days):
@@ -428,18 +451,41 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
         if date_key in seen_dates:
             continue
         
-        # 해당 날짜의 sample_hour 파일 찾기
-        target_timestamp = target_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # 해당 날짜의 파일 찾기
         target_file = None
         
-        for dt, file_path in file_timestamps:
-            file_timestamp = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            if file_timestamp == target_timestamp:
-                target_file = file_path
-                break
+        if date_key in files_by_date:
+            # 해당 날짜의 파일이 있으면
+            date_files = files_by_date[date_key]
+            
+            # 정확히 sample_hour 파일 찾기
+            target_timestamp = target_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            for dt, file_path in date_files:
+                file_timestamp = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                if file_timestamp == target_timestamp:
+                    target_file = file_path
+                    break
+            
+            # 정확히 sample_hour 파일이 없으면, 해당 날짜의 가장 가까운 시간 파일 찾기
+            if not target_file:
+                # 가장 가까운 시간 찾기 (sample_hour에 가장 가까운)
+                best_file = None
+                min_diff = float('inf')
+                target_hour = sample_hour
+                
+                for dt, file_path in date_files:
+                    hour_diff = abs(dt.hour - target_hour)
+                    if hour_diff < min_diff:
+                        min_diff = hour_diff
+                        best_file = file_path
+                
+                if best_file:
+                    target_file = best_file
         
         if not target_file or not os.path.exists(target_file):
             # 파일이 없으면 스킵 (해당 날짜 데이터 없음)
+            import logging
+            logging.debug(f"Period History 파일 없음: 날짜 {date_key}, sample_hour {sample_hour}")
             continue
         
         seen_dates.add(date_key)
@@ -449,15 +495,25 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
                 data = json.load(f)
                 if isinstance(data, list):
                     results.append((date_key, data))
-        except Exception:
+                    import logging
+                    logging.info(f"Period History 파일 읽기 성공: {target_file}, 엔티티 배열 {len(data)}개")
+        except Exception as e:
+            # 에러 발생 시 로그 출력 (디버깅용)
+            import logging
+            logging.warning(f"Period History 파일 읽기 실패: {target_file}, 에러: {e}")
             continue
     
     # 날짜순으로 정렬 (오래된 것부터)
     results.sort(key=lambda x: x[0])
     
+    import logging
+    logging.info(f"Period History 일일 샘플 조회: {len(results)}개 날짜의 데이터 수집")
+    
     # 중첩 배열로 합치기 (날짜별로 그룹화)
     combined_data: List[List[Dict[str, Any]]] = []
     for date_key, data in results:
         combined_data.extend(data)
+    
+    logging.info(f"Period History 일일 샘플 조회 완료: 총 {len(combined_data)}개 엔티티 배열 반환")
     
     return combined_data
