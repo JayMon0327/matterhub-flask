@@ -298,20 +298,29 @@ def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[D
         JSON 데이터 (중첩 배열) - 파일이 없으면 빈 배열 []
     """
     import glob
+    import logging
+    
+    if not os.path.exists(root):
+        logging.warning(f"Period History 디렉토리가 없습니다: {root}")
+        return []  # 디렉토리가 없으면 빈 배열 반환
     
     if timestamp:
         # 특정 타임스탬프의 파일 경로
         file_path = os.path.join(root, f"{timestamp}.json")
         if not os.path.exists(file_path):
+            logging.warning(f"Period History 파일이 없습니다: {file_path}")
             return []  # HA History API와 동일하게 빈 배열 반환
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, list):
+                    logging.info(f"Period History 파일 읽기 성공: {file_path}, 엔티티 배열 {len(data)}개")
                     return data
+                logging.warning(f"Period History 파일 형식 오류: {file_path} (list가 아님)")
                 return []  # 잘못된 형식이면 빈 배열
         except Exception as e:
+            logging.error(f"Period History 파일 읽기 실패: {file_path}, 에러: {e}")
             # 에러 발생 시 빈 배열 반환
             return []
     else:
@@ -319,7 +328,10 @@ def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[D
         pattern = os.path.join(root, "*.json")
         files = glob.glob(pattern)
         
+        logging.info(f"Period History 파일 조회: {root}에서 {len(files)}개 파일 발견")
+        
         if not files:
+            logging.warning(f"Period History 파일이 없습니다: {root}")
             return []  # 파일이 없으면 빈 배열 반환
         
         # 파일명에서 타임스탬프 추출하여 정렬 (최신순)
@@ -330,13 +342,18 @@ def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[D
         files.sort(key=get_timestamp_from_path, reverse=True)
         latest_file = files[0]
         
+        logging.info(f"Period History 최신 파일 선택: {latest_file}")
+        
         try:
             with open(latest_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, list):
+                    logging.info(f"Period History 파일 읽기 성공: {latest_file}, 엔티티 배열 {len(data)}개")
                     return data
+                logging.warning(f"Period History 파일 형식 오류: {latest_file} (list가 아님)")
                 return []  # 잘못된 형식이면 빈 배열
         except Exception as e:
+            logging.error(f"Period History 파일 읽기 실패: {latest_file}, 에러: {e}")
             # 에러 발생 시 빈 배열 반환
             return []
 
