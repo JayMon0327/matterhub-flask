@@ -518,7 +518,7 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
         logger.warning("기간 히스토리 수집 실패")
         return False
     
-    # 수집된 엔티티 확인
+    # 수집된 엔티티 확인 및 누락된 엔티티 보완
     if isinstance(raw, list):
         collected_entity_ids = set()
         for entity_events in raw:
@@ -528,25 +528,92 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
                     eid = first_event.get('entity_id')
                     if eid:
                         collected_entity_ids.add(eid)
-        print(f"수집된 엔티티: {len(collected_entity_ids)}개 - {sorted(list(collected_entity_ids))}")
-        logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개 - {sorted(list(collected_entity_ids))}")
+        
+        print(f"수집된 엔티티: {len(collected_entity_ids)}개")
+        logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개")
+        
+        # 누락된 엔티티가 있으면 현재 상태를 가져와서 빈 배열 추가
         if len(collected_entity_ids) < len(entities):
             missing = entities - collected_entity_ids
-            print(f"경고: {len(missing)}개 엔티티가 응답에 없습니다: {sorted(list(missing))}")
-            logger.warning(f"{len(missing)}개 엔티티가 응답에 없습니다: {sorted(list(missing))}")
+            print(f"누락된 엔티티 {len(missing)}개 보완 중: {sorted(list(missing))[:5]}...")
+            logger.info(f"누락된 엔티티 {len(missing)}개 보완 중")
+            
+            # /api/states에서 현재 상태 가져오기
+            current_states = collect_device_states()
+            if current_states:
+                # 엔티티 ID -> 현재 상태 매핑
+                states_map = {}
+                for state in current_states:
+                    eid = state.get('entity_id')
+                    if eid:
+                        states_map[eid] = state
+                
+                # 누락된 엔티티에 대해 현재 상태를 기반으로 최소 배열 추가
+                for missing_eid in missing:
+                    if missing_eid in states_map:
+                        current_state = states_map[missing_eid]
+                        # 현재 상태를 기반으로 최소 히스토리 엔트리 생성
+                        history_entry = {
+                            "entity_id": missing_eid,
+                            "state": current_state.get("state", "unknown"),
+                            "attributes": current_state.get("attributes", {}),
+                            "last_changed": current_state.get("last_changed", end_iso),
+                            "last_updated": current_state.get("last_updated", end_iso)
+                        }
+                        # 빈 배열로 추가 (HA History API 형식 유지)
+                        raw.append([history_entry])
+                        print(f"  - 엔티티 보완: {missing_eid}")
+                        logger.info(f"엔티티 보완: {missing_eid}")
+                    else:
+                        # /api/states에도 없으면 빈 배열 추가
+                        raw.append([])
+                        print(f"  - 엔티티 없음 (빈 배열): {missing_eid}")
+                        logger.warning(f"엔티티 없음 (빈 배열): {missing_eid}")
+                
+                print(f"보완 완료: 총 {len(raw)}개 엔티티 배열")
+                logger.info(f"보완 완료: 총 {len(raw)}개 엔티티 배열")
+            else:
+                print("경고: /api/states 호출 실패, 누락된 엔티티는 빈 배열로 추가")
+                logger.warning("/api/states 호출 실패, 누락된 엔티티는 빈 배열로 추가")
+                for missing_eid in missing:
+                    raw.append([])
     
     # 파일 저장 경로 (프로젝트 하위 폴더)
     final_path = get_period_history_path(dt)
     temp_path = f"{final_path}.part"
-    ensure_directory(os.path.dirname(final_path))
+    
+    # 디렉토리 생성
+    dir_path = os.path.dirname(final_path)
+    try:
+        ensure_directory(dir_path)
+        if not os.path.exists(dir_path):
+            print(f"경고: 디렉토리 생성 실패: {dir_path}")
+            logger.warning(f"디렉토리 생성 실패: {dir_path}")
+            return False
+    except Exception as e:
+        print(f"경고: 디렉토리 생성 중 오류: {e}")
+        logger.warning(f"디렉토리 생성 중 오류: {e}", exc_info=True)
+        return False
     
     try:
         # HA History API 응답 그대로 저장 (pretty print)
         with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(raw, f, indent=2, ensure_ascii=False)
         
+        # 파일이 실제로 생성되었는지 확인
+        if not os.path.exists(temp_path):
+            print(f"경고: 임시 파일 생성 실패: {temp_path}")
+            logger.warning(f"임시 파일 생성 실패: {temp_path}")
+            return False
+        
         # 원자적 rename
         os.rename(temp_path, final_path)
+        
+        # 최종 파일 존재 확인
+        if not os.path.exists(final_path):
+            print(f"경고: 최종 파일 생성 실패: {final_path}")
+            logger.warning(f"최종 파일 생성 실패: {final_path}")
+            return False
         
         file_size = os.path.getsize(final_path)
         print(f"기간 히스토리 저장 완료: {final_path} ({file_size} bytes)")
