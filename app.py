@@ -17,7 +17,7 @@ import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
 from sub.collector import start_collector
-from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files
+from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files, read_period_history_daily_sample
 from dotenv import load_dotenv, find_dotenv
 import os, sys
 import subprocess
@@ -570,6 +570,40 @@ def history_period_files():
         limit = max(1, min(limit, 100))
         
         result = list_period_history_files(root=PERIOD_HISTORY_ROOT, limit=limit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/history/period/weekly', methods=["GET"])
+def history_period_weekly():
+    """
+    Period History 모드로 저장된 데이터에서 최근 일주일간 매일 12:00시 대표 데이터 조회
+    HA History API와 동일한 응답 형식 (중첩 배열)
+    """
+    try:
+        result = read_period_history_daily_sample(
+            root=PERIOD_HISTORY_ROOT,
+            days=7,
+            sample_hour=12
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/history/period/monthly', methods=["GET"])
+def history_period_monthly():
+    """
+    Period History 모드로 저장된 데이터에서 최근 한달간 매일 12:00시 대표 데이터 조회
+    HA History API와 동일한 응답 형식 (중첩 배열)
+    """
+    try:
+        result = read_period_history_daily_sample(
+            root=PERIOD_HISTORY_ROOT,
+            days=30,
+            sample_hour=12
+        )
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

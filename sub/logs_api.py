@@ -378,3 +378,86 @@ def list_period_history_files(root: str, limit: int = 10) -> Dict[str, Any]:
     file_list.sort(key=lambda x: x["timestamp"], reverse=True)
     
     return {"files": file_list[:limit]}
+
+
+def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12) -> List[List[Dict[str, Any]]]:
+    """
+    Period History 파일에서 최근 N일 동안 매일 특정 시간(sample_hour)의 데이터만 조회
+    예: 최근 일주일 동안 매일 12:00시 데이터만 조회
+    
+    Args:
+        root: Period History 파일 저장 경로
+        days: 조회할 일수
+        sample_hour: 대표 시간 (0-23, 기본값: 12)
+    
+    Returns:
+        HA History API 형식의 중첩 배열 (날짜별로 정렬)
+    """
+    import glob
+    
+    now = datetime.now(timezone.utc)
+    results: List[Tuple[str, List[List[Dict[str, Any]]]]] = []  # (date_key, data)
+    seen_dates = set()
+    
+    # 모든 파일 목록 가져오기
+    pattern = os.path.join(root, "*.json")
+    all_files = glob.glob(pattern)
+    
+    # 파일명에서 타임스탬프 추출하여 정렬
+    file_timestamps = []
+    for file_path in all_files:
+        try:
+            filename = os.path.basename(file_path)
+            timestamp_str = filename.replace('.json', '')
+            # ISO8601 형식: "2025-11-06T02:00:00Z"
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+            file_timestamps.append((dt, file_path))
+        except Exception:
+            continue
+    
+    # 타임스탬프 기준으로 정렬 (최신순)
+    file_timestamps.sort(key=lambda x: x[0], reverse=True)
+    
+    # 역순으로 날짜 순회 (오늘부터 과거로)
+    for day_offset in range(days):
+        target_date = (now.replace(hour=sample_hour, minute=0, second=0, microsecond=0) 
+                      - timedelta(days=day_offset))
+        date_key = target_date.strftime("%Y-%m-%d")
+        
+        # 이미 처리한 날짜는 스킵
+        if date_key in seen_dates:
+            continue
+        
+        # 해당 날짜의 sample_hour 파일 찾기
+        target_timestamp = target_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        target_file = None
+        
+        for dt, file_path in file_timestamps:
+            file_timestamp = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if file_timestamp == target_timestamp:
+                target_file = file_path
+                break
+        
+        if not target_file or not os.path.exists(target_file):
+            # 파일이 없으면 스킵 (해당 날짜 데이터 없음)
+            continue
+        
+        seen_dates.add(date_key)
+        
+        try:
+            with open(target_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    results.append((date_key, data))
+        except Exception:
+            continue
+    
+    # 날짜순으로 정렬 (오래된 것부터)
+    results.sort(key=lambda x: x[0])
+    
+    # 중첩 배열로 합치기 (날짜별로 그룹화)
+    combined_data: List[List[Dict[str, Any]]] = []
+    for date_key, data in results:
+        combined_data.extend(data)
+    
+    return combined_data
