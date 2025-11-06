@@ -29,9 +29,15 @@ devices_file_path = os.environ.get('devices_file_path')
 EDGE_LOG_ROOT = os.environ.get('EDGE_LOG_ROOT', '/var/log/edge-history')
 COLLECTION_INTERVAL = int(os.environ.get('COLLECTION_INTERVAL', '3600'))  # 기본 1시간
 
+# Period History JSON 파일 저장 경로 (프로젝트 하위 폴더)
+# 현재 파일의 디렉토리를 기준으로 프로젝트 루트 찾기
+_collector_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_collector_dir)  # sub/의 상위 디렉토리
+PERIOD_HISTORY_ROOT = os.environ.get('PERIOD_HISTORY_ROOT', os.path.join(_project_root, 'history'))
+
 # History 모드 환경 변수 (기본값 포함)
 USE_HISTORY_MODE = os.environ.get('USE_HISTORY_MODE', 'false').lower() == 'true'
-USE_PERIOD_HISTORY_MODE = os.environ.get('USE_PERIOD_HISTORY_MODE', 'false').lower() == 'true'  # Period 히스토리 모드
+USE_PERIOD_HISTORY_MODE = True  # 하드코딩: Period 히스토리 모드 항상 활성화
 PERIOD_HISTORY_DAYS = 10  # 하드코딩: 10일치 히스토리
 HISTORY_WINDOW_MINUTES = int(os.environ.get('HISTORY_WINDOW_MINUTES', '60'))
 HISTORY_MINIMAL_RESPONSE = True  # 하드코딩: minimal_response 사용
@@ -68,7 +74,7 @@ def get_temp_path(dt: datetime) -> str:
 def get_period_history_path(dt: datetime) -> str:
     """기간 히스토리 JSON 파일 경로 반환 (예: 2025-11-03T05:00:00Z.json)"""
     timestamp = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    return os.path.join(EDGE_LOG_ROOT, f"{timestamp}.json")
+    return os.path.join(PERIOD_HISTORY_ROOT, f"{timestamp}.json")
 
 
 # =========================
@@ -470,7 +476,7 @@ def collect_history_window(start_dt: datetime, end_dt: datetime, entities: Set[s
 
 
 def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
-    """최근 N일치 히스토리를 수집하여 JSON 파일로 저장"""
+    """최근 N일치 히스토리를 수집하여 JSON 파일로 저장 (HA History API 응답 그대로 저장)"""
     if not entities:
         print("경고: 수집할 엔티티가 없습니다")
         logger.warning("수집할 엔티티가 없습니다")
@@ -486,20 +492,20 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
     print(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개, {PERIOD_HISTORY_DAYS}일치")
     logger.info(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개")
     
-    # API 호출
+    # API 호출 (HA History API 응답 그대로 받음)
     raw = fetch_history(start_dt, end_dt, entities)
     if raw is None:
         print("경고: 기간 히스토리 수집 실패 (API 호출 실패)")
         logger.warning("기간 히스토리 수집 실패")
         return False
     
-    # 파일 저장 경로
+    # 파일 저장 경로 (프로젝트 하위 폴더)
     final_path = get_period_history_path(dt)
     temp_path = f"{final_path}.part"
     ensure_directory(os.path.dirname(final_path))
     
     try:
-        # JSON 파일로 저장 (pretty print)
+        # HA History API 응답 그대로 저장 (pretty print)
         with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(raw, f, indent=2, ensure_ascii=False)
         

@@ -282,3 +282,99 @@ def read_daily_sample_logs(days: int, device_ids: List[str],
             continue
     
     return {"items": items}
+
+
+def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[Dict[str, Any]]]:
+    """
+    Period History 모드로 저장된 JSON 파일을 읽어서 반환
+    HA History API와 동일한 응답 형식 (중첩 배열)
+    
+    Args:
+        timestamp: ISO8601 형식의 타임스탬프 (예: "2025-11-03T05:00:00Z")
+                   None이면 가장 최근 파일 반환
+        root: 로그 디렉토리 경로
+    
+    Returns:
+        JSON 데이터 (중첩 배열) - 파일이 없으면 빈 배열 []
+    """
+    import glob
+    
+    if timestamp:
+        # 특정 타임스탬프의 파일 경로
+        file_path = os.path.join(root, f"{timestamp}.json")
+        if not os.path.exists(file_path):
+            return []  # HA History API와 동일하게 빈 배열 반환
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                return []  # 잘못된 형식이면 빈 배열
+        except Exception as e:
+            # 에러 발생 시 빈 배열 반환
+            return []
+    else:
+        # 가장 최근 파일 찾기
+        pattern = os.path.join(root, "*.json")
+        files = glob.glob(pattern)
+        
+        if not files:
+            return []  # 파일이 없으면 빈 배열 반환
+        
+        # 파일명에서 타임스탬프 추출하여 정렬 (최신순)
+        def get_timestamp_from_path(path: str) -> str:
+            filename = os.path.basename(path)
+            return filename.replace('.json', '')
+        
+        files.sort(key=get_timestamp_from_path, reverse=True)
+        latest_file = files[0]
+        
+        try:
+            with open(latest_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                return []  # 잘못된 형식이면 빈 배열
+        except Exception as e:
+            # 에러 발생 시 빈 배열 반환
+            return []
+
+
+def list_period_history_files(root: str, limit: int = 10) -> Dict[str, Any]:
+    """
+    Period History 모드로 저장된 JSON 파일 목록 조회
+    
+    Args:
+        root: 로그 디렉토리 경로
+        limit: 반환할 최대 파일 개수
+    
+    Returns:
+        {"files": [...]}
+    """
+    import glob
+    
+    pattern = os.path.join(root, "*.json")
+    files = glob.glob(pattern)
+    
+    file_list = []
+    for file_path in files:
+        try:
+            st = os.stat(file_path)
+            filename = os.path.basename(file_path)
+            timestamp = filename.replace('.json', '')
+            
+            file_list.append({
+                "timestamp": timestamp,
+                "file": file_path,
+                "size": st.st_size,
+                "mtime": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+                           .isoformat().replace("+00:00", "Z"),
+            })
+        except Exception:
+            continue
+    
+    # 타임스탬프 기준으로 정렬 (최신순)
+    file_list.sort(key=lambda x: x["timestamp"], reverse=True)
+    
+    return {"files": file_list[:limit]}

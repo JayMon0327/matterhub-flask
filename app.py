@@ -17,7 +17,7 @@ import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
 from sub.collector import start_collector
-from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs
+from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files
 from dotenv import load_dotenv, find_dotenv
 import os, sys
 import subprocess
@@ -43,6 +43,11 @@ EDGE_LOG_ROOT = os.environ.get('EDGE_LOG_ROOT', '/var/log/edge-history')
 DEFAULT_WINDOW_HOURS = int(os.environ.get('DEFAULT_WINDOW_HOURS', '24'))
 MAX_LIMIT = int(os.environ.get('MAX_LIMIT', '5000'))
 DEFAULT_LIMIT = int(os.environ.get('DEFAULT_LIMIT', '200'))
+
+# Period History JSON 파일 저장 경로 (프로젝트 하위 폴더)
+# app.py가 있는 디렉토리를 프로젝트 루트로 사용
+_app_dir = os.path.dirname(os.path.abspath(__file__))
+PERIOD_HISTORY_ROOT = os.environ.get('PERIOD_HISTORY_ROOT', os.path.join(_app_dir, 'history'))
 
 
 def config():
@@ -526,6 +531,45 @@ def logs_monthly():
             root=EDGE_LOG_ROOT,
             sample_hour=12
         )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/history/period', methods=["GET"])
+def history_period():
+    """
+    Period History 모드로 저장된 JSON 파일 조회
+    HA History API와 동일한 응답 형식 (중첩 배열)
+    
+    쿼리 파라미터:
+    - timestamp (선택): ISO8601 형식의 타임스탬프 (예: "2025-11-03T05:00:00Z")
+                        None이면 가장 최근 파일 반환
+    """
+    try:
+        timestamp = request.args.get("timestamp")  # 예: "2025-11-03T05:00:00Z"
+        
+        result = read_period_history_json(timestamp=timestamp, root=PERIOD_HISTORY_ROOT)
+        
+        # HA History API와 동일한 형식으로 반환 (중첩 배열)
+        # 파일이 없으면 빈 배열 [] 반환
+        return jsonify(result)
+    except Exception as e:
+        # 에러 발생 시에도 빈 배열 반환 (HA History API와 동일하게)
+        return jsonify([])
+
+
+@app.route('/local/api/history/period/files', methods=["GET"])
+def history_period_files():
+    """Period History 모드로 저장된 JSON 파일 목록 조회"""
+    try:
+        try:
+            limit = int(request.args.get("limit", 10))
+        except ValueError:
+            limit = 10
+        limit = max(1, min(limit, 100))
+        
+        result = list_period_history_files(root=PERIOD_HISTORY_ROOT, limit=limit)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
