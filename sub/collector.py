@@ -136,16 +136,33 @@ def build_entity_list() -> Set[str]:
                 content = f.read().strip()
                 if content:
                     devices_data = json.loads(content)
+                    print(f"devices.json에서 {len(devices_data)}개 디바이스 읽기")
+                    logger.info(f"devices.json에서 {len(devices_data)}개 디바이스 읽기")
                     for device in devices_data:
                         eid = device.get('entity_id')
                         if isinstance(eid, str) and eid:
                             entities.add(eid)
+                            print(f"  - 엔티티 추가: {eid}")
+                    logger.info(f"devices.json에서 {len(entities)}개 엔티티 추출")
+                else:
+                    print("경고: devices.json 파일이 비어있습니다")
+                    logger.warning("devices.json 파일이 비어있습니다")
+        else:
+            print(f"경고: devices.json 파일을 찾을 수 없습니다: {devices_file_path}")
+            logger.warning(f"devices.json 파일을 찾을 수 없습니다: {devices_file_path}")
     except Exception as e:
-        logger.warning(f"devices.json 읽기 실패: {e}")
+        print(f"devices.json 읽기 실패: {e}")
+        logger.warning(f"devices.json 읽기 실패: {e}", exc_info=True)
     # HISTORY_ENTITIES 보조
     if HISTORY_ENTITIES:
-        for eid in [x.strip() for x in HISTORY_ENTITIES.split(',') if x.strip()]:
+        history_entities_list = [x.strip() for x in HISTORY_ENTITIES.split(',') if x.strip()]
+        print(f"HISTORY_ENTITIES에서 {len(history_entities_list)}개 엔티티 추가")
+        logger.info(f"HISTORY_ENTITIES에서 {len(history_entities_list)}개 엔티티 추가")
+        for eid in history_entities_list:
             entities.add(eid)
+    
+    print(f"총 {len(entities)}개 엔티티 수집 대상")
+    logger.info(f"총 {len(entities)}개 엔티티 수집 대상: {sorted(list(entities))[:10]}...")  # 처음 10개만 로그
     return entities
 
 
@@ -491,6 +508,8 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
     
     print(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개, {PERIOD_HISTORY_DAYS}일치")
     logger.info(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개")
+    print(f"수집 대상 엔티티 목록: {sorted(list(entities))}")
+    logger.info(f"수집 대상 엔티티 목록: {sorted(list(entities))}")
     
     # API 호출 (HA History API 응답 그대로 받음)
     raw = fetch_history(start_dt, end_dt, entities)
@@ -498,6 +517,23 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
         print("경고: 기간 히스토리 수집 실패 (API 호출 실패)")
         logger.warning("기간 히스토리 수집 실패")
         return False
+    
+    # 수집된 엔티티 확인
+    if isinstance(raw, list):
+        collected_entity_ids = set()
+        for entity_events in raw:
+            if isinstance(entity_events, list) and len(entity_events) > 0:
+                first_event = entity_events[0]
+                if isinstance(first_event, dict):
+                    eid = first_event.get('entity_id')
+                    if eid:
+                        collected_entity_ids.add(eid)
+        print(f"수집된 엔티티: {len(collected_entity_ids)}개 - {sorted(list(collected_entity_ids))}")
+        logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개 - {sorted(list(collected_entity_ids))}")
+        if len(collected_entity_ids) < len(entities):
+            missing = entities - collected_entity_ids
+            print(f"경고: {len(missing)}개 엔티티가 응답에 없습니다: {sorted(list(missing))}")
+            logger.warning(f"{len(missing)}개 엔티티가 응답에 없습니다: {sorted(list(missing))}")
     
     # 파일 저장 경로 (프로젝트 하위 폴더)
     final_path = get_period_history_path(dt)
