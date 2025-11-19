@@ -17,7 +17,7 @@ import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
 from sub.collector import start_collector
-from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files, read_period_history_daily_sample
+from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files, read_period_history_daily_sample, read_period_history_daily_hourly
 from dotenv import load_dotenv, find_dotenv
 import os, sys
 import subprocess
@@ -603,6 +603,40 @@ def history_period_monthly():
             root=PERIOD_HISTORY_ROOT,
             days=30,
             sample_hour=12
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/local/api/history/period/daily', methods=["GET"])
+def history_period_daily():
+    """
+    특정 날짜의 모든 시간대(0시~23시) Period History 데이터 조회
+    하루 24시간의 변화를 시간대별로 확인할 수 있습니다.
+    
+    쿼리 파라미터:
+    - date (필수): 날짜 문자열 (예: "2025-11-19")
+    
+    응답 형식:
+    {
+        "date": "2025-11-19",
+        "hours": {
+            "00": [...],  // 00:00 파일의 데이터 (HA History API 형식)
+            "01": [...],  // 01:00 파일의 데이터
+            ...
+            "23": [...]   // 23:00 파일의 데이터
+        }
+    }
+    """
+    try:
+        date_str = request.args.get("date")
+        if not date_str:
+            return jsonify({"error": "date 파라미터가 필요합니다 (예: ?date=2025-11-19)"}), 400
+        
+        result = read_period_history_daily_hourly(
+            root=PERIOD_HISTORY_ROOT,
+            date_str=date_str
         )
         return jsonify(result)
     except Exception as e:

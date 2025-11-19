@@ -534,3 +534,80 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
     logging.info(f"Period History 일일 샘플 조회 완료: 총 {len(combined_data)}개 엔티티 배열 반환")
     
     return combined_data
+
+
+def read_period_history_daily_hourly(root: str, date_str: str) -> Dict[str, Any]:
+    """
+    특정 날짜의 모든 시간대(0시~23시) Period History 파일을 조회
+    
+    Args:
+        root: Period History 파일 저장 경로
+        date_str: 날짜 문자열 (예: "2025-11-19")
+    
+    Returns:
+        {
+            "date": "2025-11-19",
+            "hours": {
+                "00": [...],  // 00:00 파일의 데이터
+                "01": [...],  // 01:00 파일의 데이터
+                ...
+                "23": [...]   // 23:00 파일의 데이터
+            }
+        }
+    """
+    import glob
+    import logging
+    
+    if not os.path.exists(root):
+        logging.warning(f"Period History 디렉토리가 없습니다: {root}")
+        return {"date": date_str, "hours": {}}
+    
+    # 날짜 파싱
+    try:
+        target_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        logging.warning(f"잘못된 날짜 형식: {date_str}")
+        return {"date": date_str, "hours": {}}
+    
+    # 모든 파일 목록 가져오기
+    pattern = os.path.join(root, "*.json")
+    all_files = glob.glob(pattern)
+    
+    if not all_files:
+        logging.warning(f"Period History 파일이 없습니다: {root}")
+        return {"date": date_str, "hours": {}}
+    
+    # 해당 날짜의 모든 시간대 파일 찾기
+    hours_data: Dict[str, List[List[Dict[str, Any]]]] = {}
+    
+    for file_path in all_files:
+        try:
+            filename = os.path.basename(file_path)
+            timestamp_str = filename.replace('.json', '')
+            # ISO8601 형식: "2025-11-19T13:00:00Z"
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+            
+            # 해당 날짜의 파일인지 확인
+            if dt.date() == target_date.date():
+                hour_key = dt.strftime("%H")  # "00", "01", ..., "23"
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            # 빈 배열 제거 (저장 시 이미 제거되었지만 안전을 위해)
+                            filtered_data = [events for events in data if isinstance(events, list) and len(events) > 0]
+                            if filtered_data:
+                                hours_data[hour_key] = filtered_data
+                except Exception as e:
+                    logging.warning(f"Period History 파일 읽기 실패: {file_path}, 에러: {e}")
+                    continue
+        except Exception:
+            continue
+    
+    logging.info(f"Period History 일일 시간대별 조회: {date_str}, {len(hours_data)}개 시간대 파일 발견")
+    
+    return {
+        "date": date_str,
+        "hours": hours_data
+    }
