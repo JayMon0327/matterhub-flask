@@ -541,6 +541,7 @@ def history_period():
     """
     Period History 모드로 저장된 JSON 파일 조회
     HA History API와 동일한 응답 형식 (중첩 배열)
+    devices.json에 등록된 엔티티만 필터링하여 반환
     
     쿼리 파라미터:
     - timestamp (선택): ISO8601 형식의 타임스탬프 (예: "2025-11-03T05:00:00Z")
@@ -549,7 +550,7 @@ def history_period():
     try:
         timestamp = request.args.get("timestamp")  # 예: "2025-11-03T05:00:00Z"
         
-        result = read_period_history_json(timestamp=timestamp, root=PERIOD_HISTORY_ROOT)
+        result = read_period_history_json(timestamp=timestamp, root=PERIOD_HISTORY_ROOT, devices_file_path=devices_file_path)
         
         # HA History API와 동일한 형식으로 반환 (중첩 배열)
         # 파일이 없으면 빈 배열 [] 반환
@@ -614,6 +615,7 @@ def history_period_daily():
     """
     특정 날짜의 모든 시간대(0시~23시) Period History 데이터 조회
     하루 24시간의 변화를 시간대별로 확인할 수 있습니다.
+    devices.json에 등록된 엔티티만 필터링하여 반환
     
     쿼리 파라미터:
     - date (필수): 날짜 문자열 (예: "2025-11-19")
@@ -636,7 +638,8 @@ def history_period_daily():
         
         result = read_period_history_daily_hourly(
             root=PERIOD_HISTORY_ROOT,
-            date_str=date_str
+            date_str=date_str,
+            devices_file_path=devices_file_path
         )
         return jsonify(result)
     except Exception as e:

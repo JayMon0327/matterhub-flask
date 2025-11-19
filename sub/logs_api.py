@@ -6,7 +6,7 @@ import os
 import json
 import base64
 from datetime import datetime, timezone, timedelta
-from typing import Iterator, List, Dict, Any, Optional, Tuple
+from typing import Iterator, List, Dict, Any, Optional, Tuple, Set
 import pathlib
 
 
@@ -284,15 +284,17 @@ def read_daily_sample_logs(days: int, device_ids: List[str],
     return {"items": items}
 
 
-def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[Dict[str, Any]]]:
+def read_period_history_json(timestamp: Optional[str], root: str, devices_file_path: Optional[str] = None) -> List[List[Dict[str, Any]]]:
     """
     Period History 모드로 저장된 JSON 파일을 읽어서 반환
     HA History API와 동일한 응답 형식 (중첩 배열)
+    devices.json에 등록된 엔티티만 필터링하여 반환
     
     Args:
         timestamp: ISO8601 형식의 타임스탬프 (예: "2025-11-03T05:00:00Z")
                    None이면 가장 최근 파일 반환
         root: 로그 디렉토리 경로
+        devices_file_path: devices.json 파일 경로 (None이면 필터링 안 함)
     
     Returns:
         JSON 데이터 (중첩 배열) - 파일이 없으면 빈 배열 []
@@ -303,6 +305,9 @@ def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[D
     if not os.path.exists(root):
         logging.warning(f"Period History 디렉토리가 없습니다: {root}")
         return []  # 디렉토리가 없으면 빈 배열 반환
+    
+    # devices.json에서 엔티티 목록 로드
+    entity_filter = _load_devices_entity_ids(devices_file_path)
     
     if timestamp:
         # 특정 타임스탬프의 파일 경로
@@ -315,6 +320,19 @@ def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[D
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, list):
+                    # devices.json 기반 필터링
+                    if entity_filter:
+                        filtered_data = []
+                        for events in data:
+                            if not isinstance(events, list) or len(events) == 0:
+                                continue
+                            # 각 엔티티 배열의 첫 번째 이벤트에서 entity_id 확인
+                            first_event = events[0] if events else None
+                            if first_event and isinstance(first_event, dict):
+                                entity_id = first_event.get('entity_id')
+                                if entity_id and entity_id in entity_filter:
+                                    filtered_data.append(events)
+                        data = filtered_data
                     logging.info(f"Period History 파일 읽기 성공: {file_path}, 엔티티 배열 {len(data)}개")
                     return data
                 logging.warning(f"Period History 파일 형식 오류: {file_path} (list가 아님)")
@@ -348,6 +366,19 @@ def read_period_history_json(timestamp: Optional[str], root: str) -> List[List[D
             with open(latest_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, list):
+                    # devices.json 기반 필터링
+                    if entity_filter:
+                        filtered_data = []
+                        for events in data:
+                            if not isinstance(events, list) or len(events) == 0:
+                                continue
+                            # 각 엔티티 배열의 첫 번째 이벤트에서 entity_id 확인
+                            first_event = events[0] if events else None
+                            if first_event and isinstance(first_event, dict):
+                                entity_id = first_event.get('entity_id')
+                                if entity_id and entity_id in entity_filter:
+                                    filtered_data.append(events)
+                        data = filtered_data
                     logging.info(f"Period History 파일 읽기 성공: {latest_file}, 엔티티 배열 {len(data)}개")
                     return data
                 logging.warning(f"Period History 파일 형식 오류: {latest_file} (list가 아님)")
@@ -536,13 +567,38 @@ def read_period_history_daily_sample(root: str, days: int, sample_hour: int = 12
     return combined_data
 
 
-def read_period_history_daily_hourly(root: str, date_str: str) -> Dict[str, Any]:
+def _load_devices_entity_ids(devices_file_path: Optional[str]) -> Optional[Set[str]]:
+    """
+    devices.json에서 entity_id 목록을 읽어옴
+    """
+    if not devices_file_path or not os.path.exists(devices_file_path):
+        return None
+    
+    try:
+        with open(devices_file_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                return None
+            devices_data = json.loads(content)
+            entities = set()
+            for device in devices_data:
+                eid = device.get('entity_id')
+                if isinstance(eid, str) and eid:
+                    entities.add(eid)
+            return entities if entities else None
+    except Exception:
+        return None
+
+
+def read_period_history_daily_hourly(root: str, date_str: str, devices_file_path: Optional[str] = None) -> Dict[str, Any]:
     """
     특정 날짜의 모든 시간대(0시~23시) Period History 파일을 조회
+    devices.json에 등록된 엔티티만 필터링하여 반환
     
     Args:
         root: Period History 파일 저장 경로
         date_str: 날짜 문자열 (예: "2025-11-19")
+        devices_file_path: devices.json 파일 경로 (None이면 필터링 안 함)
     
     Returns:
         {
@@ -568,6 +624,9 @@ def read_period_history_daily_hourly(root: str, date_str: str) -> Dict[str, Any]
     except ValueError:
         logging.warning(f"잘못된 날짜 형식: {date_str}")
         return {"date": date_str, "hours": {}}
+    
+    # devices.json에서 엔티티 목록 로드
+    entity_filter = _load_devices_entity_ids(devices_file_path)
     
     # 모든 파일 목록 가져오기
     pattern = os.path.join(root, "*.json")
@@ -596,7 +655,22 @@ def read_period_history_daily_hourly(root: str, date_str: str) -> Dict[str, Any]
                         data = json.load(f)
                         if isinstance(data, list):
                             # 빈 배열 제거 (저장 시 이미 제거되었지만 안전을 위해)
-                            filtered_data = [events for events in data if isinstance(events, list) and len(events) > 0]
+                            filtered_data = []
+                            for events in data:
+                                if not isinstance(events, list) or len(events) == 0:
+                                    continue
+                                
+                                # devices.json 기반 entity_id 필터링
+                                if entity_filter:
+                                    # 각 엔티티 배열의 첫 번째 이벤트에서 entity_id 확인
+                                    first_event = events[0] if events else None
+                                    if first_event and isinstance(first_event, dict):
+                                        entity_id = first_event.get('entity_id')
+                                        if entity_id and entity_id not in entity_filter:
+                                            continue  # devices.json에 없는 엔티티는 스킵
+                                
+                                filtered_data.append(events)
+                            
                             if filtered_data:
                                 hours_data[hour_key] = filtered_data
                 except Exception as e:
