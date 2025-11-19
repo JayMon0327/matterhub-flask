@@ -503,21 +503,25 @@ def collect_history_window(start_dt: datetime, end_dt: datetime, entities: Set[s
 
 
 def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
-    """최근 N일치 히스토리를 수집하여 JSON 파일로 저장 (HA History API 응답 그대로 저장)"""
+    """해당 시간대의 히스토리를 수집하여 JSON 파일로 저장 (HA History API 응답 그대로 저장)
+    
+    각 시간대 파일에는 해당 시간대(예: 08:00~08:59)에 발생한 이벤트만 포함됩니다.
+    """
     if not entities:
         print("경고: 수집할 엔티티가 없습니다")
         logger.warning("수집할 엔티티가 없습니다")
         return False
     
-    # 시작/종료 시간 계산
-    end_dt = hour_floor(dt)
-    start_dt = end_dt - timedelta(days=PERIOD_HISTORY_DAYS)
+    # 시작/종료 시간 계산 (해당 시간대만 수집)
+    # 예: 08:00에 수집하면 08:00:00 ~ 08:59:59 사이의 이벤트만 수집
+    start_dt = hour_floor(dt)  # 예: 2025-11-19 08:00:00
+    end_dt = start_dt + timedelta(hours=1)  # 예: 2025-11-19 09:00:00
     
     start_iso = to_utc_iso(start_dt)
     end_iso = to_utc_iso(end_dt)
     
-    print(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개, {PERIOD_HISTORY_DAYS}일치")
-    logger.info(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개")
+    print(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개 (1시간 구간)")
+    logger.info(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개 (1시간 구간)")
     print(f"수집 옵션: minimal_response={HISTORY_MINIMAL_RESPONSE}, no_attributes={HISTORY_NO_ATTRIBUTES}, significant_only={HISTORY_SIGNIFICANT_ONLY}")
     logger.info(f"수집 옵션: minimal_response={HISTORY_MINIMAL_RESPONSE}, no_attributes={HISTORY_NO_ATTRIBUTES}, significant_only={HISTORY_SIGNIFICANT_ONLY}")
     print(f"수집 대상 엔티티 목록: {sorted(list(entities))}")
