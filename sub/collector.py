@@ -40,9 +40,9 @@ USE_HISTORY_MODE = os.environ.get('USE_HISTORY_MODE', 'false').lower() == 'true'
 USE_PERIOD_HISTORY_MODE = True  # 하드코딩: Period 히스토리 모드 항상 활성화
 PERIOD_HISTORY_DAYS = 10  # 하드코딩: 10일치 히스토리
 HISTORY_WINDOW_MINUTES = int(os.environ.get('HISTORY_WINDOW_MINUTES', '60'))
-HISTORY_MINIMAL_RESPONSE = True  # 하드코딩: minimal_response 사용
-HISTORY_NO_ATTRIBUTES = True  # 하드코딩: no_attributes 사용
-HISTORY_SIGNIFICANT_ONLY = os.environ.get('HISTORY_SIGNIFICANT_ONLY', 'true').lower() == 'true'
+HISTORY_MINIMAL_RESPONSE = False  # 하드코딩: 전체 히스토리 수집 (minimal_response 비활성화)
+HISTORY_NO_ATTRIBUTES = False  # 하드코딩: attributes 포함 (히스토리 조회를 위해)
+HISTORY_SIGNIFICANT_ONLY = False  # 하드코딩: 모든 변경사항 수집 (significant_changes_only 비활성화)
 HISTORY_ENTITIES = os.environ.get('HISTORY_ENTITIES', '')  # comma-separated
 HISTORY_CHECKPOINT_PATH = os.environ.get('HISTORY_CHECKPOINT_PATH', os.path.join(EDGE_LOG_ROOT, '.checkpoint'))
 HISTORY_BACKFILL_MAX_DAYS = int(os.environ.get('HISTORY_BACKFILL_MAX_DAYS', '9'))
@@ -518,65 +518,30 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
         logger.warning("기간 히스토리 수집 실패")
         return False
     
-    # 수집된 엔티티 확인 및 누락된 엔티티 보완
-    if isinstance(raw, list):
-        collected_entity_ids = set()
-        for entity_events in raw:
-            if isinstance(entity_events, list) and len(entity_events) > 0:
-                first_event = entity_events[0]
-                if isinstance(first_event, dict):
-                    eid = first_event.get('entity_id')
-                    if eid:
-                        collected_entity_ids.add(eid)
-        
-        print(f"수집된 엔티티: {len(collected_entity_ids)}개")
-        logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개")
-        
-        # 누락된 엔티티가 있으면 현재 상태를 가져와서 빈 배열 추가
-        if len(collected_entity_ids) < len(entities):
-            missing = entities - collected_entity_ids
-            print(f"누락된 엔티티 {len(missing)}개 보완 중: {sorted(list(missing))[:5]}...")
-            logger.info(f"누락된 엔티티 {len(missing)}개 보완 중")
+        # 수집된 엔티티 확인 및 통계
+        if isinstance(raw, list):
+            collected_entity_ids = set()
+            total_events = 0
+            for entity_events in raw:
+                if isinstance(entity_events, list):
+                    if len(entity_events) > 0:
+                        first_event = entity_events[0]
+                        if isinstance(first_event, dict):
+                            eid = first_event.get('entity_id')
+                            if eid:
+                                collected_entity_ids.add(eid)
+                        total_events += len(entity_events)
             
-            # /api/states에서 현재 상태 가져오기
-            current_states = collect_device_states()
-            if current_states:
-                # 엔티티 ID -> 현재 상태 매핑
-                states_map = {}
-                for state in current_states:
-                    eid = state.get('entity_id')
-                    if eid:
-                        states_map[eid] = state
-                
-                # 누락된 엔티티에 대해 현재 상태를 기반으로 최소 배열 추가
-                for missing_eid in missing:
-                    if missing_eid in states_map:
-                        current_state = states_map[missing_eid]
-                        # 현재 상태를 기반으로 최소 히스토리 엔트리 생성
-                        history_entry = {
-                            "entity_id": missing_eid,
-                            "state": current_state.get("state", "unknown"),
-                            "attributes": current_state.get("attributes", {}),
-                            "last_changed": current_state.get("last_changed", end_iso),
-                            "last_updated": current_state.get("last_updated", end_iso)
-                        }
-                        # 빈 배열로 추가 (HA History API 형식 유지)
-                        raw.append([history_entry])
-                        print(f"  - 엔티티 보완: {missing_eid}")
-                        logger.info(f"엔티티 보완: {missing_eid}")
-                    else:
-                        # /api/states에도 없으면 빈 배열 추가
-                        raw.append([])
-                        print(f"  - 엔티티 없음 (빈 배열): {missing_eid}")
-                        logger.warning(f"엔티티 없음 (빈 배열): {missing_eid}")
-                
-                print(f"보완 완료: 총 {len(raw)}개 엔티티 배열")
-                logger.info(f"보완 완료: 총 {len(raw)}개 엔티티 배열")
-            else:
-                print("경고: /api/states 호출 실패, 누락된 엔티티는 빈 배열로 추가")
-                logger.warning("/api/states 호출 실패, 누락된 엔티티는 빈 배열로 추가")
-                for missing_eid in missing:
-                    raw.append([])
+            print(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
+            logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
+            
+            # 전체 히스토리 수집 모드에서는 누락된 엔티티 보완 불필요
+            # (HA History API가 해당 기간에 변경사항이 없는 엔티티는 빈 배열로 반환)
+            # 하지만 모든 엔티티가 응답에 포함되도록 확인
+            if len(collected_entity_ids) < len(entities):
+                missing = entities - collected_entity_ids
+                print(f"참고: {len(missing)}개 엔티티가 해당 기간에 변경사항 없음 (빈 배열로 반환됨)")
+                logger.info(f"{len(missing)}개 엔티티가 해당 기간에 변경사항 없음")
     
     # 파일 저장 경로 (프로젝트 하위 폴더)
     final_path = get_period_history_path(dt)
@@ -613,7 +578,7 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
         if not os.path.exists(final_path):
             print(f"경고: 최종 파일 생성 실패: {final_path}")
             logger.warning(f"최종 파일 생성 실패: {final_path}")
-            return False
+            return False 
         
         file_size = os.path.getsize(final_path)
         print(f"기간 히스토리 저장 완료: {final_path} ({file_size} bytes)")
