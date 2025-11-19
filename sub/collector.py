@@ -547,13 +547,50 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
         print(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
         logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
         
-        # 전체 히스토리 수집 모드에서는 누락된 엔티티 보완 불필요
-        # (HA History API가 해당 기간에 변경사항이 없는 엔티티는 빈 배열로 반환)
-        # 하지만 모든 엔티티가 응답에 포함되도록 확인
-        if len(collected_entity_ids) < len(entities):
+        # HA History API가 빈 배열을 반환한 경우 (모든 엔티티가 변경사항 없음)
+        # 또는 일부 엔티티만 반환된 경우, 현재 상태를 가져와서 보완
+        if total_events == 0 or len(collected_entity_ids) < len(entities):
             missing = entities - collected_entity_ids
-            print(f"참고: {len(missing)}개 엔티티가 해당 기간에 변경사항 없음 (빈 배열로 반환됨)")
-            logger.info(f"{len(missing)}개 엔티티가 해당 기간에 변경사항 없음")
+            print(f"경고: {len(missing)}개 엔티티가 해당 기간에 변경사항 없음. 현재 상태로 보완 시도...")
+            logger.warning(f"{len(missing)}개 엔티티가 해당 기간에 변경사항 없음. 현재 상태로 보완 시도")
+            
+            # /api/states에서 현재 상태 가져오기
+            current_states = collect_device_states()
+            if current_states:
+                states_map = {}
+                for state in current_states:
+                    eid = state.get('entity_id')
+                    if eid:
+                        states_map[eid] = state
+                
+                # 누락된 엔티티에 대해 현재 상태를 기반으로 히스토리 엔트리 생성
+                for missing_eid in missing:
+                    if missing_eid in states_map:
+                        current_state = states_map[missing_eid]
+                        history_entry = {
+                            "entity_id": missing_eid,
+                            "state": current_state.get("state", "unknown"),
+                            "attributes": current_state.get("attributes", {}),
+                            "last_changed": current_state.get("last_changed", end_iso),
+                            "last_updated": current_state.get("last_updated", end_iso)
+                        }
+                        # 빈 배열 대신 현재 상태를 포함한 배열 추가
+                        raw.append([history_entry])
+                        print(f"  - 엔티티 보완: {missing_eid} (현재 상태: {history_entry['state']})")
+                        logger.info(f"엔티티 보완: {missing_eid} (현재 상태: {history_entry['state']})")
+                    else:
+                        # /api/states에도 없으면 빈 배열 추가
+                        raw.append([])
+                        print(f"  - 엔티티 없음 (빈 배열): {missing_eid}")
+                        logger.warning(f"엔티티 없음 (빈 배열): {missing_eid}")
+                
+                print(f"보완 완료: 총 {len(raw)}개 엔티티 배열")
+                logger.info(f"보완 완료: 총 {len(raw)}개 엔티티 배열")
+            else:
+                print("경고: /api/states 호출 실패, 누락된 엔티티는 빈 배열로 추가")
+                logger.warning("/api/states 호출 실패, 누락된 엔티티는 빈 배열로 추가")
+                for missing_eid in missing:
+                    raw.append([])
     
     # 파일 저장 경로 (프로젝트 하위 폴더)
     final_path = get_period_history_path(dt)
