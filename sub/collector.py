@@ -518,8 +518,8 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
         logger.warning("기간 히스토리 수집 실패")
         return False
     
-        # 수집된 엔티티 확인 및 통계
-        if isinstance(raw, list):
+    # 수집된 엔티티 확인 및 통계
+    if isinstance(raw, list):
             collected_entity_ids = set()
             total_events = 0
             for entity_events in raw:
