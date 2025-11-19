@@ -304,12 +304,22 @@ def fetch_history(start_dt: datetime, end_dt: datetime, entities: Set[str]) -> O
     query = urlencode(params_pairs)
 
     url = f"{path}?{query}"
+    
+    # 디버깅: 실제 호출 URL 로그
+    print(f"HA History API 호출: {url}")
+    logger.info(f"HA History API 호출: {url}")
 
     for attempt in range(MAX_RETRIES):
         try:
-            resp = requests.get(url, headers=headers, timeout=60)
+            resp = requests.get(url, headers=headers, timeout=120)  # 타임아웃 120초로 증가 (10일치 데이터는 클 수 있음)
             if resp.status_code == 200:
-                return resp.json()
+                data = resp.json()
+                # 응답 크기 확인
+                if isinstance(data, list):
+                    total_events = sum(len(events) if isinstance(events, list) else 0 for events in data)
+                    print(f"HA History API 응답: {len(data)}개 엔티티 배열, 총 {total_events}개 이벤트")
+                    logger.info(f"HA History API 응답: {len(data)}개 엔티티 배열, 총 {total_events}개 이벤트")
+                return data
             logger.warning(f"History API 응답 오류: {resp.status_code}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY_BASE ** attempt)
@@ -508,6 +518,8 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
     
     print(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개, {PERIOD_HISTORY_DAYS}일치")
     logger.info(f"기간 히스토리 수집: {start_iso} ~ {end_iso}, 엔티티 {len(entities)}개")
+    print(f"수집 옵션: minimal_response={HISTORY_MINIMAL_RESPONSE}, no_attributes={HISTORY_NO_ATTRIBUTES}, significant_only={HISTORY_SIGNIFICANT_ONLY}")
+    logger.info(f"수집 옵션: minimal_response={HISTORY_MINIMAL_RESPONSE}, no_attributes={HISTORY_NO_ATTRIBUTES}, significant_only={HISTORY_SIGNIFICANT_ONLY}")
     print(f"수집 대상 엔티티 목록: {sorted(list(entities))}")
     logger.info(f"수집 대상 엔티티 목록: {sorted(list(entities))}")
     
