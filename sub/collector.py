@@ -520,28 +520,28 @@ def collect_period_history(dt: datetime, entities: Set[str]) -> bool:
     
     # 수집된 엔티티 확인 및 통계
     if isinstance(raw, list):
-            collected_entity_ids = set()
-            total_events = 0
-            for entity_events in raw:
-                if isinstance(entity_events, list):
-                    if len(entity_events) > 0:
-                        first_event = entity_events[0]
-                        if isinstance(first_event, dict):
-                            eid = first_event.get('entity_id')
-                            if eid:
-                                collected_entity_ids.add(eid)
-                        total_events += len(entity_events)
-            
-            print(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
-            logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
-            
-            # 전체 히스토리 수집 모드에서는 누락된 엔티티 보완 불필요
-            # (HA History API가 해당 기간에 변경사항이 없는 엔티티는 빈 배열로 반환)
-            # 하지만 모든 엔티티가 응답에 포함되도록 확인
-            if len(collected_entity_ids) < len(entities):
-                missing = entities - collected_entity_ids
-                print(f"참고: {len(missing)}개 엔티티가 해당 기간에 변경사항 없음 (빈 배열로 반환됨)")
-                logger.info(f"{len(missing)}개 엔티티가 해당 기간에 변경사항 없음")
+        collected_entity_ids = set()
+        total_events = 0
+        for entity_events in raw:
+            if isinstance(entity_events, list):
+                if len(entity_events) > 0:
+                    first_event = entity_events[0]
+                    if isinstance(first_event, dict):
+                        eid = first_event.get('entity_id')
+                        if eid:
+                            collected_entity_ids.add(eid)
+                total_events += len(entity_events)
+        
+        print(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
+        logger.info(f"수집된 엔티티: {len(collected_entity_ids)}개, 총 이벤트: {total_events}개")
+        
+        # 전체 히스토리 수집 모드에서는 누락된 엔티티 보완 불필요
+        # (HA History API가 해당 기간에 변경사항이 없는 엔티티는 빈 배열로 반환)
+        # 하지만 모든 엔티티가 응답에 포함되도록 확인
+        if len(collected_entity_ids) < len(entities):
+            missing = entities - collected_entity_ids
+            print(f"참고: {len(missing)}개 엔티티가 해당 기간에 변경사항 없음 (빈 배열로 반환됨)")
+            logger.info(f"{len(missing)}개 엔티티가 해당 기간에 변경사항 없음")
     
     # 파일 저장 경로 (프로젝트 하위 폴더)
     final_path = get_period_history_path(dt)
