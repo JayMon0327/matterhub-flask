@@ -3,9 +3,9 @@ Description=matterhub
 After=network.target
 
 [Service]
-User=matterhub
-WorkingDirectory=/home/matterhub/Desktop
-ExecStart=sh /home/matterhub/Desktop/matterhub/matterhub.sh
+User=whatsmatter
+WorkingDirectory=/home/whatsmatter/Desktop/matterhub
+ExecStart=sh /home/whatsmatter/Desktop/matterhub/device_config/matterhub.sh
 Restart=always
 RestartSec=5
 #Environment="PYTHONPATH=/usr/lib/python3/dist-packages"
