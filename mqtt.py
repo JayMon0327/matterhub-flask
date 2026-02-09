@@ -4,6 +4,7 @@ import threading
 import time
 import uuid
 import sys
+from datetime import datetime, timezone
 from awscrt import io, mqtt
 from awsiot import mqtt_connection_builder
 from dotenv import load_dotenv
@@ -42,6 +43,23 @@ HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
 matterhub_id = os.environ.get('matterhub_id')
 
+# 코나이 토픽: 코나이가 준 Topic prefix 1개만 사용 (구독·발행 동일)
+# 예: update/reported/dev/.../matter/k3O6TL
+LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://localhost:8100")
+_KONAI_TOPIC_DEFAULT = "update/reported/dev/c3c6d27d5f2f353991afac4e3af69029303795a2/matter/k3O6TL"
+KONAI_TOPIC = os.environ.get("KONAI_TOPIC", os.environ.get("KONAI_TOPIC_RESPONSE", _KONAI_TOPIC_DEFAULT)).strip('"')
+KONAI_TOPIC_REQUEST = os.environ.get("KONAI_TOPIC_REQUEST", KONAI_TOPIC).strip('"')   # 구독: 같은 토픽
+KONAI_TOPIC_RESPONSE = os.environ.get("KONAI_TOPIC_RESPONSE", KONAI_TOPIC).strip('"')  # 발행: 같은 토픽
+# 변경 시마다 코나이 토픽으로 entity_changed 발행할 entity_id 목록 (쉼표 구분)
+KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get("KONAI_REPORT_ENTITY_IDS", "sensor.smart_ht_sensor_ondo")
+KONAI_REPORT_ENTITY_IDS = [eid.strip() for eid in KONAI_REPORT_ENTITY_IDS_RAW.split(",") if eid.strip()]
+# 이벤트 발행 제한: 동일 entity_id 최소 발행 간격(초), 짧은 시간 내 동일 값 연속 발행 방지(초)
+KONAI_EVENT_THROTTLE_SEC = max(0, float(os.environ.get("KONAI_EVENT_THROTTLE_SEC", "2")))
+KONAI_EVENT_DEDUP_WINDOW_SEC = max(0, float(os.environ.get("KONAI_EVENT_DEDUP_WINDOW_SEC", "3")))
+# bootstrap 전체 상태 1회 발행 여부 (프로세스당 1회)
+konai_bootstrap_done = False
+# entity_changed throttle/dedup용: entity_id -> (last_publish_ts, last_state_str)
+konai_last_entity_publish = {}
 # 전역 변수로 선언
 global_mqtt_connection = None
 is_connected_flag = False   # 연결 상태 플래그
@@ -56,16 +74,15 @@ is_processing_update = False
 # last_state_update = 0  # 변경사항 감지 기반으로 변경되어 사용하지 않음
 # STATE_UPDATE_INTERVAL = 180  # 3분마다 상태 업데이트 - 변경사항 감지 기반으로 변경되어 사용하지 않음
 
-# 변경사항 감지 기반 섀도우 업데이트
+# 변경사항 감지 기반 상태 발행
 class StateChangeDetector:
     def __init__(self):
         self.last_states = {}
         self.is_initialized = False  # 초기화 여부 플래그
         self.change_threshold = 5  # 5초 내 변경사항이 있으면 업데이트
         
-        # 섀도우 업데이트에서 제외할 센서 목록 (state 변화 감지만 제외)
+        # 상태 발행 시 변경 감지에서 제외할 엔티티 목록
         self.excluded_sensors = {
-            'sensor.smart_ht_sensor_ondo',
             'sensor.smart_ht_sensor_ondo_1', 
             'sensor.smart_ht_sensor_ondo_2',
             'sensor.smart_ht_sensor_ondo_3',
@@ -83,7 +100,7 @@ class StateChangeDetector:
         self.battery_keys = ["battery", "battery_level", "battery_percentage"]
         
     def detect_changes(self, current_states):
-        """상태 변경사항 감지 (sensor.로 시작하는 디바이스는 state 변화 무시)"""
+        """상태 변경사항 감지. excluded_sensors에 있는 항목만 제외하고, 나머지(센서 포함)는 모두 감지."""
         changes = []
         current_time = time.time()
         
@@ -98,16 +115,15 @@ class StateChangeDetector:
             print(f"디바이스 상태 초기화 완료: {len(self.last_states)}개")
             return False, []  # 초기화 시에는 변경사항 없음
         
-        # 실제 변경사항 감지 (sensor.로 시작하는 디바이스는 state 변화 무시)
+        # 실제 변경사항 감지 (excluded_sensors만 제외, 센서 포함 나머지 전부 감지)
         for state in current_states:
             entity_id = state.get('entity_id')
             current_state = state.get('state')
             
             if not entity_id:
                 continue
-                
-            # sensor.로 시작하는 디바이스는 변경사항 감지에서 제외 (state 변화 무시)
-            if entity_id.startswith('sensor.'):
+            # 코나이 단일 센서 발행 대상은 제외 목록에 있어도 변경 감지함
+            if entity_id in self.excluded_sensors and entity_id not in KONAI_REPORT_ENTITY_IDS:
                 continue
                 
             if entity_id not in self.last_states:
@@ -130,198 +146,6 @@ class StateChangeDetector:
         
         return len(changes) > 0, changes
 
-def detect_and_publish_alerts(states, managed_devices=None):
-    """
-    기기 상태에서 알림 조건을 감지하고 이벤트를 발행하는 함수
-    
-    Args:
-        states: HA /api/states 응답에서 필터링된 엔트리 리스트
-        managed_devices: devices.json에 등록된 entity_id set (없으면 전체 허용)
-    """
-    try:
-        alerts = []
-        now = int(time.time())
-        
-        for state in states:
-            entity_id = state.get('entity_id', '')
-            if not entity_id:
-                continue
-                
-            # 관리되는 디바이스만 처리 (managed_devices가 None이면 전체)
-            if managed_devices is not None and entity_id not in managed_devices:
-                continue
-            
-            current_state = state.get('state')
-            attributes = state.get('attributes', {}) or {}
-            
-            # 1) 기기 unavailable 감지
-            if isinstance(current_state, str) and current_state.lower() == "unavailable":
-                alerts.append({
-                    "entity_id": entity_id,
-                    "alert_type": "UNAVAILABLE",
-                    "current_state": current_state,
-                    "battery": None,
-                    "attributes": attributes
-                })
-            
-            # 2) 배터리 0% 감지
-            for battery_key in state_detector.battery_keys:
-                if battery_key in attributes:
-                    try:
-                        battery_value = int(attributes[battery_key])
-                        if battery_value == 0:
-                            alerts.append({
-                                "entity_id": entity_id,
-                                "alert_type": "BATTERY_EMPTY",
-                                "current_state": current_state,
-                                "battery": battery_value,
-                                "attributes": attributes
-                            })
-                            break  # 하나의 배터리 키에서 0% 발견하면 중단
-                    except (ValueError, TypeError):
-                        continue  # 숫자 변환 실패 시 무시
-        
-        # 감지된 알림 처리 (상태 전이 기반 1회 트리거)
-        for alert in alerts:
-            try:
-                key = (alert["entity_id"], alert["alert_type"])
-                # 이미 활성 알림이면 스킵
-                if key in active_alerts:
-                    continue
-
-                # 알림 페이로드 구성
-                alert_payload = {
-                    "hub_id": matterhub_id,
-                    "ts": now,
-                    "entity_id": alert["entity_id"],
-                    "alert_type": alert["alert_type"],
-                    "prev_state": state_detector.last_states.get(alert["entity_id"]),
-                    "current_state": alert["current_state"],
-                    "battery": alert["battery"],
-                    "attributes": alert["attributes"]
-                }
-                
-                # 로컬 웹훅 즉시 호출 (notifications.json 기반)
-                send_local_webhook_notification(alert_payload)
-                
-                # AWS IoT Core로 이벤트 발행
-                publish_alert_event(alert_payload)
-                
-                print(f"🚨 알림 감지 및 발행: {alert['alert_type']} - {alert['entity_id']}")
-
-                # 활성 알림으로 등록
-                active_alerts[key] = now
-                
-            except Exception as e:
-                print(f"❌ 알림 처리 실패: {alert['entity_id']} - {e}")
-                
-    except Exception as e:
-        print(f"❌ 알림 감지 함수 실행 실패: {e}")
-
-def send_local_webhook_notification(alert_payload):
-    """
-    notifications.json 파일을 기반으로 로컬 웹훅 알림 전송
-    환경변수로 설정된 기본 웹훅도 함께 전송
-    새로운 구조와 기존 구조 모두 지원
-    """
-    try:
-        webhooks_to_call = []
-        
-        # 1. 환경변수에서 기본 웹훅 가져오기
-        default_webhook = os.environ.get('DEFAULT_ALERT_WEBHOOK')
-        if default_webhook:
-            webhooks_to_call.append({
-                "webhook": default_webhook,
-                "source": "environment"
-            })
-        
-        # 2. notifications.json에서 웹훅 가져오기
-        if notifications_file_path and os.path.exists(notifications_file_path):
-            with open(notifications_file_path, 'r', encoding='utf-8') as f:
-                notification_rules = json.load(f) or []
-        
-            for rule in notification_rules:
-                try:
-                    # 새로운 구조 지원 (trigger 기반)
-                    if "trigger" in rule and "action" in rule:
-                        trigger = rule.get("trigger", {})
-                        action = rule.get("action", {})
-                        
-                        # 트리거 조건 확인
-                        trigger_match = False
-                        if trigger.get("entity_id") == alert_payload["entity_id"] or trigger.get("entity_id") == "*":
-                            if trigger.get("state") == alert_payload["current_state"] or trigger.get("state") == "*":
-                                trigger_match = True
-                        
-                        # 조건 확인 (condition 배열)
-                        condition_match = True
-                        if "condition" in rule:
-                            for condition in rule["condition"]:
-                                # 현재는 단순히 조건이 있으면 통과 (향후 확장 가능)
-                                pass
-                        
-                        if trigger_match and condition_match and action.get("url"):
-                            webhooks_to_call.append({
-                                "webhook": action["url"],
-                                "source": f"notifications.json (rule: {rule.get('id', 'unknown')})"
-                            })
-                    
-                    # 기존 구조 지원 (device/status 기반)
-                    elif "device" in rule and "status" in rule:
-                        device_match = (
-                            rule.get("device") == alert_payload["entity_id"] or 
-                            rule.get("device") == "*"
-                        )
-                        
-                        status_match = (
-                            rule.get("status") == alert_payload["alert_type"] or
-                            rule.get("status") == alert_payload["current_state"] or
-                            rule.get("status") == "*"
-                        )
-                        
-                        if device_match and status_match and rule.get("webhook"):
-                            webhooks_to_call.append({
-                                "webhook": rule["webhook"],
-                                "source": f"notifications.json (rule: {rule.get('id', 'unknown')})"
-                            })
-                        
-                except Exception as e:
-                    print(f"❌ 알림 규칙 처리 실패: {rule.get('id', 'unknown')} - {e}")
-        
-        # 3. 모든 웹훅 호출
-        webhook_payload = {
-            "title": f"[{alert_payload['alert_type']}] {alert_payload['entity_id']}",
-            "hub_id": alert_payload["hub_id"],
-            "entity_id": alert_payload["entity_id"],
-            "alert_type": alert_payload["alert_type"],
-            "current_state": alert_payload["current_state"],
-            "battery": alert_payload["battery"],
-            "timestamp": alert_payload["ts"],
-            "attributes": alert_payload["attributes"]
-        }
-        
-        for webhook_info in webhooks_to_call:
-            try:
-                webhook_url = webhook_info["webhook"]
-                source = webhook_info["source"]
-                
-                response = requests.post(
-                    webhook_url, 
-                    json=webhook_payload, 
-                    timeout=3,
-                    headers={"Content-Type": "application/json"}
-                )
-                
-                if response.status_code == 200:
-                    print(f"✅ 로컬 웹훅 전송 성공: {source}")
-                else:
-                    print(f"⚠️ 로컬 웹훅 응답 오류: {source} - {response.status_code}")
-                    
-            except Exception as e:
-                print(f"❌ 로컬 웹훅 전송 실패: {webhook_info.get('source', 'unknown')} - {e}")
-                
-    except Exception as e:
-        print(f"❌ 로컬 알림 설정 읽기 실패: {e}")
 
 def publish_alert_event(alert_payload):
     """
@@ -352,8 +176,8 @@ state_detector = StateChangeDetector()
 active_alerts = {}
 last_heartbeat = 0
 HEARTBEAT_INTERVAL = 3600  # 30분 → 60분으로 변경 (비용 절감)
-last_shadow_update = 0  # Shadow 업데이트 rate-limit용
-MIN_SHADOW_INTERVAL = 120  # 30초 → 120초로 변경 (비용 절감)
+last_state_publish = 0  # 상태 발행 rate-limit용
+MIN_STATE_PUBLISH_INTERVAL = 120  # 상태 발행 최소 간격(초)
 last_health_check = 0  # 헬스체크용
 HEALTH_CHECK_INTERVAL = 1800  # 10분 → 30분으로 변경 (비용 절감)
 reconnect_attempts = 0
@@ -409,12 +233,13 @@ def check_mqtt_connection():
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
 
-                # 재구독 (필요한 토픽만)
+                # 재구독 (필요한 토픽 + 코나이 요청 토픽)
                 subscribe_topics = [
+                    KONAI_TOPIC_REQUEST,
                     f"matterhub/{matterhub_id}/api",
                     "matterhub/api",
                     "matterhub/group/all/api",
-                    f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 업데이트 토픽만
+                    f"matterhub/update/specific/{matterhub_id}",
                 ]
                 
                 for t in subscribe_topics:
@@ -449,191 +274,44 @@ def check_mqtt_connection():
         return False
 
 class AWSIoTClient:
+    """코나이(Konai) 인증서 기반 MQTT 클라이언트. konai_certificates/ 사용, 프로비저닝 없음."""
     def __init__(self):
-        self.cert_path = "certificates/"
-        self.claim_cert = "whatsmatter_nipa_claim_cert.cert.pem"
-        self.claim_key = "whatsmatter_nipa_claim_cert.private.key"
-        self.endpoint = "a206qwcndl23az-ats.iot.ap-northeast-2.amazonaws.com"
-        self.client_id = "whatsmatter-nipa-claim-thing"
-        
+        self.cert_path = "konai_certificates/"
+        self.endpoint = "a34vuzhubahjfj-ats.iot.ap-northeast-2.amazonaws.com"
+        # 코나이 Client ID: {device_id}-matter-{suffix}. env 없으면 기본값 사용
+        self.client_id = os.environ.get(
+            "KONAI_CLIENT_ID",
+            "c3c6d27d5f2f353991afac4e3af69029303795a2-matter-k3O6TL"
+        ).strip('"')
+
     def check_certificate(self):
-        """발급된 인증서 확인"""
-        cert_file = os.path.join(self.cert_path, "device.pem.crt")
-        key_file = os.path.join(self.cert_path, "private.pem.key")
-        
+        """코나이 인증서(cert.pem, key.pem) 확인"""
+        cert_file = os.path.join(self.cert_path, "cert.pem")
+        key_file = os.path.join(self.cert_path, "key.pem")
         if os.path.exists(cert_file) and os.path.exists(key_file):
             return True, cert_file, key_file
         return False, None, None
 
-    def provision_device(self):
-        """Claim 인증서를 사용하여 새 인증서 발급 및 사물 등록"""
-        try:
-            # Claim 인증서로 MQTT 클라이언트 생성
-            event_loop_group = io.EventLoopGroup(1)
-            host_resolver = io.DefaultHostResolver(event_loop_group)
-            client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
-
-            mqtt_connection = mqtt_connection_builder.mtls_from_path(
-                endpoint=self.endpoint,
-                cert_filepath=os.path.join(self.cert_path, self.claim_cert),
-                pri_key_filepath=os.path.join(self.cert_path, self.claim_key),
-                client_bootstrap=client_bootstrap,
-                client_id=self.client_id,
-                keep_alive_secs=120  # 300초 → 120초로 변경 (비용 최적화)
-            )
-
-            print("MQTT 연결 시도 중...")
-            connect_future = mqtt_connection.connect()
-            connect_future.result(timeout=10)
-            print("MQTT 연결 성공")
-            
-            # 인증서 발급 요청
-            provision_topic = "$aws/certificates/create/json"
-            response_topic = "$aws/certificates/create/json/accepted"
-            
-            # 응답 대기를 위한 플래그
-            received_response = False
-            new_cert_data = None
-            
-            def on_message_received(topic, payload, **kwargs):
-                nonlocal received_response, new_cert_data
-                new_cert_data = json.loads(payload.decode())
-                received_response = True
-            
-            subscribe_future, _ = mqtt_connection.subscribe(
-                topic=response_topic,
-                qos=mqtt.QoS.AT_LEAST_ONCE,
-                callback=on_message_received
-            )
-            subscribe_future.result(timeout=10)
-            
-            print("인증서 발급 요청 중...")
-            publish_future, _ = mqtt_connection.publish(
-                topic=provision_topic,
-                payload=json.dumps({}),
-                qos=mqtt.QoS.AT_LEAST_ONCE
-            )
-            publish_future.result(timeout=10)
-            
-            # 응답 대기
-            timeout = time.time() + 10
-            while not received_response and time.time() < timeout:
-                time.sleep(0.1)
-            
-            if new_cert_data:
-                # 새 인증서 저장
-                with open(os.path.join(self.cert_path, "device.pem.crt"), "w") as f:
-                    f.write(new_cert_data["certificatePem"])
-                with open(os.path.join(self.cert_path, "private.pem.key"), "w") as f:
-                    f.write(new_cert_data["privateKey"])
-                
-                # 인증서 발급 후 사물 등록 진행
-                success = self.register_thing(
-                    mqtt_connection, 
-                    new_cert_data["certificateId"],
-                    new_cert_data["certificateOwnershipToken"]
-                )
-                mqtt_connection.disconnect()
-                return success
-                
-            mqtt_connection.disconnect()
-            return False
-        except Exception as e:
-            print(f"인증서 발급 실패: {e}")
-            return False
-
-    def register_thing(self, mqtt_connection, certificate_id, cert_ownership_token):
-        """템플릿을 사용하여 사물 등록"""
-        try:
-            template_topic = "$aws/provisioning-templates/whatsmatter-nipa-template/provision/json"
-            response_topic = "$aws/provisioning-templates/whatsmatter-nipa-template/provision/json/accepted"
-            
-            received_response = False
-            registration_data = None
-            
-            def on_registration_response(topic, payload, **kwargs):
-                nonlocal received_response, registration_data
-                registration_data = json.loads(payload.decode())
-                received_response = True
-            
-            # 등록 응답 구독
-            subscribe_future, _ = mqtt_connection.subscribe(
-                topic=response_topic,
-                qos=mqtt.QoS.AT_LEAST_ONCE,
-                callback=on_registration_response
-            )
-            subscribe_future.result(timeout=30)
-            
-            # 등록 요청 전송
-            registration_request = {
-                "Parameters": {
-                    "SerialNumber": f"SN-{int(time.time())}"  # 실제 디바이스 이름으로 변경 필요
-                },
-                "certificateOwnershipToken": cert_ownership_token,
-                "certificateId": certificate_id
-            }
-            
-            print("사물 등록 요청 중...")
-            publish_future, _ = mqtt_connection.publish(
-                topic=template_topic,
-                payload=json.dumps(registration_request),
-                qos=mqtt.QoS.AT_LEAST_ONCE
-            )
-            publish_future.result(timeout=10)
-            
-            # 응답 대기
-            timeout = time.time() + 10
-            while not received_response and time.time() < timeout:
-                time.sleep(0.1)
-            
-            if registration_data:
-                print("사물 등록 성공:", registration_data)
-                
-                global matterhub_id
-                matterhub_id = registration_data['thingName']
-                # .env 파일 읽기 및 업데이트
-                env_data = {}
-                if os.path.exists('.env'):
-                    with open('.env', 'r') as f:
-                        for line in f:
-                            if '=' in line:
-                                key, value = line.strip().split('=', 1)
-                                env_data[key] = value
-                
-                # matterhub_id 업데이트 또는 추가
-                env_data['matterhub_id'] = f"\"{matterhub_id}\""
-                
-                # .env 파일에 저장
-                with open('.env', 'w') as f:
-                    for key, value in env_data.items():
-                        f.write(f'{key}={value}\n')
-                print(f"matterhub_id를 .env 파일에 저장했습니다: {matterhub_id}")
-                return True
-            
-            print("사물 등록 실패: 응답 없음")
-            return False
-            
-        except Exception as e:
-            print(f"사물 등록 실패: {e}")
-            return False
+    # (제거됨) provision_device / register_thing
+    # 코나이는 사전 발급 인증서(cert.pem, key.pem)만 사용합니다.
+    # 기존 whatsmatter 방식: Claim 인증서로 AWS에 인증서 발급 요청 → device.pem.crt/private.pem.key 생성
+    # → 프로비저닝 템플릿으로 사물 등록 → thingName을 matterhub_id로 .env에 저장.
+    # 코나이 연동에서는 위 플로우를 사용하지 않으므로 matterhub_id는 .env에 직접 설정해야 합니다.
 
     def connect_mqtt(self):
-        """인증서를 사용하여 MQTT 연결 - 동시성 문제 해결"""
+        """코나이 인증서(cert.pem, key.pem)로 MQTT 연결. 프로비저닝 없음."""
         has_cert, cert_file, key_file = self.check_certificate()
-        
         if not has_cert:
-            success = self.provision_device()
-            if not success:
-                raise Exception("인증서 발급 실패")
-            has_cert, cert_file, key_file = self.check_certificate()
-            
-        # 새로운 인증서로 연결할 때는 client_id를 다르게 설정
-        self.client_id = f"device_{int(time.time())}"  # 고유한 client_id 생성
-        
+            raise Exception(
+                "konai_certificates/cert.pem 또는 key.pem이 없습니다. "
+                "코나이 인증서를 konai_certificates/ 디렉토리에 넣어 주세요."
+            )
+
+        # 코나이: client_id는 __init__에서 설정한 값 유지 (덮어쓰지 않음)
         event_loop_group = io.EventLoopGroup(1)
         host_resolver = io.DefaultHostResolver(event_loop_group)
         client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
-        
+
         # 연결 상태 콜백
         def on_interrupted(connection, error, **kwargs):
             global is_connected_flag, reconnect_attempts
@@ -643,24 +321,28 @@ class AWSIoTClient:
 
         def on_resumed(connection, return_code, session_present, **kwargs):
             global is_connected_flag, reconnect_attempts
-            # 0(ACCEPTED)일 때 정상 복구
             is_connected_flag = (return_code == 0)
             if return_code == 0:
-                reconnect_attempts = 0  # 재연결 성공 시 카운터 리셋
+                reconnect_attempts = 0
                 print(f"✅ MQTT 연결 재개됨 (return_code={return_code}, session_present={session_present})")
             else:
                 print(f"❌ MQTT 재연결 실패 (return_code={return_code})")
 
-        mqtt_conn = mqtt_connection_builder.mtls_from_path(
+        # 루트 CA(선택): ca_cert.pem이 있으면 TLS 검증에 사용
+        mtls_kw = dict(
             endpoint=self.endpoint,
             cert_filepath=cert_file,
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
-            keep_alive_secs=120,  # 300초 → 120초로 변경 (비용 최적화)
+            keep_alive_secs=120,
             on_connection_interrupted=on_interrupted,
             on_connection_resumed=on_resumed,
         )
+        ca_path = os.path.join(self.cert_path, "ca_cert.pem")
+        if os.path.exists(ca_path):
+            mtls_kw["ca_filepath"] = ca_path
+        mqtt_conn = mqtt_connection_builder.mtls_from_path(**mtls_kw)
         
         # 🚀 동시성 문제 해결: 지수 백오프 재시도 로직
         max_retries = 5
@@ -703,179 +385,132 @@ class AWSIoTClient:
         # 이 지점에 도달하면 안 되지만 안전장치
         raise Exception("MQTT 연결 실패: 예상치 못한 오류")
 
-def update_device_shadow():
-    """변경사항 감지 기반 섀도우 업데이트 - Home Assistant 상태를 AWS IoT Core에 보고"""
-    global last_heartbeat, last_shadow_update
-    
+def publish_bootstrap_all_states():
+    """MQTT 연결 성공 후 1회만: 전체 상태를 type=bootstrap_all_states 로 발행"""
+    global konai_bootstrap_done
+    if konai_bootstrap_done:
+        return
     try:
-        # MQTT 연결 상태 확인
         if not check_mqtt_connection():
-            print("❌ MQTT 연결 실패로 섀도우 업데이트 스킵")
             return
-            
+        headers = {}
+        if hass_token:
+            headers["Authorization"] = f"Bearer {hass_token}"
+        resp = requests.get(f"{LOCAL_API_BASE}/local/api/states", headers=headers, timeout=15)
+        if resp.status_code != 200:
+            print(f"❌ 코나이 bootstrap: 로컬 API 실패 HTTP {resp.status_code}")
+            return
+        data = resp.json()
+        _konai_publish({
+            "type": "bootstrap_all_states",
+            "correlation_id": None,
+            "ts": _konai_ts(),
+            "data": data,
+        })
+        konai_bootstrap_done = True
+        print(f"✅ 코나이 bootstrap 발행: 전체 {len(data) if isinstance(data, list) else 0} entities")
+    except Exception as e:
+        print(f"❌ 코나이 bootstrap 실패: {e}")
+
+
+def publish_device_state():
+    """변경사항 감지 후 KONAI_REPORT_ENTITY_IDS 대상만 entity_changed 이벤트 발행. 전체 상태는 발행하지 않음(bootstrap 1회만)."""
+    global konai_last_entity_publish
+
+    try:
+        if not check_mqtt_connection():
+            return
         current_time = time.time()
-        
-        # Home Assistant에서 현재 상태 가져오기
         headers = {"Authorization": f"Bearer {hass_token}"}
         response = requests.get(f"{HA_host}/api/states", headers=headers)
-        
-        if response.status_code == 200:
-            states = response.json()
-            
-            # devices.json에서 관리하는 entity_id 목록 가져오기
+        if response.status_code != 200:
+            return
+
+        states = response.json()
+        managed_devices = set()
+        try:
+            if devices_file_path and os.path.exists(devices_file_path):
+                with open(devices_file_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:
+                        devices_data = json.loads(content)
+                        for device in devices_data:
+                            if 'entity_id' in device:
+                                managed_devices.add(device['entity_id'])
+        except Exception:
+            pass
+        if not managed_devices:
             managed_devices = set()
-            try:
-                if devices_file_path and os.path.exists(devices_file_path):
-                    with open(devices_file_path, 'r', encoding='utf-8') as f:
-                        content = f.read().strip()
-                        if content:  # 파일이 비어있지 않은 경우만
-                            devices_data = json.loads(content)
-                            for device in devices_data:
-                                if 'entity_id' in device:
-                                    managed_devices.add(device['entity_id'])
-                        else:
-                            print(f"devices.json 파일이 비어있음: {devices_file_path}")
-                elif devices_file_path:
-                    print(f"devices.json 파일이 존재하지 않음: {devices_file_path}")
-                else:
-                    print("devices_file_path 환경변수가 설정되지 않음 - 모든 디바이스 관리")
-            except json.JSONDecodeError as e:
-                print(f"devices.json JSON 형식 오류: {e}")
-                print(f"파일 경로: {devices_file_path}")
-            except Exception as e:
-                print(f"devices.json 읽기 실패: {e}")
-                print(f"파일 경로: {devices_file_path}")
-            finally:
-                # 실패 시에도 빈 set으로 처리하여 프로그램 중단 방지
-                if not managed_devices:
-                    managed_devices = set()
-            
-            # 관리되는 디바이스만 필터링
-            filtered_states = []
-            for state in states:
-                entity_id = state.get('entity_id', '')
-                # managed_devices가 None이면 모든 디바이스 포함, 아니면 필터링
-                if managed_devices is None or entity_id in managed_devices:
-                    filtered_states.append(state)
-            
-            print(f"디바이스 상태: 전체 {len(states)}개, 관리 {len(filtered_states)}개")
-            
-            # 변경사항 감지 (관리되는 디바이스만)
-            has_changes, changes = state_detector.detect_changes(filtered_states)
 
-            # 🚨 알림 감지 및 발행 (관리되는 디바이스만)
-            detect_and_publish_alerts(filtered_states, managed_devices)
+        filtered_states = [s for s in states if not managed_devices or s.get('entity_id', '') in managed_devices]
+        has_changes, changes = state_detector.detect_changes(filtered_states)
 
-            # 🚨 활성 알림 해제 처리: 정상 상태로 복귀하면 캐시에서 제거
-            try:
-                to_remove = []
-                for (eid, atype), first_ts in active_alerts.items():
-                    # 현재 상태에서 해당 엔티티를 찾아 상태 확인
-                    found = next((s for s in filtered_states if s.get('entity_id') == eid), None)
-                    if not found:
-                        # 목록에 없으면 보류 (HA에서 사라진 상태일 수 있음)
-                        continue
-                    st = (found.get('state') or '').lower()
-                    attrs = found.get('attributes', {}) or {}
-                    if atype == 'UNAVAILABLE' and st != 'unavailable':
+        detect_and_publish_alerts(filtered_states, managed_devices)
+
+        try:
+            to_remove = []
+            for (eid, atype), _ in list(active_alerts.items()):
+                found = next((s for s in filtered_states if s.get('entity_id') == eid), None)
+                if not found:
+                    continue
+                st = (found.get('state') or '').lower()
+                attrs = found.get('attributes', {}) or {}
+                if atype == 'UNAVAILABLE' and st != 'unavailable':
+                    to_remove.append((eid, atype))
+                elif atype == 'BATTERY_EMPTY':
+                    ok = False
+                    for k in state_detector.battery_keys:
+                        if k in attrs:
+                            try:
+                                if int(attrs[k]) > 0:
+                                    ok = True
+                                    break
+                            except (ValueError, TypeError):
+                                pass
+                    if ok:
                         to_remove.append((eid, atype))
-                    elif atype == 'BATTERY_EMPTY':
-                        # 배터리 키 중 하나라도 1 이상이면 해제
-                        ok = False
-                        for k in state_detector.battery_keys:
-                            if k in attrs:
-                                try:
-                                    if int(attrs[k]) > 0:
-                                        ok = True
-                                        break
-                                except (ValueError, TypeError):
-                                    pass
-                        if ok:
-                            to_remove.append((eid, atype))
-                for key in to_remove:
-                    active_alerts.pop(key, None)
-                    print(f"✅ 알림 해제: {key}")
-            except Exception as e:
-                print(f"⚠️ 알림 해제 처리 실패: {e}")
-            
-            # 변경사항이 있거나 heartbeat 시간이 되었으면 업데이트
-            should_update = has_changes or (current_time - last_heartbeat >= HEARTBEAT_INTERVAL)
-            
-            # Rate-limit 체크: 최소 간격 보장 (비용 절감)
-            if should_update and (current_time - last_shadow_update < MIN_SHADOW_INTERVAL):
-                remaining = MIN_SHADOW_INTERVAL - (current_time - last_shadow_update)
-                print(f"Shadow 업데이트 대기: {format_duration(remaining)} 남음")
-                return
-            
-            # 디버깅 로그
-            if has_changes:
-                print(f"변경사항 감지: {len(changes)}개")
-                for change in changes[:3]:  # 처음 3개만 출력
-                    print(f"  - {change.get('type', 'unknown')}: {change.get('entity_id', 'unknown')}")
-                if len(changes) > 3:
-                    print(f"  ... 외 {len(changes) - 3}개")
-            elif current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
-                elapsed = current_time - last_heartbeat
-                print(f"Heartbeat 시간 도달: {format_duration(elapsed)} 경과")
-            else:
-                remaining = HEARTBEAT_INTERVAL - (current_time - last_heartbeat)
-                # 로그 출력 빈도 감소 (비용 절감을 위해 주석 처리)
-                # print(f"변경사항 없음, Heartbeat 대기: {format_duration(remaining)} 남음")
-            
-            if should_update:
-                # 상태 데이터 정리
-                shadow_state = {
-                    "state": {
-                        "reported": {
-                            "hub_id": matterhub_id,
-                            "timestamp": int(current_time),
-                            "status_key": f"{matterhub_id}#LATEST",  # 최신 상태 조회용 키
-                            "device_count": len(filtered_states),  # 현재 연결된 관리 대상 디바이스 수
-                            "total_devices": len(states),  # Home Assistant 전체 디바이스 수
-                            "managed_devices": len(managed_devices),  # devices.json에 등록된 디바이스 수
-                            "online": True,
-                            "ha_reachable": True,
-                            "devices": {},
-                            "has_changes": has_changes,
-                            "change_count": len(changes) if has_changes else 0,
-                            "device_stats": {
-                                "connected": len(filtered_states),  # 현재 연결된 관리 대상
-                                "total_ha": len(states),  # Home Assistant 전체
-                                "configured": len(managed_devices)  # 설정 파일에 등록된
-                            }
-                        }
-                    }
-                }
-                
-                # 관리되는 디바이스 상태만 포함
-                for state in filtered_states:
-                    entity_id = state.get('entity_id', '')
-                    if entity_id:
-                        shadow_state["state"]["reported"]["devices"][entity_id] = {
-                            "state": state.get('state'),
-                            "last_changed": state.get('last_changed'),
-                            "attributes": state.get('attributes', {})
-                        }
-                
-                # 섀도우 업데이트 토픽으로 발행 (QoS0으로 비용 절감)
-                shadow_topic = f"$aws/things/{matterhub_id}/shadow/update"
-                global_mqtt_connection.publish(
-                    topic=shadow_topic,
-                    payload=json.dumps(shadow_state),
-                    qos=mqtt.QoS.AT_MOST_ONCE  # QoS1 → QoS0으로 변경하여 비용 절감
-                )
-                
-                # Shadow 업데이트 성공 시 시간 기록 (rate-limit용)
-                last_shadow_update = current_time
-                
-                if has_changes:
-                    print(f"Shadow 업데이트: {len(changes)}개 변경사항")
-                else:
-                    last_heartbeat = current_time
-                    print(f"Heartbeat Shadow 업데이트")
-                    
+            for key in to_remove:
+                active_alerts.pop(key, None)
+        except Exception:
+            pass
+
+        if not has_changes:
+            return
+
+        # KONAI_REPORT_ENTITY_IDS 대상만 entity_changed 발행 (throttle + dedup)
+        for ch in changes:
+            eid = ch.get("entity_id")
+            if not eid or eid not in KONAI_REPORT_ENTITY_IDS:
+                continue
+            one = next((s for s in filtered_states if s.get("entity_id") == eid), None)
+            if not one:
+                continue
+
+            state_str = json.dumps(one, sort_keys=True, ensure_ascii=False)
+            last_info = konai_last_entity_publish.get(eid)
+            now = time.time()
+            # throttle: 최소 간격 미만이면 스킵
+            if last_info:
+                last_ts, last_val = last_info
+                if now - last_ts < KONAI_EVENT_THROTTLE_SEC:
+                    continue
+                if KONAI_EVENT_DEDUP_WINDOW_SEC > 0 and (now - last_ts) < KONAI_EVENT_DEDUP_WINDOW_SEC and last_val == state_str:
+                    continue
+            konai_last_entity_publish[eid] = (now, state_str)
+
+            event_id = f"evt-{int(now * 1000)}-{eid.replace('.', '_')}"
+            _konai_publish({
+                "type": "entity_changed",
+                "correlation_id": None,
+                "event_id": event_id,
+                "ts": _konai_ts(),
+                "entity_id": eid,
+                "state": one,
+            })
+            print(f"코나이 entity_changed: {eid} → {KONAI_TOPIC_RESPONSE}")
+
     except Exception as e:
-        print(f"Shadow 업데이트 실패: {e}")
+        print(f"상태 발행(이벤트) 실패: {e}")
 
 def send_health_check():
     """간단한 헬스체크 전송 (비용 최소화)"""
@@ -1267,7 +902,129 @@ def execute_external_update_script(branch='master', force_update=False, update_i
             'timestamp': int(time.time())
         }
 
+def _konai_ts():
+    """ISO8601 타임스탬프 (UTC)"""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _konai_publish(payload_dict):
+    """KONAI_TOPIC_RESPONSE로 dict 발행"""
+    global_mqtt_connection.publish(
+        topic=KONAI_TOPIC_RESPONSE,
+        payload=json.dumps(payload_dict, ensure_ascii=False),
+        qos=mqtt.QoS.AT_MOST_ONCE,
+    )
+
+
+def _konai_publish_error(correlation_id, code, message, detail=None):
+    """오류 응답 발행 (type: error)"""
+    body = {
+        "type": "error",
+        "correlation_id": correlation_id,
+        "ts": _konai_ts(),
+        "error": {"code": code, "message": message},
+    }
+    if detail is not None:
+        body["error"]["detail"] = detail
+    _konai_publish(body)
+    print(f"❌ 코나이 오류 응답: {code} - {message}")
+
+
+def handle_konai_states_request(payload_bytes=None):
+    """코나이 요청 처리: correlation_id 필수, entity_id 있으면 단일 조회 없으면 전체 조회.
+    응답 규격: type, correlation_id, ts, data 또는 error."""
+    try:
+        correlation_id = None
+        entity_id = None
+        if payload_bytes:
+            try:
+                msg = json.loads(payload_bytes.decode("utf-8"))
+            except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
+                _konai_publish_error(None, "INVALID_JSON", "Request payload is not valid JSON")
+                return
+            if not isinstance(msg, dict):
+                _konai_publish_error(None, "INVALID_JSON", "Request payload must be a JSON object")
+                return
+            correlation_id = msg.get("correlation_id")
+            if not correlation_id:
+                cid = msg.get("request_id")  # 대체 필드
+                if cid is not None and str(cid).strip():
+                    correlation_id = str(cid).strip()
+            if not correlation_id:
+                _konai_publish_error(None, "MISSING_CORRELATION_ID", "correlation_id is required")
+                return
+            eid = msg.get("entity_id")
+            if eid is not None and str(eid).strip():
+                entity_id = str(eid).strip()
+
+        headers = {}
+        if hass_token:
+            headers["Authorization"] = f"Bearer {hass_token}"
+        ts = _konai_ts()
+
+        if entity_id:
+            url = f"{LOCAL_API_BASE}/local/api/states/{entity_id}"
+            try:
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    _konai_publish({
+                        "type": "query_response_single",
+                        "correlation_id": correlation_id,
+                        "ts": ts,
+                        "data": data,
+                    })
+                    print(f"✅ 코나이 단일 조회 응답: entity_id={entity_id}")
+                else:
+                    _konai_publish_error(
+                        correlation_id,
+                        "LOCAL_API_ERROR" if resp.status_code >= 500 else "INVALID_ENTITY_ID",
+                        resp.text or f"HTTP {resp.status_code}",
+                        detail={"status_code": resp.status_code},
+                    )
+            except requests.Timeout:
+                _konai_publish_error(correlation_id, "TIMEOUT", "Local API request timed out")
+            except Exception as e:
+                _konai_publish_error(correlation_id, "LOCAL_API_ERROR", str(e), detail={"exception": type(e).__name__})
+        else:
+            url = f"{LOCAL_API_BASE}/local/api/states"
+            try:
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    _konai_publish({
+                        "type": "query_response_all",
+                        "correlation_id": correlation_id,
+                        "ts": ts,
+                        "data": data,
+                    })
+                    print(f"✅ 코나이 전체 조회 응답: {len(data) if isinstance(data, list) else 'n/a'} entities")
+                else:
+                    _konai_publish_error(
+                        correlation_id,
+                        "LOCAL_API_ERROR",
+                        resp.text or f"HTTP {resp.status_code}",
+                        detail={"status_code": resp.status_code},
+                    )
+            except requests.Timeout:
+                _konai_publish_error(correlation_id, "TIMEOUT", "Local API request timed out")
+            except Exception as e:
+                _konai_publish_error(correlation_id, "LOCAL_API_ERROR", str(e), detail={"exception": type(e).__name__})
+    except Exception as e:
+        print(f"❌ 코나이 요청 처리 실패: {e}")
+        try:
+            _konai_publish_error(None, "LOCAL_API_ERROR", str(e))
+        except Exception:
+            pass
+
+
 def mqtt_callback(topic, payload, **kwargs):
+    # 코나이: 요청 토픽 수신 시 로컬 API 호출 후 응답 토픽으로 발행 (payload에 entity_id 있으면 해당 센서만 조회)
+    if topic == KONAI_TOPIC_REQUEST:
+        print(f"📩 코나이 요청 수신: {topic}")
+        handle_konai_states_request(payload)
+        return
+
     _message = json.loads(payload.decode('utf-8'))
 
     # 기본값 설정
@@ -1581,11 +1338,7 @@ if __name__ == "__main__":
         global_mqtt_connection = aws_client.connect_mqtt()
         print("MQTT 연결 성공")
         
-        # 초기 Shadow 업데이트 실행
-        print("초기 Shadow 업데이트 실행...")
-        update_device_shadow()
-        print("초기 Shadow 업데이트 완료")
-        
+        # 코나이 bootstrap은 구독 완료 후 1회 호출
     except Exception as e:
         print(f"MQTT 연결 실패: {e}")
         # 🚀 동시성 문제 해결: 연결 실패 시에도 재시도 로직 적용
@@ -1606,11 +1359,7 @@ if __name__ == "__main__":
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
                 print("MQTT 연결 성공")
-                
-                # 초기 Shadow 업데이트 실행
-                print("초기 Shadow 업데이트 실행...")
-                update_device_shadow()
-                print("초기 Shadow 업데이트 완료")
+                # bootstrap은 구독 완료 후 1회만 호출됨
                 break
                 
             except Exception as retry_e:
@@ -1624,12 +1373,13 @@ if __name__ == "__main__":
                     print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
                     sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
     
-    # 🚀 동시성 문제 해결: 토픽 구독도 재시도 로직 적용
+    # 🚀 동시성 문제 해결: 토픽 구독도 재시도 로직 적용 (코나이 요청 토픽 포함)
     subscribe_topics = [
+        KONAI_TOPIC_REQUEST,
         f"matterhub/{matterhub_id}/api",
         "matterhub/api",
         "matterhub/group/all/api",
-        f"matterhub/update/specific/{matterhub_id}",  # 실제 사용되는 토픽만 구독
+        f"matterhub/update/specific/{matterhub_id}",
     ]
     
     print("📡 토픽 구독 시작...")
@@ -1669,22 +1419,16 @@ if __name__ == "__main__":
     
     print("📡 모든 토픽 구독 완료")
 
+    # 코나이: bootstrap 전체 상태 1회 발행 (연결·구독 후 1회)
+    publish_bootstrap_all_states()
 
-    # 테스트용 데이터 publish 제거 (비용 절감)
-    # test_data = {
-    #     "message": "테스트 메시지",
-    #     "timestamp": time.time()
-    # }
-    
-
-    
     try:
         # 최적화된 메인 루프
         connection_check_counter = 0
         
         while True:
-            # Shadow 업데이트 실행 (변경사항 감지 기반)
-            update_device_shadow()
+            # 상태 발행 (변경사항 감지 기반)
+            publish_device_state()
             
             # 간단한 헬스체크 전송 (10분 간격)
             send_health_check()
