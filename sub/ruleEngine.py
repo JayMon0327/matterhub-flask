@@ -5,11 +5,11 @@ import requests
 import os, time
 from dotenv import load_dotenv
 
+# wm-app가 먼저 리소스/파일을 생성할 시간을 주기 위해 약간 지연
+time.sleep(5)
 load_dotenv()
 hass_token = os.environ.get('hass_token')
 HA_host = os.environ.get('HA_host')
-_rules_dir = os.path.dirname(os.path.abspath(__file__))
-rules_file_path = os.environ.get('rules_file_path') or os.path.join(os.path.dirname(_rules_dir), 'resources', 'rules.json')
 
 auth_body = {
     "type": "auth",
@@ -29,8 +29,9 @@ subscribe_file_changed_body = {
 }
 
 def get_rules():
-    with open(rules_file_path, 'r', encoding='utf-8') as file:
+    with open('resources/rules.json', 'r', encoding='utf-8') as file:
         data = json.load(file)
+
         return data
     return [] 
 

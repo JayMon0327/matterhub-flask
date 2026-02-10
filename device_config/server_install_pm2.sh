@@ -3,10 +3,6 @@
 # 사용법: 프로젝트 루트에서 실행
 #   chmod +x device_config/server_install_pm2.sh
 #   ./device_config/server_install_pm2.sh
-#
-# PM2 기동 (프로젝트 루트에서):
-#   pm2 start device_config/startup.json
-#   (startup.json의 __PROJECT_ROOT__는 프로젝트 루트 경로로 치환 필요 시, sed로 임시 파일 만들어서 사용)
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

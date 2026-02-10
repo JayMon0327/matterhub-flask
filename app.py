@@ -26,15 +26,13 @@ from libs.edit import deleteItem, file_changed_request, putItem, update_env_file
 env_file = find_dotenv()
 load_dotenv()
 
-# .env 그대로 참조 (없으면 .env 예시와 동일한 기본값)
-_app_dir = os.path.dirname(os.path.abspath(__file__))
-res_file_path = os.environ.get('res_file_path') or 'resources'
-cert_file_path = os.environ.get('cert_file_path') or 'cert'
-schedules_file_path = os.environ.get('schedules_file_path') or 'resources/schedule.json'
-rules_file_path = os.environ.get('rules_file_path') or 'resources/rules.json'
-rooms_file_path = os.environ.get('rooms_file_path') or 'resources/rooms.json'
-devices_file_path = os.environ.get('devices_file_path') or 'resources/devices.json'
-notifications_file_path = os.environ.get('notifications_file_path') or 'resources/notifications.json'
+res_file_path= os.environ.get('res_file_path')
+cert_file_path= os.environ.get('cert_file_path')
+schedules_file_path = os.environ.get('schedules_file_path')
+rules_file_path = os.environ.get('rules_file_path')
+rooms_file_path = os.environ.get('rooms_file_path')
+devices_file_path = os.environ.get('devices_file_path')
+notifications_file_path = os.environ.get('notifications_file_path')
 
 HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
@@ -46,6 +44,8 @@ MAX_LIMIT = int(os.environ.get('MAX_LIMIT', '5000'))
 DEFAULT_LIMIT = int(os.environ.get('DEFAULT_LIMIT', '200'))
 
 # Period History JSON 파일 저장 경로 (프로젝트 하위 폴더)
+# app.py가 있는 디렉토리를 프로젝트 루트로 사용
+_app_dir = os.path.dirname(os.path.abspath(__file__))
 PERIOD_HISTORY_ROOT = os.environ.get('PERIOD_HISTORY_ROOT', os.path.join(_app_dir, 'history'))
 
 
@@ -61,11 +61,12 @@ def config():
 
     file_list = [schedules_file_path, rules_file_path, rooms_file_path, devices_file_path, notifications_file_path]
     
-    for path in file_list:
-        if not os.path.exists(path):
-            with open(path, 'w') as f:
+    for f in file_list:
+        if not os.path.exists(f):
+            with open(f, 'w') as f:
                 json.dump([], f)
-            print(f"{path} 파일이 생성되었습니다.")
+
+            print(f"{f} 파일이 생성되었습니다.")
 
 
 

@@ -42,7 +42,7 @@ notifications_file_path = os.environ.get('notifications_file_path') or os.path.j
 
 HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
-matterhub_id = os.environ.get('matterhub_id')
+matterhub_id = (os.environ.get('matterhub_id') or '').strip().strip('"') or None  # None/빈문자열 정리
 
 # 코나이 토픽: 코나이가 준 Topic prefix 1개만 사용 (구독·발행 동일)
 # 예: update/reported/dev/.../matter/k3O6TL
@@ -234,14 +234,13 @@ def check_mqtt_connection():
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
 
-                # 재구독 (필요한 토픽 + 코나이 요청 토픽)
-                subscribe_topics = [
-                    KONAI_TOPIC_REQUEST,
-                    f"matterhub/{matterhub_id}/api",
-                    "matterhub/api",
-                    "matterhub/group/all/api",
-                    f"matterhub/update/specific/{matterhub_id}",
-                ]
+                # 재구독 (matterhub_id 없으면 해당 토픽 제외)
+                subscribe_topics = [KONAI_TOPIC_REQUEST, "matterhub/api", "matterhub/group/all/api"]
+                if matterhub_id:
+                    subscribe_topics.extend([
+                        f"matterhub/{matterhub_id}/api",
+                        f"matterhub/update/specific/{matterhub_id}",
+                    ])
                 
                 for t in subscribe_topics:
                     try:
@@ -1374,14 +1373,15 @@ if __name__ == "__main__":
                     print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
                     sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
     
-    # 🚀 동시성 문제 해결: 토픽 구독도 재시도 로직 적용 (코나이 요청 토픽 포함)
-    subscribe_topics = [
-        KONAI_TOPIC_REQUEST,
-        f"matterhub/{matterhub_id}/api",
-        "matterhub/api",
-        "matterhub/group/all/api",
-        f"matterhub/update/specific/{matterhub_id}",
-    ]
+    # 🚀 토픽 구독 (matterhub_id 없으면 matterhub/{id}/api 등 제외 → .env의 matterhub_id 설정 시 추가 구독)
+    subscribe_topics = [KONAI_TOPIC_REQUEST, "matterhub/api", "matterhub/group/all/api"]
+    if matterhub_id:
+        subscribe_topics.extend([
+            f"matterhub/{matterhub_id}/api",
+            f"matterhub/update/specific/{matterhub_id}",
+        ])
+    else:
+        print("⚠️ .env에 matterhub_id 없음 → matterhub/{id}/api, matterhub/update/specific/{id} 구독 생략")
     
     print("📡 토픽 구독 시작...")
     for topic in subscribe_topics:
