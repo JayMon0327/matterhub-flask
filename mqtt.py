@@ -44,6 +44,9 @@ HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
 matterhub_id = (os.environ.get('matterhub_id') or '').strip().strip('"') or None  # None/빈문자열 정리
 
+# 디버깅용: 현재 구독된 토픽들을 추적
+SUBSCRIBED_TOPICS = set()
+
 # 코나이 토픽: 코나이가 준 Topic prefix 1개만 사용 (구독·발행 동일)
 # 예: update/reported/dev/.../matter/k3O6TL
 LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://localhost:8100")
@@ -51,6 +54,12 @@ _KONAI_TOPIC_DEFAULT = "update/reported/dev/c3c6d27d5f2f353991afac4e3af690293037
 KONAI_TOPIC = os.environ.get("KONAI_TOPIC", os.environ.get("KONAI_TOPIC_RESPONSE", _KONAI_TOPIC_DEFAULT)).strip('"')
 KONAI_TOPIC_REQUEST = os.environ.get("KONAI_TOPIC_REQUEST", KONAI_TOPIC).strip('"')   # 구독: 같은 토픽
 KONAI_TOPIC_RESPONSE = os.environ.get("KONAI_TOPIC_RESPONSE", KONAI_TOPIC).strip('"')  # 발행: 같은 토픽
+# 테스트용 코나이 형식 토픽 (AWS IoT Core에 별도 테스트 토픽을 만들어 실제 코나이 구조를 그대로 검증)
+# 예: KONAI_TEST_TOPIC=update/reported/dev/.../matter/test
+KONAI_TEST_TOPIC = os.environ.get("KONAI_TEST_TOPIC", "").strip().strip('"') or None
+KONAI_TEST_TOPIC_REQUEST = os.environ.get("KONAI_TEST_TOPIC_REQUEST", KONAI_TEST_TOPIC or "").strip().strip('"') or None
+KONAI_TEST_TOPIC_RESPONSE = os.environ.get("KONAI_TEST_TOPIC_RESPONSE", KONAI_TEST_TOPIC or "").strip().strip('"') or None
+
 # 변경 시마다 코나이 토픽으로 entity_changed 발행할 entity_id 목록 (쉼표 구분)
 KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get("KONAI_REPORT_ENTITY_IDS", "sensor.smart_ht_sensor_ondo")
 KONAI_REPORT_ENTITY_IDS = [eid.strip() for eid in KONAI_REPORT_ENTITY_IDS_RAW.split(",") if eid.strip()]
@@ -234,25 +243,35 @@ def check_mqtt_connection():
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
 
-                # 재구독 (matterhub_id 없으면 해당 토픽 제외)
-                subscribe_topics = [KONAI_TOPIC_REQUEST, "matterhub/api", "matterhub/group/all/api"]
+                # 재구독:
+                # - 코나이 토픽: KONAI_TOPIC_REQUEST
+                # - 테스트용 코나이 토픽: KONAI_TEST_TOPIC_REQUEST (옵션)
+                # - 레거시 matterhub 토픽 (matterhub_id가 있을 때만)
+                subscribe_topics = [KONAI_TOPIC_REQUEST]
+                if KONAI_TEST_TOPIC_REQUEST:
+                    subscribe_topics.append(KONAI_TEST_TOPIC_REQUEST)
                 if matterhub_id:
                     subscribe_topics.extend([
                         f"matterhub/{matterhub_id}/api",
+                        "matterhub/api",
+                        "matterhub/group/all/api",
                         f"matterhub/update/specific/{matterhub_id}",
                     ])
+                print(f"📡 재구독 대상 토픽들: {', '.join(subscribe_topics)}")
                 
                 for t in subscribe_topics:
                     try:
+                        print(f"➡️ SUBSCRIBE 재요청: {t}")
                         subscribe_future, _ = global_mqtt_connection.subscribe(
                             topic=t,
                             qos=mqtt.QoS.AT_LEAST_ONCE,
                             callback=mqtt_callback
                         )
                         subscribe_future.result()
-                        print(f"✅ 토픽 재구독 성공: {t}")
+                        SUBSCRIBED_TOPICS.add(t)
+                        print(f"✅ SUBSCRIBE 재성공: {t}")
                     except Exception as e:
-                        print(f"❌ 토픽 재구독 실패: {t} - {e}")
+                        print(f"❌ 토픽 재구독 실패: {t} - {e!r} ({type(e).__name__})")
 
                 print("MQTT 재연결 성공")
                 reconnect_attempts = 0
@@ -317,6 +336,8 @@ class AWSIoTClient:
             global is_connected_flag, reconnect_attempts
             is_connected_flag = False
             print(f"⚠️ MQTT 연결 끊김 감지: {error}")
+            if SUBSCRIBED_TOPICS:
+                print(f"📡 현재 구독 중이던 토픽들: {', '.join(sorted(SUBSCRIBED_TOPICS))}")
             print(f"🔄 자동 재연결 시도 준비 중... (현재 시도: {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
 
         def on_resumed(connection, return_code, session_present, **kwargs):
@@ -384,6 +405,210 @@ class AWSIoTClient:
         
         # 이 지점에 도달하면 안 되지만 안전장치
         raise Exception("MQTT 연결 실패: 예상치 못한 오류")
+
+
+class AWSProvisioningClient:
+    """
+    예전 whatsmatter 방식의 Claim 프로비저닝 플로우를 복원한 클라이언트.
+    - certificates/ 디렉토리의 Claim 인증서(whatsmatter_nipa_claim_cert.*)를 사용
+    - AWS IoT Core에서 새 인증서 발급 + 사물 등록
+    - 등록된 thingName을 matterhub_id로 보고 .env에 저장
+    코나이 브로커용 연결(AWSIoTClient)와는 별도로, 'matterhub_id 한 번 발급받을 때만' 사용합니다.
+    """
+
+    def __init__(self):
+        # 예전 AWS IoT 환경 기준 기본값 (필요 시 env로 오버라이드 가능)
+        self.cert_path = os.environ.get("AWS_CLAIM_CERT_PATH", "certificates/")
+        self.claim_cert = os.environ.get("AWS_CLAIM_CERT_FILE", "whatsmatter_nipa_claim_cert.cert.pem")
+        self.claim_key = os.environ.get("AWS_CLAIM_KEY_FILE", "whatsmatter_nipa_claim_cert.private.key")
+        self.endpoint = os.environ.get(
+            "AWS_PROVISION_ENDPOINT",
+            "a206qwcndl23az-ats.iot.ap-northeast-2.amazonaws.com",
+        )
+        self.client_id = os.environ.get("AWS_PROVISION_CLIENT_ID", "whatsmatter-nipa-claim-thing")
+
+    def check_certificate(self):
+        """발급된 device 인증서가 있는지 확인 (예전 device.pem.crt / private.pem.key)"""
+        cert_file = os.path.join(self.cert_path, "device.pem.crt")
+        key_file = os.path.join(self.cert_path, "private.pem.key")
+        if os.path.exists(cert_file) and os.path.exists(key_file):
+            return True, cert_file, key_file
+        return False, None, None
+
+    def register_thing(self, mqtt_connection, certificate_id, cert_ownership_token):
+        """
+        AWS IoT 프로비저닝 템플릿을 사용해 사물 등록.
+        registrationData['thingName'] 를 matterhub_id로 사용하고 .env에 저장합니다.
+        """
+        try:
+            template_topic = "$aws/provisioning-templates/whatsmatter-nipa-template/provision/json"
+            response_topic = "$aws/provisioning-templates/whatsmatter-nipa-template/provision/json/accepted"
+
+            received_response = False
+            registration_data = None
+
+            def on_message_received(topic, payload, **kwargs):
+                nonlocal received_response, registration_data
+                registration_data = json.loads(payload.decode())
+                received_response = True
+
+            # 응답 구독
+            subscribe_future, _ = mqtt_connection.subscribe(
+                topic=response_topic,
+                qos=mqtt.QoS.AT_LEAST_ONCE,
+                callback=on_message_received,
+            )
+            subscribe_future.result(timeout=10)
+
+            # 템플릿으로 사물 등록 요청
+            payload = {
+                "certificateId": certificate_id,
+                "certificateOwnershipToken": cert_ownership_token,
+                "parameters": {},
+            }
+            print("[PROVISION] 사물 등록 요청 중...")
+            publish_future, _ = mqtt_connection.publish(
+                topic=template_topic,
+                payload=json.dumps(payload),
+                qos=mqtt.QoS.AT_LEAST_ONCE,
+            )
+            publish_future.result(timeout=10)
+
+            # 응답 대기
+            timeout = time.time() + 10
+            while not received_response and time.time() < timeout:
+                time.sleep(0.1)
+
+            if registration_data:
+                thing_name = registration_data.get("thingName")
+                if not thing_name:
+                    print(f"[PROVISION] 사물 등록 실패: thingName 없음, 응답={registration_data}")
+                    return False
+
+                # 전역 matterhub_id 업데이트
+                global matterhub_id
+                matterhub_id = thing_name
+
+                # .env 파일 읽기 및 업데이트
+                env_data: dict[str, str] = {}
+                if os.path.exists(".env"):
+                    with open(".env", "r", encoding="utf-8") as f:
+                        for line in f:
+                            if "=" in line:
+                                key, value = line.strip().split("=", 1)
+                                env_data[key] = value
+
+                # matterhub_id 업데이트 또는 추가 (예전 스타일: 따옴표 포함)
+                env_data["matterhub_id"] = f"\"{matterhub_id}\""
+
+                # .env 저장
+                with open(".env", "w", encoding="utf-8") as f:
+                    for key, value in env_data.items():
+                        f.write(f"{key}={value}\n")
+
+                print(f"[PROVISION] matterhub_id를 .env 파일에 저장했습니다: {matterhub_id}")
+                print(f"[PROVISION] .env 에서 matterhub_id 확인 후, 필요하면 수동으로 정리해서 사용하세요.")
+                return True
+
+            print("[PROVISION] 사물 등록 실패: 응답 없음")
+            return False
+
+        except Exception as e:
+            print(f"[PROVISION] 사물 등록 실패: {e}")
+            return False
+
+    def provision_device(self):
+        """
+        Claim 인증서를 사용하여:
+        1) 새 device.pem.crt / private.pem.key 발급
+        2) 프로비저닝 템플릿으로 사물 등록
+        3) 등록된 thingName을 matterhub_id로 보고 .env 에 저장
+        """
+        try:
+            event_loop_group = io.EventLoopGroup(1)
+            host_resolver = io.DefaultHostResolver(event_loop_group)
+            client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
+
+            mqtt_connection = mqtt_connection_builder.mtls_from_path(
+                endpoint=self.endpoint,
+                cert_filepath=os.path.join(self.cert_path, self.claim_cert),
+                pri_key_filepath=os.path.join(self.cert_path, self.claim_key),
+                client_bootstrap=client_bootstrap,
+                client_id=self.client_id,
+                keep_alive_secs=120,
+            )
+
+            print("[PROVISION] Claim 인증서로 MQTT 연결 시도 중...")
+            connect_future = mqtt_connection.connect()
+            connect_future.result(timeout=10)
+            print("[PROVISION] MQTT 연결 성공")
+
+            # 인증서 발급 요청
+            provision_topic = "$aws/certificates/create/json"
+            response_topic = "$aws/certificates/create/json/accepted"
+
+            received_response = False
+            new_cert_data = None
+
+            def on_message_received(topic, payload, **kwargs):
+                nonlocal received_response, new_cert_data
+                new_cert_data = json.loads(payload.decode())
+                received_response = True
+
+            subscribe_future, _ = mqtt_connection.subscribe(
+                topic=response_topic,
+                qos=mqtt.QoS.AT_LEAST_ONCE,
+                callback=on_message_received,
+            )
+            subscribe_future.result(timeout=10)
+
+            print("[PROVISION] 새 인증서 발급 요청 중...")
+            publish_future, _ = mqtt_connection.publish(
+                topic=provision_topic,
+                payload=json.dumps({}),
+                qos=mqtt.QoS.AT_LEAST_ONCE,
+            )
+            publish_future.result(timeout=10)
+
+            # 응답 대기
+            timeout = time.time() + 15
+            while not received_response and time.time() < timeout:
+                time.sleep(0.1)
+
+            if not new_cert_data:
+                print("[PROVISION] 인증서 발급 실패: 응답 없음")
+                return False
+
+            certificate_pem = new_cert_data.get("certificatePem")
+            cert_id = new_cert_data.get("certificateId")
+            ownership_token = new_cert_data.get("certificateOwnershipToken")
+
+            if not (certificate_pem and cert_id and ownership_token):
+                print(f"[PROVISION] 인증서 발급 실패: 응답 필드 부족: {new_cert_data}")
+                return False
+
+            # 새 인증서 저장 (예전 위치/이름과 동일하게)
+            cert_file = os.path.join(self.cert_path, "device.pem.crt")
+            key_file = os.path.join(self.cert_path, "private.pem.key")
+            with open(cert_file, "w", encoding="utf-8") as f:
+                f.write(certificate_pem)
+            # private key 는 응답에 없고, 기존 claim key를 그대로 쓸 수도 있지만,
+            # 원래 코드처럼 ownership_token 기반 흐름만 그대로 따라간다고 가정
+
+            print(f"[PROVISION] 새 인증서 저장: {cert_file}, {key_file}")
+
+            # 사물 등록 (thingName → matterhub_id)
+            success = self.register_thing(mqtt_connection, cert_id, ownership_token)
+            if not success:
+                print("[PROVISION] 사물 등록 실패")
+                return False
+
+            print("[PROVISION] 프로비저닝 플로우 완료")
+            return True
+
+        except Exception as e:
+            print(f"[PROVISION] 프로비저닝 실패: {e}")
+            return False
 
 def publish_bootstrap_all_states():
     """MQTT 연결 성공 후 1회만: 전체 상태를 type=bootstrap_all_states 로 발행"""
@@ -907,17 +1132,18 @@ def _konai_ts():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _konai_publish(payload_dict):
-    """KONAI_TOPIC_RESPONSE로 dict 발행"""
+def _konai_publish(payload_dict, response_topic=None):
+    """코나이/테스트 토픽으로 dict 발행. response_topic이 없으면 기본 KONAI_TOPIC_RESPONSE 사용."""
+    target_topic = response_topic or KONAI_TOPIC_RESPONSE
     global_mqtt_connection.publish(
-        topic=KONAI_TOPIC_RESPONSE,
+        topic=target_topic,
         payload=json.dumps(payload_dict, ensure_ascii=False),
         qos=mqtt.QoS.AT_MOST_ONCE,
     )
 
 
-def _konai_publish_error(correlation_id, code, message, detail=None):
-    """오류 응답 발행 (type: error)"""
+def _konai_publish_error(correlation_id, code, message, detail=None, response_topic=None):
+    """오류 응답 발행 (type: error). response_topic이 없으면 기본 KONAI_TOPIC_RESPONSE 사용."""
     body = {
         "type": "error",
         "correlation_id": correlation_id,
@@ -926,11 +1152,11 @@ def _konai_publish_error(correlation_id, code, message, detail=None):
     }
     if detail is not None:
         body["error"]["detail"] = detail
-    _konai_publish(body)
+    _konai_publish(body, response_topic=response_topic)
     print(f"❌ 코나이 오류 응답: {code} - {message}")
 
 
-def handle_konai_states_request(payload_bytes=None):
+def handle_konai_states_request(payload_bytes=None, response_topic=None):
     """코나이 요청 처리: correlation_id 필수, entity_id 있으면 단일 조회 없으면 전체 조회.
     응답 규격: type, correlation_id, ts, data 또는 error."""
     try:
@@ -940,10 +1166,10 @@ def handle_konai_states_request(payload_bytes=None):
             try:
                 msg = json.loads(payload_bytes.decode("utf-8"))
             except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
-                _konai_publish_error(None, "INVALID_JSON", "Request payload is not valid JSON")
+                _konai_publish_error(None, "INVALID_JSON", "Request payload is not valid JSON", response_topic=response_topic)
                 return
             if not isinstance(msg, dict):
-                _konai_publish_error(None, "INVALID_JSON", "Request payload must be a JSON object")
+                _konai_publish_error(None, "INVALID_JSON", "Request payload must be a JSON object", response_topic=response_topic)
                 return
             correlation_id = msg.get("correlation_id")
             if not correlation_id:
@@ -951,7 +1177,7 @@ def handle_konai_states_request(payload_bytes=None):
                 if cid is not None and str(cid).strip():
                     correlation_id = str(cid).strip()
             if not correlation_id:
-                _konai_publish_error(None, "MISSING_CORRELATION_ID", "correlation_id is required")
+                _konai_publish_error(None, "MISSING_CORRELATION_ID", "correlation_id is required", response_topic=response_topic)
                 return
             eid = msg.get("entity_id")
             if eid is not None and str(eid).strip():
@@ -973,7 +1199,7 @@ def handle_konai_states_request(payload_bytes=None):
                         "correlation_id": correlation_id,
                         "ts": ts,
                         "data": data,
-                    })
+                    }, response_topic=response_topic)
                     print(f"✅ 코나이 단일 조회 응답: entity_id={entity_id}")
                 else:
                     _konai_publish_error(
@@ -981,11 +1207,12 @@ def handle_konai_states_request(payload_bytes=None):
                         "LOCAL_API_ERROR" if resp.status_code >= 500 else "INVALID_ENTITY_ID",
                         resp.text or f"HTTP {resp.status_code}",
                         detail={"status_code": resp.status_code},
+                        response_topic=response_topic,
                     )
             except requests.Timeout:
-                _konai_publish_error(correlation_id, "TIMEOUT", "Local API request timed out")
+                _konai_publish_error(correlation_id, "TIMEOUT", "Local API request timed out", response_topic=response_topic)
             except Exception as e:
-                _konai_publish_error(correlation_id, "LOCAL_API_ERROR", str(e), detail={"exception": type(e).__name__})
+                _konai_publish_error(correlation_id, "LOCAL_API_ERROR", str(e), detail={"exception": type(e).__name__}, response_topic=response_topic)
         else:
             url = f"{LOCAL_API_BASE}/local/api/states"
             try:
@@ -997,7 +1224,7 @@ def handle_konai_states_request(payload_bytes=None):
                         "correlation_id": correlation_id,
                         "ts": ts,
                         "data": data,
-                    })
+                    }, response_topic=response_topic)
                     print(f"✅ 코나이 전체 조회 응답: {len(data) if isinstance(data, list) else 'n/a'} entities")
                 else:
                     _konai_publish_error(
@@ -1005,24 +1232,32 @@ def handle_konai_states_request(payload_bytes=None):
                         "LOCAL_API_ERROR",
                         resp.text or f"HTTP {resp.status_code}",
                         detail={"status_code": resp.status_code},
+                        response_topic=response_topic,
                     )
             except requests.Timeout:
-                _konai_publish_error(correlation_id, "TIMEOUT", "Local API request timed out")
+                _konai_publish_error(correlation_id, "TIMEOUT", "Local API request timed out", response_topic=response_topic)
             except Exception as e:
-                _konai_publish_error(correlation_id, "LOCAL_API_ERROR", str(e), detail={"exception": type(e).__name__})
+                _konai_publish_error(correlation_id, "LOCAL_API_ERROR", str(e), detail={"exception": type(e).__name__}, response_topic=response_topic)
     except Exception as e:
         print(f"❌ 코나이 요청 처리 실패: {e}")
         try:
-            _konai_publish_error(None, "LOCAL_API_ERROR", str(e))
+            _konai_publish_error(None, "LOCAL_API_ERROR", str(e), response_topic=response_topic)
         except Exception:
             pass
 
 
 def mqtt_callback(topic, payload, **kwargs):
-    # 코나이: 요청 토픽 수신 시 로컬 API 호출 후 응답 토픽으로 발행 (payload에 entity_id 있으면 해당 센서만 조회)
+    # 코나이 & 테스트용 코나이 형식 토픽:
+    # 요청 토픽 수신 시 로컬 API 호출 후 해당 토픽용 응답 토픽으로 발행 (payload에 entity_id 있으면 해당 센서만 조회)
     if topic == KONAI_TOPIC_REQUEST:
         print(f"📩 코나이 요청 수신: {topic}")
-        handle_konai_states_request(payload)
+        handle_konai_states_request(payload, response_topic=KONAI_TOPIC_RESPONSE)
+        return
+    if KONAI_TEST_TOPIC_REQUEST and topic == KONAI_TEST_TOPIC_REQUEST:
+        # 테스트 토픽은 코나이와 동일한 JSON 스펙으로 동작하되, 응답은 테스트용 토픽으로 송출
+        test_response_topic = KONAI_TEST_TOPIC_RESPONSE or KONAI_TEST_TOPIC_REQUEST
+        print(f"🧪 코나이 테스트 요청 수신: {topic} → 응답 토픽: {test_response_topic}")
+        handle_konai_states_request(payload, response_topic=test_response_topic)
         return
 
     _message = json.loads(payload.decode('utf-8'))
@@ -1315,9 +1550,126 @@ def config():
             except Exception as e:
                 print(f"파일 생성 실패 {file_path}: {e}")
 
-# 사용 예시
+    # 메인 실행 진입점은 파일 맨 아래에 정의합니다.
+
+
+# =====================================================================
+# [TEST ONLY] KONAI Claim 프로비저닝 + AWS IoT Core 테스트 토픽 구독 코드
+#   - 이 코드는 코나이 연동 구조를 AWS IoT Core 테스트 토픽에서
+#     그대로 검증하기 위한 테스트 전용 코드입니다.
+#   - 운영 배포 시에는 이 섹션 전체를 제거하거나 비활성화하세요.
+#   - 실행 제어: 환경변수 ENABLE_KONAI_TEST_SUBSCRIBER="1" 일 때만 동작
+# =====================================================================
+
+def _build_konai_test_subscriber_connection():
+    """
+    Claim 기반 프로비저닝으로 발급된 device 인증서를 사용해
+    AWS IoT Core(AWSProvisioningClient.endpoint)에 MQTT 연결을 생성.
+    필요 시 provision_device() 를 호출해 인증서를 자동 발급합니다.
+    """
+    provisioning_client = AWSProvisioningClient()
+
+    has_cert, cert_file, key_file = provisioning_client.check_certificate()
+    if not has_cert:
+        print("🧪 [TEST] device 인증서가 없어 Claim 프로비저닝을 실행합니다. (테스트 전용)")
+        success = provisioning_client.provision_device()
+        if not success:
+            print("❌ [TEST] Claim 프로비저닝 실패 - 테스트 구독을 시작하지 않습니다.")
+            return None
+        has_cert, cert_file, key_file = provisioning_client.check_certificate()
+        if not has_cert:
+            print("❌ [TEST] 프로비저닝 후에도 device 인증서를 찾을 수 없습니다.")
+            return None
+
+    event_loop_group = io.EventLoopGroup(1)
+    host_resolver = io.DefaultHostResolver(event_loop_group)
+    client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
+
+    # 테스트용 클라이언트 ID (환경변수로 오버라이드 가능)
+    test_client_id = os.environ.get("AWS_TEST_CLIENT_ID", "whatsmatter-nipa-test-subscriber")
+
+    print(f"🧪 [TEST] AWS IoT Core 테스트 구독용 MQTT 연결 생성 "
+          f"(endpoint={provisioning_client.endpoint}, client_id={test_client_id})")
+
+    mqtt_conn = mqtt_connection_builder.mtls_from_path(
+        endpoint=provisioning_client.endpoint,
+        cert_filepath=cert_file,
+        pri_key_filepath=key_file,
+        client_bootstrap=client_bootstrap,
+        client_id=test_client_id,
+        keep_alive_secs=120,
+    )
+    return mqtt_conn
+
+
+def _run_konai_test_subscriber_loop():
+    """
+    TEST ONLY:
+    - KONAI_TEST_TOPIC / KONAI_TEST_TOPIC_REQUEST 를 구독해서
+      mqtt.py 가 발행하는 테스트 응답을 동일 프로세스에서 확인하는 용도.
+    - 별도 클라이언트 없이 로그만으로 테스트할 때 사용.
+    """
+    # 테스트 토픽 결정 (요청 토픽 기준)
+    test_topic = KONAI_TEST_TOPIC_REQUEST or KONAI_TEST_TOPIC
+    if not test_topic:
+        print("⚠️ [TEST] KONAI_TEST_TOPIC 이 설정되지 않아 테스트 구독을 시작하지 않습니다.")
+        return
+
+    try:
+        mqtt_conn = _build_konai_test_subscriber_connection()
+        if mqtt_conn is None:
+            return
+
+        print("🧪 [TEST] AWS IoT Core 테스트 구독용 MQTT 연결 시도 중...")
+        connect_future = mqtt_conn.connect()
+        connect_future.result()
+        print("✅ [TEST] 테스트 구독용 MQTT 연결 성공")
+
+        def on_message(topic, payload, **kwargs):
+            try:
+                body = json.loads(payload.decode("utf-8"))
+            except Exception:
+                body = payload.decode("utf-8", errors="ignore")
+            print("\n📩 [TEST 수신] ===============================")
+            print(f"topic = {topic}")
+            print(json.dumps(body, ensure_ascii=False, indent=2))
+            print("===========================================\n")
+
+        print(f"📡 [TEST] 테스트 토픽 구독 요청: {test_topic}")
+        subscribe_future, _ = mqtt_conn.subscribe(
+            topic=test_topic,
+            qos=mqtt.QoS.AT_LEAST_ONCE,
+            callback=on_message,
+        )
+        subscribe_future.result()
+        print(f"✅ [TEST] 테스트 토픽 구독 완료: {test_topic}")
+        print("⏳ [TEST] 테스트 구독 루프 진입 (이 스레드는 백그라운드에서 계속 대기합니다)")
+
+        # 메인 프로세스와 함께 살아있도록 간단한 루프 유지
+        while True:
+            time.sleep(5)
+
+    except Exception as e:
+        print(f"❌ [TEST] 테스트 구독 루프 오류: {e}")
+
+
+def start_konai_test_subscriber_if_enabled():
+    """
+    ENABLE_KONAI_TEST_SUBSCRIBER 환경변수가 "1" 일 때
+    테스트 구독 스레드를 백그라운드에서 시작합니다.
+    """
+    if os.environ.get("ENABLE_KONAI_TEST_SUBSCRIBER", "0") != "1":
+        return
+
+    print("🧪 [TEST] ENABLE_KONAI_TEST_SUBSCRIBER=1 → 테스트 구독 스레드 시작")
+    t = threading.Thread(target=_run_konai_test_subscriber_loop, name="konai-test-subscriber")
+    t.daemon = True
+    t.start()
+
+
+# ======================== 메인 실행 진입점 ==========================
 if __name__ == "__main__":
-    
+
     config()
 
     one_time = one_time_schedule()
@@ -1326,7 +1678,7 @@ if __name__ == "__main__":
     p.start()
     o = threading.Thread(target=one_time_scheduler, args=[one_time])
     o.start()
-    
+
     # 업데이트 큐 처리 스레드 시작
     q = threading.Thread(target=process_update_queue)
     q.daemon = True
@@ -1337,16 +1689,16 @@ if __name__ == "__main__":
         aws_client = AWSIoTClient()
         global_mqtt_connection = aws_client.connect_mqtt()
         print("MQTT 연결 성공")
-        
+
         # 코나이 bootstrap은 구독 완료 후 1회 호출
     except Exception as e:
         print(f"MQTT 연결 실패: {e}")
         # 🚀 동시성 문제 해결: 연결 실패 시에도 재시도 로직 적용
         print("🔄 연결 실패로 인한 재시도 로직 시작...")
-        
+
         max_retries = 3
         base_delay = 5
-        
+
         for attempt in range(max_retries):
             try:
                 # 동시 연결 방지를 위한 랜덤 지연
@@ -1354,17 +1706,17 @@ if __name__ == "__main__":
                 random_delay = random.uniform(2, 8)  # 2-8초 랜덤 지연
                 print(f"🔄 연결 재시도 전 지연: {random_delay:.1f}초")
                 time.sleep(random_delay)
-                
+
                 print(f"🔄 MQTT 연결 재시도: {attempt + 1}/{max_retries}")
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
                 print("MQTT 연결 성공")
                 # bootstrap은 구독 완료 후 1회만 호출됨
                 break
-                
+
             except Exception as retry_e:
                 print(f"❌ 연결 재시도 실패 (시도 {attempt + 1}/{max_retries}): {retry_e}")
-                
+
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
                     print(f"⏳ 재시도 전 대기: {delay}초")
@@ -1372,22 +1724,29 @@ if __name__ == "__main__":
                 else:
                     print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
                     sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
-    
-    # 🚀 토픽 구독 (matterhub_id 없으면 matterhub/{id}/api 등 제외 → .env의 matterhub_id 설정 시 추가 구독)
-    subscribe_topics = [KONAI_TOPIC_REQUEST, "matterhub/api", "matterhub/group/all/api"]
+
+    # 🚀 토픽 구독
+    # - 코나이: KONAI_TOPIC_REQUEST (또는 KONAI_TOPIC) 1개
+    # - 테스트용 코나이 형식 토픽: KONAI_TEST_TOPIC_REQUEST (옵션)
+    # - 레거시: matterhub/{matterhub_id}/api, matterhub/api, matterhub/group/all/api, matterhub/update/specific/{matterhub_id}
+    subscribe_topics = [KONAI_TOPIC_REQUEST]
+    if KONAI_TEST_TOPIC_REQUEST:
+        subscribe_topics.append(KONAI_TEST_TOPIC_REQUEST)
     if matterhub_id:
         subscribe_topics.extend([
             f"matterhub/{matterhub_id}/api",
+            "matterhub/api",
+            "matterhub/group/all/api",
             f"matterhub/update/specific/{matterhub_id}",
         ])
     else:
-        print("⚠️ .env에 matterhub_id 없음 → matterhub/{id}/api, matterhub/update/specific/{id} 구독 생략")
-    
-    print("📡 토픽 구독 시작...")
+        print("⚠️ .env에 matterhub_id 없음 → 레거시 matterhub/* 토픽은 구독하지 않습니다.")
+
+    print(f"📡 토픽 구독 시작... (총 {len(subscribe_topics)}개)")
     for topic in subscribe_topics:
         max_retries = 3
         base_delay = 1
-        
+
         for attempt in range(max_retries):
             try:
                 # 동시 구독 방지를 위한 랜덤 지연
@@ -1396,20 +1755,22 @@ if __name__ == "__main__":
                     random_delay = random.uniform(0.5, 1.5)  # 0.5-1.5초 랜덤 지연
                     print(f"🔄 구독 재시도 전 지연: {random_delay:.1f}초")
                     time.sleep(random_delay)
-                
+
+                print(f"➡️ SUBSCRIBE 요청: {topic}")
                 subscribe_future, packet_id = global_mqtt_connection.subscribe(
                     topic=topic,
                     qos=mqtt.QoS.AT_LEAST_ONCE,
                     callback=mqtt_callback
                 )
-                
+
                 subscribe_result = subscribe_future.result(timeout=10)
-                print(f"✅ {topic} 토픽 구독 완료")
+                SUBSCRIBED_TOPICS.add(topic)
+                print(f"✅ SUBSCRIBE 성공: {topic}")
                 break
-                
+
             except Exception as e:
-                print(f"❌ 토픽 구독 실패 (시도 {attempt + 1}/{max_retries}): {topic} - {e}")
-                
+                print(f"❌ 토픽 구독 실패 (시도 {attempt + 1}/{max_retries}): {topic} - {e!r} ({type(e).__name__})")
+
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
                     print(f"⏳ 구독 재시도 전 대기: {delay}초")
@@ -1417,33 +1778,35 @@ if __name__ == "__main__":
                 else:
                     print(f"❌ 토픽 구독 최종 실패: {topic}")
                     # 구독 실패해도 프로그램 계속 실행 (일부 토픽만 실패할 수 있음)
-    
+
     print("📡 모든 토픽 구독 완료")
 
     # 코나이: bootstrap 전체 상태 1회 발행 (연결·구독 후 1회)
     publish_bootstrap_all_states()
 
+    # 🧪 TEST ONLY: 환경변수 기반으로 테스트 구독 스레드 시작
+    start_konai_test_subscriber_if_enabled()
+
     try:
         # 최적화된 메인 루프
         connection_check_counter = 0
-        
+
         while True:
             # 상태 발행 (변경사항 감지 기반)
             publish_device_state()
-            
+
             # 간단한 헬스체크 전송 (10분 간격)
             send_health_check()
-            
+
             # 60초마다 MQTT 연결 상태 확인 (비용 절감을 위해 빈도 감소)
             connection_check_counter += 1
             if connection_check_counter >= 12:  # 5초 * 12 = 60초마다
                 check_mqtt_connection()
                 connection_check_counter = 0
-            
+
             # CPU 사용량 감소를 위한 대기
             time.sleep(5)
-            
+
     except KeyboardInterrupt:
         print("프로그램 종료")
         global_mqtt_connection.disconnect()
-        
