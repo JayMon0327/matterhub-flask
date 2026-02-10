@@ -10,13 +10,10 @@
 
 from flask import Flask, request, jsonify
 import requests
-import schedule
-import time
 import json
 import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
-from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files, read_period_history_daily_sample, read_period_history_daily_hourly
 from dotenv import load_dotenv, find_dotenv
 import os, sys
 import subprocess
