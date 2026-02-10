@@ -16,7 +16,6 @@ import json
 import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
-from sub.collector import start_collector
 from sub.logs_api import read_logs, read_tail_logs, get_log_stats, list_log_files, read_daily_sample_logs, read_period_history_json, list_period_history_files, read_period_history_daily_sample, read_period_history_daily_hourly
 from dotenv import load_dotenv, find_dotenv
 import os, sys
@@ -655,13 +654,6 @@ p = threading.Thread(target=periodic_scheduler)
 p.start()
 o = threading.Thread(target=one_time_scheduler, args=[one_time])
 o.start()
-
-# 상태 히스토리 수집기 시작
-try:
-    collector_thread = start_collector()
-    print("상태 히스토리 수집기가 시작되었습니다.")
-except Exception as e:
-    print(f"상태 히스토리 수집기 시작 실패: {e}")
 
 if __name__ == '__main__':
     app.run('0.0.0.0',debug=True,port=8100)
