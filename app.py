@@ -61,12 +61,11 @@ def config():
 
     file_list = [schedules_file_path, rules_file_path, rooms_file_path, devices_file_path, notifications_file_path]
     
-    for f in file_list:
-        if not os.path.exists(f):
-            with open(f, 'w') as f:
+    for path in file_list:
+        if not os.path.exists(path):
+            with open(path, 'w') as f:
                 json.dump([], f)
-
-            print(f"{f} 파일이 생성되었습니다.")
+            print(f"{path} 파일이 생성되었습니다.")
 
 
 

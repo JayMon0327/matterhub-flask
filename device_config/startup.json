@@ -2,32 +2,32 @@
   "apps": [
     {
       "name": "wm-ruleEngine",
-      "script": "sub/ruleEngine.py",
-      "interpreter": "venv/bin/python3",
+      "script": "../sub/ruleEngine.py",
+      "interpreter": "../venv/bin/python3",
       "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     },
     {
       "name": "wm-notifier",
-      "script": "sub/notifier.py",
-      "interpreter": "venv/bin/python3",
+      "script": "../sub/notifier.py",
+      "interpreter": "../venv/bin/python3",
       "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     },
     {
       "name": "wm-app",
-      "script": "app.py",
-      "interpreter": "venv/bin/python3",
+      "script": "../app.py",
+      "interpreter": "../venv/bin/python3",
       "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     },
     {
       "name": "wm-mqtt",
-      "script": "mqtt.py",
-      "interpreter": "venv/bin/python3",
+      "script": "../mqtt.py",
+      "interpreter": "../venv/bin/python3",
       "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
