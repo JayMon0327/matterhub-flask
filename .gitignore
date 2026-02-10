@@ -31,3 +31,5 @@ device.pem.crt
 private.pem.key
 
 __init__.py
+
+.KONAI_CERTIFICATE_GUIDE.md
