@@ -1,3 +1,14 @@
+# Flask API
+flask
+requests
+
+# 환경 변수 (.env)
+python-dotenv
+
+# WebSocket (notifier, ruleEngine)
+websockets
+
+# 스케줄러, AWS IoT
 schedule
 awscrt
 awsiotsdk
