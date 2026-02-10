@@ -1,0 +1,32 @@
+{
+  "apps": [
+    {
+      "name": "wm-ruleEngine",
+      "script": "sub/ruleEngine.py",
+      "interpreter": "venv/bin/python3",
+      "instances": 1,
+      "autorestart": true
+    },
+    {
+      "name": "wm-notifier",
+      "script": "sub/notifier.py",
+      "interpreter": "venv/bin/python3",
+      "instances": 1,
+      "autorestart": true
+    },
+    {
+      "name": "wm-app",
+      "script": "app.py",
+      "interpreter": "venv/bin/python3",
+      "instances": 1,
+      "autorestart": true
+    },
+    {
+      "name": "wm-mqtt",
+      "script": "mqtt.py",
+      "interpreter": "venv/bin/python3",
+      "instances": 1,
+      "autorestart": true
+    }
+  ]
+}
