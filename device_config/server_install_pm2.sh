@@ -12,6 +12,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# sudo로 실행 중이면 PM2가 root 소유로 떠서, 이후 pm2 list/logs 도 반드시 sudo 로 봐야 함
+if [ "$(id -u)" = "0" ]; then
+  echo "⚠️  root로 실행 중입니다. 가능하면 sudo 없이 실행하세요 (pm2 list / pm2 logs 를 sudo 없이 쓰려면)."
+fi
 echo "=== 프로젝트 루트: $PROJECT_ROOT ==="
 
 # --- 1) Python 가상환경 가능 여부 (python3-venv) ---
@@ -37,7 +41,8 @@ if ! command -v pm2 &>/dev/null; then
   exit 1
 fi
 echo "[3/3] PM2로 앱 시작 (cwd는 프로젝트 루트)..."
-STARTUP_TMP=$(mktemp)
+# 확장자 .json 이 없으면 PM2가 ecosystem이 아니라 스크립트로 인식해 'tmp' 한 개만 뜨고 실패함
+STARTUP_TMP=$(mktemp).json
 sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" device_config/startup.json > "$STARTUP_TMP"
 pm2 start "$STARTUP_TMP"
 rm -f "$STARTUP_TMP"
