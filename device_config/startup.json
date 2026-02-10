@@ -4,7 +4,7 @@
       "name": "wm-ruleEngine",
       "script": "sub/ruleEngine.py",
       "interpreter": "venv/bin/python3",
-      "cwd": "/home/whatsmatter/Desktop/matterhub",
+      "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     },
@@ -12,7 +12,7 @@
       "name": "wm-notifier",
       "script": "sub/notifier.py",
       "interpreter": "venv/bin/python3",
-      "cwd": "/home/whatsmatter/Desktop/matterhub",
+      "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     },
@@ -20,7 +20,7 @@
       "name": "wm-app",
       "script": "app.py",
       "interpreter": "venv/bin/python3",
-      "cwd": "/home/whatsmatter/Desktop/matterhub",
+      "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     },
@@ -28,7 +28,7 @@
       "name": "wm-mqtt",
       "script": "mqtt.py",
       "interpreter": "venv/bin/python3",
-      "cwd": "/home/whatsmatter/Desktop/matterhub",
+      "cwd": "__PROJECT_ROOT__",
       "instances": 1,
       "autorestart": true
     }

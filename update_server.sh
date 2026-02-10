@@ -220,12 +220,14 @@ sleep 10
 echo "[INFO] 새로운 코드로 프로세스 시작 중..." | tee -a "$LOG_FILE"
 cd /home/hyodol/whatsmatter-hub-flask-server
 
-# device_config/startup.json 사용 (PM2 ecosystem)
+# device_config/startup.json 사용 (PM2 ecosystem, cwd 치환)
 if [ -f "device_config/startup.json" ]; then
     echo "[INFO] device_config/startup.json 사용하여 프로세스 시작" | tee -a "$LOG_FILE"
-    
-    $PM2 start device_config/startup.json
-    
+    PROJECT_ROOT="/home/hyodol/whatsmatter-hub-flask-server"
+    STARTUP_TMP=$(mktemp)
+    sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" device_config/startup.json > "$STARTUP_TMP"
+    $PM2 start "$STARTUP_TMP"
+    rm -f "$STARTUP_TMP"
 else
     echo "[INFO] startup.json 없음 - 개별 프로세스 시작" | tee -a "$LOG_FILE"
     

@@ -1,9 +1,10 @@
 #!/bin/bash
 # PM2 + venv 원클릭 설치 (패키지 설치 ~ PM2 기동까지 한 스크립트)
-# 사용법: 프로젝트 루트에서 실행
+# 사용법: 프로젝트 루트에서 실행 (sudo 없이 실행 권장)
 #   chmod +x device_config/server_install_pm2.sh
 #   ./device_config/server_install_pm2.sh
 #
+# ⚠️ sudo로 실행하면 PM2가 root로 떠서, 로그/재시작은 반드시 sudo pm2 logs, sudo pm2 list 로 확인.
 # 필요: pm2 설치됨 (npm install -g pm2). Debian/Ubuntu에서는 시스템 pip 대신 venv 사용.
 
 set -e
@@ -35,8 +36,11 @@ if ! command -v pm2 &>/dev/null; then
   echo "PM2 없음. 설치 후 다시 실행: npm install -g pm2"
   exit 1
 fi
-echo "[3/3] PM2로 앱 시작 (cwd는 startup.json 기준)..."
-pm2 start device_config/startup.json
+echo "[3/3] PM2로 앱 시작 (cwd는 프로젝트 루트)..."
+STARTUP_TMP=$(mktemp)
+sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" device_config/startup.json > "$STARTUP_TMP"
+pm2 start "$STARTUP_TMP"
+rm -f "$STARTUP_TMP"
 pm2 save
 pm2 list
 
