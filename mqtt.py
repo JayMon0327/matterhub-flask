@@ -1287,7 +1287,20 @@ def mqtt_callback(topic, payload, **kwargs):
     # 코나이 & 테스트용 코나이 형식 토픽:
     # 요청 토픽 수신 시 로컬 API 호출 후 해당 토픽용 응답 토픽으로 발행 (payload에 entity_id 있으면 해당 센서만 조회)
     if topic == KONAI_TOPIC_REQUEST:
-        print(f"📩 코나이 요청 수신: {topic}")
+        try:
+            prelim = json.loads(payload.decode("utf-8"))
+        except Exception:
+            prelim = None
+        # 이미 응답/이벤트로 발행된 메시지는 재처리하지 않음
+        if isinstance(prelim, dict) and prelim.get("type") in {
+            "query_response_all",
+            "query_response_single",
+            "error",
+            "entity_changed",
+            "bootstrap_all_states",
+        }:
+            return
+        print(f"코나이 요청 수신: {topic}")
         handle_konai_states_request(payload, response_topic=KONAI_TOPIC_RESPONSE)
         return
     if KONAI_TEST_TOPIC_REQUEST and topic == KONAI_TEST_TOPIC_REQUEST:
