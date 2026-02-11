@@ -5,9 +5,9 @@ matterhub_id 발급 전용 스크립트 (Claim 프로비저닝)
 Claim 인증서로 AWS IoT Core에 사물을 등록하고,
 발급된 thingName을 matterhub_id로 .env에 저장합니다.
 
-사용법:
+사용법 (PM2/venv 사용 시 가상환경 Python으로 실행):
   cd matterhub-flask
-  python run_provision.py
+  venv/bin/python3 run_provision.py
 
 필요 조건:
   - certificates/ 디렉토리에 Claim 인증서 존재
@@ -23,10 +23,22 @@ import os
 import sys
 
 # 프로젝트 루트에서 실행되도록
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _script_dir)
+os.chdir(_script_dir)
 
-from dotenv import load_dotenv
+# dotenv 등 의존성: venv 사용 필수 (PM2와 동일한 interpreter)
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("")
+    print("❌ dotenv 모듈을 찾을 수 없습니다.")
+    print("   PM2가 venv를 사용 중이면, 가상환경 Python으로 실행하세요:")
+    print("")
+    print("   venv/bin/python3 run_provision.py")
+    print("")
+    sys.exit(1)
+
 load_dotenv()
 
 # mqtt 모듈에서 AWSProvisioningClient import

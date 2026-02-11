@@ -453,30 +453,46 @@ class AWSProvisioningClient:
         registrationData['thingName'] 를 matterhub_id로 사용하고 .env에 저장합니다.
         """
         try:
-            template_topic = "$aws/provisioning-templates/whatsmatter-nipa-template/provision/json"
-            response_topic = "$aws/provisioning-templates/whatsmatter-nipa-template/provision/json/accepted"
+            template_name = os.environ.get("AWS_PROVISION_TEMPLATE_NAME", "whatsmatter-nipa-template")
+            template_topic = f"$aws/provisioning-templates/{template_name}/provision/json"
+            accepted_topic = f"$aws/provisioning-templates/{template_name}/provision/json/accepted"
+            rejected_topic = f"$aws/provisioning-templates/{template_name}/provision/json/rejected"
 
             received_response = False
             registration_data = None
+            reject_reason = None
 
-            def on_message_received(topic, payload, **kwargs):
+            def on_accepted(topic, payload, **kwargs):
                 nonlocal received_response, registration_data
                 registration_data = json.loads(payload.decode())
                 received_response = True
 
-            # 응답 구독
-            subscribe_future, _ = mqtt_connection.subscribe(
-                topic=response_topic,
-                qos=mqtt.QoS.AT_LEAST_ONCE,
-                callback=on_message_received,
-            )
-            subscribe_future.result(timeout=10)
+            def on_rejected(topic, payload, **kwargs):
+                nonlocal received_response, reject_reason
+                try:
+                    reject_reason = json.loads(payload.decode())
+                except Exception:
+                    reject_reason = {"raw": payload.decode(errors="ignore")}
+                received_response = True
 
-            # 템플릿으로 사물 등록 요청
+            # accepted / rejected 둘 다 구독
+            for sub_topic, callback in [(accepted_topic, on_accepted), (rejected_topic, on_rejected)]:
+                sub_fut, _ = mqtt_connection.subscribe(
+                    topic=sub_topic,
+                    qos=mqtt.QoS.AT_LEAST_ONCE,
+                    callback=callback,
+                )
+                sub_fut.result(timeout=10)
+
+            print(f"[PROVISION] 템플릿: {template_name}")
+
+            # 템플릿으로 사물 등록 요청 (원본: Parameters.SerialNumber 필수)
             payload = {
-                "certificateId": certificate_id,
+                "Parameters": {
+                    "SerialNumber": f"SN-{int(time.time())}",
+                },
                 "certificateOwnershipToken": cert_ownership_token,
-                "parameters": {},
+                "certificateId": certificate_id,
             }
             print("[PROVISION] 사물 등록 요청 중...")
             publish_future, _ = mqtt_connection.publish(
@@ -486,10 +502,14 @@ class AWSProvisioningClient:
             )
             publish_future.result(timeout=10)
 
-            # 응답 대기
-            timeout = time.time() + 10
+            # 응답 대기 (15초)
+            timeout = time.time() + 15
             while not received_response and time.time() < timeout:
                 time.sleep(0.1)
+
+            if reject_reason:
+                print(f"[PROVISION] 사물 등록 거부됨: {reject_reason}")
+                return False
 
             if registration_data:
                 thing_name = registration_data.get("thingName")
@@ -528,7 +548,8 @@ class AWSProvisioningClient:
                 print(f"")
                 return True
 
-            print("[PROVISION] 사물 등록 실패: 응답 없음")
+            print("[PROVISION] 사물 등록 실패: 응답 없음 (템플릿명·endpoint·Claim 정책 확인)")
+            print(f"   - 템플릿: {template_name}, endpoint: {self.endpoint}")
             return False
 
         except Exception as e:
@@ -605,15 +626,18 @@ class AWSProvisioningClient:
                 print(f"[PROVISION] 인증서 발급 실패: 응답 필드 부족: {new_cert_data}")
                 return False
 
-            # 새 인증서 저장 (예전 위치/이름과 동일하게)
+            # 새 인증서 저장 (원본과 동일: certificatePem + privateKey)
             cert_file = os.path.join(self.cert_path, "device.pem.crt")
             key_file = os.path.join(self.cert_path, "private.pem.key")
             with open(cert_file, "w", encoding="utf-8") as f:
                 f.write(certificate_pem)
-            # private key 는 응답에 없고, 기존 claim key를 그대로 쓸 수도 있지만,
-            # 원래 코드처럼 ownership_token 기반 흐름만 그대로 따라간다고 가정
-
-            print(f"[PROVISION] 새 인증서 저장: {cert_file}, {key_file}")
+            private_key = new_cert_data.get("privateKey")
+            if private_key:
+                with open(key_file, "w", encoding="utf-8") as f:
+                    f.write(private_key)
+                print(f"[PROVISION] 새 인증서 저장: {cert_file}, {key_file}")
+            else:
+                print(f"[PROVISION] 경고: privateKey 없음, claim key 재사용. {cert_file} 만 저장")
 
             # 사물 등록 (thingName → matterhub_id)
             success = self.register_thing(mqtt_connection, cert_id, ownership_token)
