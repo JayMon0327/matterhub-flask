@@ -73,7 +73,7 @@ KONAI_TEST_TOPIC_REQUEST = os.environ.get("KONAI_TEST_TOPIC_REQUEST", KONAI_TEST
 KONAI_TEST_TOPIC_RESPONSE = os.environ.get("KONAI_TEST_TOPIC_RESPONSE", KONAI_TEST_TOPIC or "").strip().strip('"') or None
 
 # 변경 시마다 코나이 토픽으로 entity_changed 발행할 entity_id 목록 (쉼표 구분)
-KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get("KONAI_REPORT_ENTITY_IDS", "sensor.smart_ht_sensor_ondo")
+KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get("KONAI_REPORT_ENTITY_IDS", "sensor.smart_ht_sensor_ondo,sensor.smart_ht_sensor_seubdo")
 KONAI_REPORT_ENTITY_IDS = [eid.strip() for eid in KONAI_REPORT_ENTITY_IDS_RAW.split(",") if eid.strip()]
 # 이벤트 발행 제한: 동일 entity_id 최소 발행 간격(초), 짧은 시간 내 동일 값 연속 발행 방지(초)
 KONAI_EVENT_THROTTLE_SEC = max(0, float(os.environ.get("KONAI_EVENT_THROTTLE_SEC", "2")))
@@ -108,7 +108,6 @@ class StateChangeDetector:
             'sensor.smart_ht_sensor_ondo_1', 
             'sensor.smart_ht_sensor_ondo_2',
             'sensor.smart_ht_sensor_ondo_3',
-            'sensor.smart_ht_sensor_seubdo',
             'sensor.smart_ht_sensor_seubdo_1',
             'sensor.smart_ht_sensor_seubdo_2', 
             'sensor.smart_ht_sensor_seubdo_3',
