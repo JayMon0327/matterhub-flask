@@ -46,9 +46,9 @@ matterhub_id = (os.environ.get('matterhub_id') or '').strip().strip('"') or None
 
 # matterhub_id 상태 로그 (Claim 프로비저닝 발급 여부 확인용)
 if matterhub_id:
-    print(f"📌 matterhub_id 로드됨: {matterhub_id} (.env에서 읽음)")
+    print(f"matterhub_id 로드됨: {matterhub_id}")
 else:
-    print("⚠️ matterhub_id 없음 → Claim 프로비저닝 실행 후 .env에 등록하세요. (가이드: MATTERHUB_ID_GUIDE.md)")
+    print("matterhub_id 없음 (Claim 프로비저닝 후 .env 등록, 가이드: MATTERHUB_ID_GUIDE.md)")
 
 # 디버깅용: 현재 구독된 토픽들을 추적
 SUBSCRIBED_TOPICS = set()
@@ -187,7 +187,7 @@ def publish_alert_event(alert_payload):
             qos=mqtt.QoS.AT_MOST_ONCE  # QoS0으로 비용 최소화
         )
         
-        print(f"📡 AWS IoT Core 알림 이벤트 발행: {alert_topic}")
+        print(f"AWS IoT Core 알림 이벤트 발행: {alert_topic}")
         
     except Exception as e:
         print(f"❌ AWS IoT Core 알림 이벤트 발행 실패: {e}")
@@ -248,32 +248,27 @@ def check_mqtt_connection():
                 if attempt > 0:
                     import random
                     random_delay = random.uniform(0.5, 2.0)  # 0.5-2초 랜덤 지연
-                    print(f"🔄 재연결 지연: {random_delay:.1f}초")
+                    print(f"재연결 지연: {random_delay:.1f}초")
                     time.sleep(random_delay)
                 
                 # 재연결
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
 
-                # 재구독:
-                # - 코나이 토픽: KONAI_TOPIC_REQUEST
-                # - 테스트용 코나이 토픽: KONAI_TEST_TOPIC_REQUEST (옵션)
-                # - 레거시 matterhub 토픽 (matterhub_id가 있을 때만)
                 subscribe_topics = [KONAI_TOPIC_REQUEST]
                 if KONAI_TEST_TOPIC_REQUEST:
                     subscribe_topics.append(KONAI_TEST_TOPIC_REQUEST)
-                if matterhub_id:
+                if matterhub_id and os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "0") == "1":
                     subscribe_topics.extend([
                         f"matterhub/{matterhub_id}/api",
                         "matterhub/api",
                         "matterhub/group/all/api",
                         f"matterhub/update/specific/{matterhub_id}",
                     ])
-                print(f"📡 재구독 대상 토픽들: {', '.join(subscribe_topics)}")
                 
                 for t in subscribe_topics:
                     try:
-                        print(f"➡️ SUBSCRIBE 재요청: {t}")
+                        print(f"SUBSCRIBE 재요청: {t}")
                         subscribe_future, _ = global_mqtt_connection.subscribe(
                             topic=t,
                             qos=mqtt.QoS.AT_LEAST_ONCE,
@@ -294,7 +289,7 @@ def check_mqtt_connection():
                 
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
-                    print(f"⏳ 재연결 재시도 전 대기: {delay}초")
+                    print(f"재연결 재시도 전 대기: {delay}초")
                     time.sleep(delay)
                 else:
                     print(f"❌ 재연결 최종 실패: {max_retries}회 시도 후 포기")
@@ -347,10 +342,10 @@ class AWSIoTClient:
         def on_interrupted(connection, error, **kwargs):
             global is_connected_flag, reconnect_attempts
             is_connected_flag = False
-            print(f"⚠️ MQTT 연결 끊김 감지: {error}")
+            print(f"MQTT 연결 끊김: {error}")
             if SUBSCRIBED_TOPICS:
-                print(f"📡 현재 구독 중이던 토픽들: {', '.join(sorted(SUBSCRIBED_TOPICS))}")
-            print(f"🔄 자동 재연결 시도 준비 중... (현재 시도: {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
+                print(f"구독 중: {', '.join(sorted(SUBSCRIBED_TOPICS))}")
+            print(f"재연결 시도 ({reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
 
         def on_resumed(connection, return_code, session_present, **kwargs):
             global is_connected_flag, reconnect_attempts
@@ -389,7 +384,7 @@ class AWSIoTClient:
                 if attempt > 0:
                     import random
                     random_delay = random.uniform(1, 3)  # 1-3초 랜덤 지연
-                    print(f"🔄 동시 연결 방지를 위한 지연: {random_delay:.1f}초")
+                    print(f"연결 재시도 지연: {random_delay:.1f}초")
                     time.sleep(random_delay)
                 
                 connect_future = mqtt_conn.connect()
@@ -409,7 +404,7 @@ class AWSIoTClient:
                 if attempt < max_retries - 1:
                     # 지수 백오프: 2, 4, 8, 16초
                     delay = base_delay * (2 ** attempt)
-                    print(f"⏳ 재시도 전 대기: {delay}초")
+                    print(f"재시도 전 대기: {delay}초")
                     time.sleep(delay)
                 else:
                     print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
@@ -538,14 +533,7 @@ class AWSProvisioningClient:
                     for key, value in env_data.items():
                         f.write(f"{key}={value}\n")
 
-                print(f"")
-                print(f"═══════════════════════════════════════════════════════════════")
-                print(f"✅ [PROVISION] matterhub_id 발급 완료: {matterhub_id}")
-                print(f"   → .env 파일에 자동 저장됨. 아래 명령으로 확인:")
-                print(f"   grep matterhub_id .env")
-                print(f"   → 적용을 위해 mqtt.py (또는 PM2) 재시작 필요")
-                print(f"═══════════════════════════════════════════════════════════════")
-                print(f"")
+                print(f"✅ [PROVISION] matterhub_id 발급 완료: {matterhub_id} (.env 저장됨, mqtt.py 재시작 필요)")
                 return True
 
             print("[PROVISION] 사물 등록 실패: 응답 없음 (템플릿명·endpoint·Claim 정책 확인)")
@@ -914,7 +902,7 @@ def send_final_response(message, result):
         )
         
         print(f"✅ 최종 응답 전송 완료: {update_id}")
-        print(f"📊 결과: {'성공' if result['success'] else '실패'}")
+        print(f"결과: {'성공' if result['success'] else '실패'}")
         
     except Exception as e:
         print(f"❌ 최종 응답 전송 실패: {e}")
@@ -953,20 +941,16 @@ def execute_update_async(message):
         branch = message.get('branch', 'master')
         force_update = message.get('force_update', False)
         
-        print(f"🔧 백그라운드 업데이트 실행 시작: {update_id}")
-        print(f"📋 업데이트 상세 정보:")
-        print(f"   - Branch: {branch}")
-        print(f"   - Force Update: {force_update}")
-        print(f"   - Hub ID: {matterhub_id}")
+        print(f"백그라운드 업데이트 시작: {update_id} (branch={branch}, force={force_update}, hub_id={matterhub_id})")
         
         # 외부 스크립트 실행
         result = execute_external_update_script(branch, force_update, update_id)
         
-        print(f"📊 스크립트 실행 결과: {result}")
+        print(f"스크립트 실행 결과: {result}")
         
         # 스크립트가 백그라운드에서 실행된 경우 완료 대기
         if result.get('success') and result.get('pid'):
-            print(f"⏳ 업데이트 스크립트 완료 대기 중... (PID: {result['pid']})")
+            print(f"업데이트 스크립트 대기 (PID: {result['pid']})")
             
             # 업데이트 완료 대기 (최대 5분)
             max_wait_time = 300  # 5분
@@ -989,14 +973,14 @@ def execute_update_async(message):
                         break
                         
                 except Exception as e:
-                    print(f"⚠️ 프로세스 체크 실패: {e}")
+                    print(f"프로세스 체크 실패: {e}")
                 
                 time.sleep(wait_interval)
                 waited_time += wait_interval
-                print(f"⏳ 업데이트 대기 중... ({waited_time}/{max_wait_time}초)")
+                print(f"업데이트 대기 ({waited_time}/{max_wait_time}초)")
             
             if waited_time >= max_wait_time:
-                print(f"⚠️ 업데이트 타임아웃 ({max_wait_time}초)")
+                print(f"업데이트 타임아웃 ({max_wait_time}초)")
                 result['timeout'] = True
         
         # 최종 응답 전송
@@ -1018,7 +1002,7 @@ def process_update_queue():
             with update_queue_lock:
                 is_processing_update = True
             
-            print(f"🔄 큐에서 업데이트 명령 처리 시작: {message.get('update_id')}")
+            print(f"업데이트 큐 처리: {message.get('update_id')}")
             
             # 업데이트 실행
             execute_update_async(message)
@@ -1053,7 +1037,7 @@ def handle_update_command(message):
             update_queue.put(message)
             
             print(f"📥 업데이트 명령이 큐에 추가됨: {update_id}")
-            print(f"📊 현재 큐 크기: {update_queue.qsize()}")
+            print(f"큐 크기: {update_queue.qsize()}")
             
     except Exception as e:
         print(f"❌ Git 업데이트 실패: {e}")
@@ -1092,10 +1076,10 @@ def execute_external_update_script(branch='master', force_update=False, update_i
             os.chmod(script_path, 0o755)
             print(f"✅ 스크립트 권한 설정 완료: {script_path}")
         except Exception as e:
-            print(f"⚠️ 스크립트 권한 설정 실패: {e}")
+            print(f"스크립트 권한 설정 실패: {e}")
         
         print(f"🚀 외부 업데이트 스크립트 실행: {script_path}")
-        print(f"📋 매개변수: branch={branch}, force_update={force_update}, update_id={update_id}, hub_id={matterhub_id}")
+        print(f"매개변수: branch={branch}, force_update={force_update}, update_id={update_id}, hub_id={matterhub_id}")
         
         # 스크립트 내용 확인 (디버깅용)
         try:
@@ -1103,7 +1087,7 @@ def execute_external_update_script(branch='master', force_update=False, update_i
                 script_content = f.read()
                 print(f"📄 스크립트 내용 (처음 200자): {script_content[:200]}...")
         except Exception as e:
-            print(f"⚠️ 스크립트 내용 읽기 실패: {e}")
+            print(f"스크립트 내용 읽기 실패: {e}")
         
         # 백그라운드에서 스크립트 실행 (nohup 사용)
         force_flag = "true" if force_update else "false"
@@ -1114,7 +1098,7 @@ def execute_external_update_script(branch='master', force_update=False, update_i
         # 명령어 구성: 로그 파일에 출력 저장
         cmd = f"nohup bash {script_path} {branch} {force_flag} {update_id} {matterhub_id} > {log_file} 2>&1 & echo $!"
         
-        print(f"🔧 실행 명령어: {cmd}")
+        print(f"실행 명령어: {cmd}")
         
         # 스크립트 실행
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -1131,9 +1115,9 @@ def execute_external_update_script(branch='master', force_update=False, update_i
                     try:
                         with open(log_file, 'r') as f:
                             log_content = f.read()
-                            print(f"📋 스크립트 로그: {log_content}")
+                            print(f"스크립트 로그: {log_content}")
                     except Exception as e:
-                        print(f"⚠️ 로그 파일 읽기 실패: {e}")
+                        print(f"로그 파일 읽기 실패: {e}")
                 
                 return {
                     'success': True,
@@ -1148,7 +1132,7 @@ def execute_external_update_script(branch='master', force_update=False, update_i
                     'timestamp': int(time.time())
                 }
             except ValueError:
-                print(f"⚠️ PID 추출 실패: {result.stdout}")
+                print(f"PID 추출 실패: {result.stdout}")
                 return {
                     'success': True,
                     'message': 'Update script started but PID extraction failed',
@@ -1310,7 +1294,7 @@ def mqtt_callback(topic, payload, **kwargs):
     if KONAI_TEST_TOPIC_REQUEST and topic == KONAI_TEST_TOPIC_REQUEST:
         # 테스트 토픽은 코나이와 동일한 JSON 스펙으로 동작하되, 응답은 테스트용 토픽으로 송출
         test_response_topic = KONAI_TEST_TOPIC_RESPONSE or KONAI_TEST_TOPIC_REQUEST
-        print(f"🧪 코나이 테스트 요청 수신: {topic} → 응답 토픽: {test_response_topic}, matterhub_id={matterhub_id or '(미설정)'}")
+        print(f"코나이 테스트 요청: {topic} -> {test_response_topic}, matterhub_id={matterhub_id or '(미설정)'}")
         handle_konai_states_request(payload, response_topic=test_response_topic)
         return
 
@@ -1625,7 +1609,7 @@ def _build_konai_test_subscriber_connection():
 
     has_cert, cert_file, key_file = provisioning_client.check_certificate()
     if not has_cert:
-        print("🧪 [TEST] device 인증서가 없어 Claim 프로비저닝을 실행합니다. (테스트 전용)")
+        print("[TEST] device 인증서 없음, Claim 프로비저닝 실행")
         success = provisioning_client.provision_device()
         if not success:
             print("❌ [TEST] Claim 프로비저닝 실패 - 테스트 구독을 시작하지 않습니다.")
@@ -1642,7 +1626,7 @@ def _build_konai_test_subscriber_connection():
     # 테스트용 클라이언트 ID (환경변수로 오버라이드 가능)
     test_client_id = os.environ.get("AWS_TEST_CLIENT_ID", "whatsmatter-nipa-test-subscriber")
 
-    print(f"🧪 [TEST] AWS IoT Core 테스트 구독용 MQTT 연결 생성 "
+    print(f"[TEST] AWS IoT Core 테스트 구독 MQTT 연결 생성 "
           f"(endpoint={provisioning_client.endpoint}, client_id={test_client_id})")
 
     mqtt_conn = mqtt_connection_builder.mtls_from_path(
@@ -1666,7 +1650,7 @@ def _run_konai_test_subscriber_loop():
     # 테스트 토픽 결정 (요청 토픽 기준)
     test_topic = KONAI_TEST_TOPIC_REQUEST or KONAI_TEST_TOPIC
     if not test_topic:
-        print("⚠️ [TEST] KONAI_TEST_TOPIC 이 설정되지 않아 테스트 구독을 시작하지 않습니다.")
+        print("[TEST] KONAI_TEST_TOPIC 미설정, 테스트 구독 스킵")
         return
 
     try:
@@ -1674,7 +1658,7 @@ def _run_konai_test_subscriber_loop():
         if mqtt_conn is None:
             return
 
-        print("🧪 [TEST] AWS IoT Core 테스트 구독용 MQTT 연결 시도 중...")
+        print("[TEST] AWS IoT Core 테스트 구독 MQTT 연결 시도")
         connect_future = mqtt_conn.connect()
         connect_future.result()
         print("✅ [TEST] 테스트 구독용 MQTT 연결 성공")
@@ -1689,7 +1673,7 @@ def _run_konai_test_subscriber_loop():
             print(json.dumps(body, ensure_ascii=False, indent=2))
             print("===========================================\n")
 
-        print(f"📡 [TEST] 테스트 토픽 구독 요청: {test_topic}")
+        print(f"[TEST] 테스트 토픽 구독: {test_topic}")
         subscribe_future, _ = mqtt_conn.subscribe(
             topic=test_topic,
             qos=mqtt.QoS.AT_LEAST_ONCE,
@@ -1697,7 +1681,7 @@ def _run_konai_test_subscriber_loop():
         )
         subscribe_future.result()
         print(f"✅ [TEST] 테스트 토픽 구독 완료: {test_topic}")
-        print("⏳ [TEST] 테스트 구독 루프 진입 (이 스레드는 백그라운드에서 계속 대기합니다)")
+        print("[TEST] 테스트 구독 루프 진입")
 
         # 메인 프로세스와 함께 살아있도록 간단한 루프 유지
         while True:
@@ -1715,7 +1699,7 @@ def start_konai_test_subscriber_if_enabled():
     if os.environ.get("ENABLE_KONAI_TEST_SUBSCRIBER", "0") != "1":
         return
 
-    print("🧪 [TEST] ENABLE_KONAI_TEST_SUBSCRIBER=1 → 테스트 구독 스레드 시작 (matterhub_id={})".format(matterhub_id or "미설정"))
+    print("[TEST] ENABLE_KONAI_TEST_SUBSCRIBER=1, 테스트 구독 스레드 시작")
     t = threading.Thread(target=_run_konai_test_subscriber_loop, name="konai-test-subscriber")
     t.daemon = True
     t.start()
@@ -1748,7 +1732,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"MQTT 연결 실패: {e}")
         # 🚀 동시성 문제 해결: 연결 실패 시에도 재시도 로직 적용
-        print("🔄 연결 실패로 인한 재시도 로직 시작...")
+        print("연결 재시도 로직 시작")
 
         max_retries = 3
         base_delay = 5
@@ -1758,10 +1742,10 @@ if __name__ == "__main__":
                 # 동시 연결 방지를 위한 랜덤 지연
                 import random
                 random_delay = random.uniform(2, 8)  # 2-8초 랜덤 지연
-                print(f"🔄 연결 재시도 전 지연: {random_delay:.1f}초")
+                print(f"연결 재시도 지연: {random_delay:.1f}초")
                 time.sleep(random_delay)
 
-                print(f"🔄 MQTT 연결 재시도: {attempt + 1}/{max_retries}")
+                print(f"MQTT 연결 재시도: {attempt + 1}/{max_retries}")
                 aws_client = AWSIoTClient()
                 global_mqtt_connection = aws_client.connect_mqtt()
                 print("MQTT 연결 성공")
@@ -1773,32 +1757,29 @@ if __name__ == "__main__":
 
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
-                    print(f"⏳ 재시도 전 대기: {delay}초")
+                    print(f"재시도 전 대기: {delay}초")
                     time.sleep(delay)
                 else:
                     print(f"❌ MQTT 연결 최종 실패: {max_retries}회 시도 후 포기")
                     sys.exit(1)  # ← 이걸로 PM2가 재시작하게 됨
 
-    # 🚀 토픽 구독
-    # - 코나이: KONAI_TOPIC_REQUEST (또는 KONAI_TOPIC) 1개
-    # - 테스트용 코나이 형식 토픽: KONAI_TEST_TOPIC_REQUEST (옵션)
-    # - 레거시: matterhub/{matterhub_id}/api, matterhub/api, matterhub/group/all/api, matterhub/update/specific/{matterhub_id}
+    # 토픽 구독
+    # - 코나이: KONAI_TOPIC_REQUEST
+    # - 테스트용: KONAI_TEST_TOPIC_REQUEST (옵션)
+    # - matterhub/*: AWS IoT 브로커용. KONAI 브로커(a34vuzhubahjfj)와 별개이므로 기본 비활성화
     subscribe_topics = [KONAI_TOPIC_REQUEST]
     if KONAI_TEST_TOPIC_REQUEST:
         subscribe_topics.append(KONAI_TEST_TOPIC_REQUEST)
-    if matterhub_id:
+    if matterhub_id and os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "0") == "1":
         subscribe_topics.extend([
             f"matterhub/{matterhub_id}/api",
             "matterhub/api",
             "matterhub/group/all/api",
             f"matterhub/update/specific/{matterhub_id}",
         ])
-    else:
-        print("⚠️ .env에 matterhub_id 없음 → 레거시 matterhub/* 토픽은 구독하지 않습니다.")
 
-    # 테스트 토픽·레거시 토픽에서 matterhub_id 확인용 (Claim 프로비저닝 발급 여부)
-    print(f"📋 matterhub_id: {matterhub_id or '(미설정 — Claim 프로비저닝 후 .env 등록 필요, 가이드: MATTERHUB_ID_GUIDE.md)'}")
-    print(f"📡 토픽 구독 시작... (총 {len(subscribe_topics)}개)")
+    print(f"matterhub_id: {matterhub_id or '(미설정)'}")
+    print(f"토픽 구독 시작 (총 {len(subscribe_topics)}개)")
     for topic in subscribe_topics:
         max_retries = 3
         base_delay = 1
@@ -1809,10 +1790,10 @@ if __name__ == "__main__":
                 if attempt > 0:
                     import random
                     random_delay = random.uniform(0.5, 1.5)  # 0.5-1.5초 랜덤 지연
-                    print(f"🔄 구독 재시도 전 지연: {random_delay:.1f}초")
+                    print(f"구독 재시도 지연: {random_delay:.1f}초")
                     time.sleep(random_delay)
 
-                print(f"➡️ SUBSCRIBE 요청: {topic}")
+                print(f"SUBSCRIBE: {topic}")
                 subscribe_future, packet_id = global_mqtt_connection.subscribe(
                     topic=topic,
                     qos=mqtt.QoS.AT_LEAST_ONCE,
@@ -1829,13 +1810,13 @@ if __name__ == "__main__":
 
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
-                    print(f"⏳ 구독 재시도 전 대기: {delay}초")
+                    print(f"구독 재시도 전 대기: {delay}초")
                     time.sleep(delay)
                 else:
                     print(f"❌ 토픽 구독 최종 실패: {topic}")
                     # 구독 실패해도 프로그램 계속 실행 (일부 토픽만 실패할 수 있음)
 
-    print("📡 모든 토픽 구독 완료")
+    print("모든 토픽 구독 완료")
 
     # 코나이: bootstrap 전체 상태 1회 발행 (연결·구독 후 1회)
     publish_bootstrap_all_states()

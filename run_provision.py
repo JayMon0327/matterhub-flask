@@ -56,7 +56,7 @@ def main():
     has_cert, cert_file, key_file = client.check_certificate()
 
     if has_cert:
-        print(f"ℹ️  device 인증서 존재: {cert_file}")
+        print(f"device 인증서 존재: {cert_file}")
         print("   (이미 발급된 경우 .env의 matterhub_id를 확인하세요)")
         print("")
         ans = input("   프로비저닝을 다시 실행할까요? (기존 thingName 유지) [y/N]: ").strip().lower()
