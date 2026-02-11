@@ -362,7 +362,7 @@ class AWSIoTClient:
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
-            keep_alive_secs=120,
+            keep_alive_secs=300,
             on_connection_interrupted=on_interrupted,
             on_connection_resumed=on_resumed,
         )
@@ -561,7 +561,7 @@ class AWSProvisioningClient:
                 pri_key_filepath=os.path.join(self.cert_path, self.claim_key),
                 client_bootstrap=client_bootstrap,
                 client_id=self.client_id,
-                keep_alive_secs=120,
+                keep_alive_secs=300,
             )
 
             print("[PROVISION] Claim 인증서로 MQTT 연결 시도 중...")
@@ -1647,7 +1647,7 @@ def _build_konai_test_subscriber_connection():
         pri_key_filepath=key_file,
         client_bootstrap=client_bootstrap,
         client_id=test_client_id,
-        keep_alive_secs=120,
+        keep_alive_secs=300,
     )
     return mqtt_conn
 

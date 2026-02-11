@@ -73,7 +73,7 @@ def main():
         pri_key_filepath=key_file,
         client_bootstrap=client_bootstrap,
         client_id=CLIENT_ID,
-        keep_alive_secs=120,
+        keep_alive_secs=300,
     )
 
     print(f"연결: {ENDPOINT}, client_id={CLIENT_ID}")
