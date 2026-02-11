@@ -44,8 +44,20 @@ HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
 matterhub_id = (os.environ.get('matterhub_id') or '').strip().strip('"') or None  # None/빈문자열 정리
 
+# matterhub_id 상태 로그 (Claim 프로비저닝 발급 여부 확인용)
+if matterhub_id:
+    print(f"📌 matterhub_id 로드됨: {matterhub_id} (.env에서 읽음)")
+else:
+    print("⚠️ matterhub_id 없음 → Claim 프로비저닝 실행 후 .env에 등록하세요. (가이드: MATTERHUB_ID_GUIDE.md)")
+
 # 디버깅용: 현재 구독된 토픽들을 추적
 SUBSCRIBED_TOPICS = set()
+
+# 알림(온습도 센서 등) 이벤트 발행 로직은 코나이 버전에서는 아직 사용 안 함.
+# 기존 코드와의 호환을 위해 더미 함수로 남겨서 에러만 막아 둔다.
+def detect_and_publish_alerts(filtered_states, managed_devices):
+    # TODO: 코나이용 Alert 로직이 필요하면 이 함수 안에서 구현
+    return
 
 # 코나이 토픽: 코나이가 준 Topic prefix 1개만 사용 (구독·발행 동일)
 # 예: update/reported/dev/.../matter/k3O6TL
@@ -506,8 +518,14 @@ class AWSProvisioningClient:
                     for key, value in env_data.items():
                         f.write(f"{key}={value}\n")
 
-                print(f"[PROVISION] matterhub_id를 .env 파일에 저장했습니다: {matterhub_id}")
-                print(f"[PROVISION] .env 에서 matterhub_id 확인 후, 필요하면 수동으로 정리해서 사용하세요.")
+                print(f"")
+                print(f"═══════════════════════════════════════════════════════════════")
+                print(f"✅ [PROVISION] matterhub_id 발급 완료: {matterhub_id}")
+                print(f"   → .env 파일에 자동 저장됨. 아래 명령으로 확인:")
+                print(f"   grep matterhub_id .env")
+                print(f"   → 적용을 위해 mqtt.py (또는 PM2) 재시작 필요")
+                print(f"═══════════════════════════════════════════════════════════════")
+                print(f"")
                 return True
 
             print("[PROVISION] 사물 등록 실패: 응답 없음")
@@ -626,12 +644,15 @@ def publish_bootstrap_all_states():
             print(f"❌ 코나이 bootstrap: 로컬 API 실패 HTTP {resp.status_code}")
             return
         data = resp.json()
-        _konai_publish({
+        bootstrap_payload = {
             "type": "bootstrap_all_states",
             "correlation_id": None,
             "ts": _konai_ts(),
             "data": data,
-        })
+        }
+        if matterhub_id:
+            bootstrap_payload["hub_id"] = matterhub_id
+        _konai_publish(bootstrap_payload)
         konai_bootstrap_done = True
         print(f"✅ 코나이 bootstrap 발행: 전체 {len(data) if isinstance(data, list) else 0} entities")
     except Exception as e:
@@ -724,14 +745,17 @@ def publish_device_state():
             konai_last_entity_publish[eid] = (now, state_str)
 
             event_id = f"evt-{int(now * 1000)}-{eid.replace('.', '_')}"
-            _konai_publish({
+            evt_payload = {
                 "type": "entity_changed",
                 "correlation_id": None,
                 "event_id": event_id,
                 "ts": _konai_ts(),
                 "entity_id": eid,
                 "state": one,
-            })
+            }
+            if matterhub_id:
+                evt_payload["hub_id"] = matterhub_id
+            _konai_publish(evt_payload)
             print(f"코나이 entity_changed: {eid} → {KONAI_TOPIC_RESPONSE}")
 
     except Exception as e:
@@ -1194,13 +1218,16 @@ def handle_konai_states_request(payload_bytes=None, response_topic=None):
                 resp = requests.get(url, headers=headers, timeout=10)
                 if resp.status_code == 200:
                     data = resp.json()
-                    _konai_publish({
+                    payload = {
                         "type": "query_response_single",
                         "correlation_id": correlation_id,
                         "ts": ts,
                         "data": data,
-                    }, response_topic=response_topic)
-                    print(f"✅ 코나이 단일 조회 응답: entity_id={entity_id}")
+                    }
+                    if matterhub_id:
+                        payload["hub_id"] = matterhub_id
+                    _konai_publish(payload, response_topic=response_topic)
+                    print(f"✅ 코나이 단일 조회 응답: entity_id={entity_id}" + (f", hub_id={matterhub_id}" if matterhub_id else " (hub_id 없음)"))
                 else:
                     _konai_publish_error(
                         correlation_id,
@@ -1219,13 +1246,16 @@ def handle_konai_states_request(payload_bytes=None, response_topic=None):
                 resp = requests.get(url, headers=headers, timeout=10)
                 if resp.status_code == 200:
                     data = resp.json()
-                    _konai_publish({
+                    payload = {
                         "type": "query_response_all",
                         "correlation_id": correlation_id,
                         "ts": ts,
                         "data": data,
-                    }, response_topic=response_topic)
-                    print(f"✅ 코나이 전체 조회 응답: {len(data) if isinstance(data, list) else 'n/a'} entities")
+                    }
+                    if matterhub_id:
+                        payload["hub_id"] = matterhub_id
+                    _konai_publish(payload, response_topic=response_topic)
+                    print(f"✅ 코나이 전체 조회 응답: {len(data) if isinstance(data, list) else 'n/a'} entities" + (f", hub_id={matterhub_id}" if matterhub_id else " (hub_id 없음)"))
                 else:
                     _konai_publish_error(
                         correlation_id,
@@ -1256,7 +1286,7 @@ def mqtt_callback(topic, payload, **kwargs):
     if KONAI_TEST_TOPIC_REQUEST and topic == KONAI_TEST_TOPIC_REQUEST:
         # 테스트 토픽은 코나이와 동일한 JSON 스펙으로 동작하되, 응답은 테스트용 토픽으로 송출
         test_response_topic = KONAI_TEST_TOPIC_RESPONSE or KONAI_TEST_TOPIC_REQUEST
-        print(f"🧪 코나이 테스트 요청 수신: {topic} → 응답 토픽: {test_response_topic}")
+        print(f"🧪 코나이 테스트 요청 수신: {topic} → 응답 토픽: {test_response_topic}, matterhub_id={matterhub_id or '(미설정)'}")
         handle_konai_states_request(payload, response_topic=test_response_topic)
         return
 
@@ -1661,7 +1691,7 @@ def start_konai_test_subscriber_if_enabled():
     if os.environ.get("ENABLE_KONAI_TEST_SUBSCRIBER", "0") != "1":
         return
 
-    print("🧪 [TEST] ENABLE_KONAI_TEST_SUBSCRIBER=1 → 테스트 구독 스레드 시작")
+    print("🧪 [TEST] ENABLE_KONAI_TEST_SUBSCRIBER=1 → 테스트 구독 스레드 시작 (matterhub_id={})".format(matterhub_id or "미설정"))
     t = threading.Thread(target=_run_konai_test_subscriber_loop, name="konai-test-subscriber")
     t.daemon = True
     t.start()
@@ -1742,6 +1772,8 @@ if __name__ == "__main__":
     else:
         print("⚠️ .env에 matterhub_id 없음 → 레거시 matterhub/* 토픽은 구독하지 않습니다.")
 
+    # 테스트 토픽·레거시 토픽에서 matterhub_id 확인용 (Claim 프로비저닝 발급 여부)
+    print(f"📋 matterhub_id: {matterhub_id or '(미설정 — Claim 프로비저닝 후 .env 등록 필요, 가이드: MATTERHUB_ID_GUIDE.md)'}")
     print(f"📡 토픽 구독 시작... (총 {len(subscribe_topics)}개)")
     for topic in subscribe_topics:
         max_retries = 3

@@ -143,9 +143,25 @@ def services():
 
 @app.route('/local/api/states')
 def states():
+    """
+    HA /api/states 프록시.
+    - HA 쪽에서 JSON 이 아닌 응답(HTML, 에러페이지 등)을 주면 json()에서 예외가 나므로
+      이를 잡아서 에러 내용을 그대로 반환하고, HTTP 상태코드를 함께 노출한다.
+    """
     headers = {"Authorization": f"Bearer {hass_token}"}
-    response = requests.get(f"{HA_host}/api/states", headers=headers)
-    return jsonify(response.json())
+    resp = requests.get(f"{HA_host}/api/states", headers=headers)
+    try:
+        data = resp.json()
+    except Exception as e:  # JSONDecodeError, ValueError 등
+        # 디버깅을 위해 앞부분 텍스트를 로그/응답에 남긴다.
+        text_snippet = resp.text[:200] if resp.text else ""
+        return jsonify({
+            "error": "ha_states_invalid_json",
+            "message": str(e),
+            "status_code": resp.status_code,
+            "body_snippet": text_snippet,
+        }), 502
+    return jsonify(data)
 
 @app.route('/local/api/states/<entity_id>')
 def statesEntityId(entity_id):
@@ -653,4 +669,7 @@ o = threading.Thread(target=one_time_scheduler, args=[one_time])
 o.start()
 
 if __name__ == '__main__':
-    app.run('0.0.0.0',debug=True,port=8100)
+    # PM2 아래에서 돌릴 때는 debug/reloader 가 프로세스를 계속 재시작시키므로
+    # 기본은 debug=False, 필요할 때만 WM_DEBUG=1 로 켜서 사용.
+    _debug = os.environ.get("WM_DEBUG", "0").strip().lower() in ("1", "true", "yes", "y")
+    app.run('0.0.0.0', debug=_debug, use_reloader=_debug, port=8100)
