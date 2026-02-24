@@ -2,8 +2,8 @@
 """
 코나이/와츠매터 토픽 요청·응답 테스트
 
-mqtt.py가 구독 중인 토픽에 요청을 발행하고, 동일 토픽으로 오는 응답을 수신합니다.
-(코나이 토픽과 동일한 규격: correlation_id 필수, entity_id 있으면 단일 조회)
+요청을 delta 토픽으로 발행하고, 허브가 응답을 보내는 reported 토픽을 구독해 수신합니다.
+(코나이 토픽 규격: correlation_id 필수, entity_id 있으면 단일 조회)
 
 사용법:
   venv/bin/python3 test_konai_request.py              # 전체 조회
@@ -29,8 +29,11 @@ os.chdir(_script_dir)
 from awscrt import io, mqtt
 from awsiot import mqtt_connection_builder
 
-# mqtt.py와 동일한 토픽/env
-KONAI_TOPIC = os.environ.get("KONAI_TOPIC", "update/reported/dev/c3c6d27d5f2f353991afac4e3af69029303795a2/matter/k3O6TL").strip('"')
+from mqtt_pkg import settings as mqtt_settings
+
+# 구독 = delta(요청 수신), 발행 = reported(응답 수신) → 테스트는 요청을 delta로 보내고 reported를 구독
+KONAI_TOPIC_REQUEST = mqtt_settings.KONAI_TOPIC_REQUEST   # 요청 발행 대상 (허브가 구독 중)
+KONAI_TOPIC_RESPONSE = mqtt_settings.KONAI_TOPIC_RESPONSE  # 응답 수신용 구독 (허브가 발행)
 CERT_PATH = "konai_certificates/"
 ENDPOINT = "a34vuzhubahjfj-ats.iot.ap-northeast-2.amazonaws.com"
 # main mqtt와 충돌 방지용 client_id (접미사 -test 추가)
@@ -77,18 +80,21 @@ def main():
     )
 
     print(f"연결: {ENDPOINT}, client_id={CLIENT_ID}")
-    print(f"토픽: {KONAI_TOPIC}")
+    print(f"요청 발행( delta ): {KONAI_TOPIC_REQUEST}")
+    print(f"응답 구독(reported): {KONAI_TOPIC_RESPONSE}")
     print(f"요청: {json.dumps(request, ensure_ascii=False)}")
     print("")
 
     connect_future = conn.connect()
     connect_future.result(timeout=10)
 
-    sub_future, _ = conn.subscribe(topic=KONAI_TOPIC, qos=mqtt.QoS.AT_LEAST_ONCE, callback=on_message)
+    sub_future, _ = conn.subscribe(
+        topic=KONAI_TOPIC_RESPONSE, qos=mqtt.QoS.AT_LEAST_ONCE, callback=on_message
+    )
     sub_future.result(timeout=5)
 
     pub_future, _ = conn.publish(
-        topic=KONAI_TOPIC,
+        topic=KONAI_TOPIC_REQUEST,
         payload=json.dumps(request, ensure_ascii=False),
         qos=mqtt.QoS.AT_LEAST_ONCE,
     )
