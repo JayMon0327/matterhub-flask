@@ -19,6 +19,14 @@ MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 30  # seconds
 
 
+def _certificate_paths(cert_path: str) -> tuple[str, str, str]:
+    normalized_cert_path = os.path.normpath(cert_path)
+    cert_file = os.path.join(normalized_cert_path, "cert.pem")
+    key_file = os.path.join(normalized_cert_path, "key.pem")
+    ca_file = os.path.join(normalized_cert_path, "ca_cert.pem")
+    return cert_file, key_file, ca_file
+
+
 class AWSIoTClient:
     """Konai certificate based MQTT client (no provisioning)."""
 
@@ -32,12 +40,28 @@ class AWSIoTClient:
             "c3c6d27d5f2f353991afac4e3af69029303795a2-matter-k3O6TL",
         ).strip('"')
 
+    def describe_connection(self) -> dict[str, object]:
+        cert_file, key_file, ca_file = _certificate_paths(self.cert_path)
+        return {
+            "endpoint": self.endpoint,
+            "client_id": self.client_id,
+            "cert_path": os.path.normpath(self.cert_path),
+            "cert_file": cert_file,
+            "key_file": key_file,
+            "ca_file": ca_file,
+            "cert_exists": os.path.exists(cert_file),
+            "key_exists": os.path.exists(key_file),
+            "ca_exists": os.path.exists(ca_file),
+        }
+
     def connect_mqtt(self) -> mqtt.Connection:
         has_cert, cert_file, key_file = self._check_certificate()
         if not has_cert:
+            connection_info = self.describe_connection()
             raise FileNotFoundError(
                 "konai_certificates/cert.pem 또는 key.pem이 없습니다. "
-                "코나이 인증서를 konai_certificates/ 디렉토리에 넣어 주세요."
+                "코나이 인증서를 konai_certificates/ 디렉토리에 넣어 주세요. "
+                f"(cert={connection_info['cert_file']}, key={connection_info['key_file']})"
             )
 
         event_loop_group = io.EventLoopGroup(1)
@@ -73,7 +97,7 @@ class AWSIoTClient:
             on_connection_resumed=on_resumed,
         )
 
-        ca_path = os.path.join(self.cert_path, "ca_cert.pem")
+        _, _, ca_path = _certificate_paths(self.cert_path)
         if os.path.exists(ca_path):
             mtls_kw["ca_filepath"] = ca_path
 
@@ -110,8 +134,7 @@ class AWSIoTClient:
         raise RuntimeError("MQTT 연결 실패: 최대 재시도 횟수를 초과했습니다.")
 
     def _check_certificate(self) -> tuple[bool, Optional[str], Optional[str]]:
-        cert_file = os.path.join(self.cert_path, "cert.pem")
-        key_file = os.path.join(self.cert_path, "key.pem")
+        cert_file, key_file, _ = _certificate_paths(self.cert_path)
         if os.path.exists(cert_file) and os.path.exists(key_file):
             return True, cert_file, key_file
         return False, None, None
@@ -204,4 +227,3 @@ def check_mqtt_connection(
     resubscribe(list(topics), callback)
     print("MQTT 재연결 성공")
     return True
-

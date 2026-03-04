@@ -34,6 +34,7 @@ __init__.py
 !device_config/__init__.py
 !tests/__init__.py
 !tests/device_config/__init__.py
+!tests/mqtt_pkg/__init__.py
 
 KONAI_CERTIFICATE_GUIDE.md
 docs/

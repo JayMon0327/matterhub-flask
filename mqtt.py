@@ -14,17 +14,18 @@ def log_matterhub_status() -> None:
         print("matterhub_id 없음 (Claim 프로비저닝 후 .env 등록, 가이드: MATTERHUB_ID_GUIDE.md)")
 
 
+def _append_unique_topic(topics: List[str], topic: str | None) -> None:
+    if topic and topic not in topics:
+        topics.append(topic)
+
+
 def build_subscribe_topics() -> List[str]:
     topics: List[str] = []
-    if settings.KONAI_TOPIC_REQUEST:
-        topics.append(settings.KONAI_TOPIC_REQUEST)
-    if settings.KONAI_TEST_TOPIC_REQUEST:
-        topics.append(settings.KONAI_TEST_TOPIC_REQUEST)
+    _append_unique_topic(topics, settings.KONAI_TOPIC_REQUEST)
+    _append_unique_topic(topics, settings.KONAI_TEST_TOPIC_REQUEST)
     if settings.SUBSCRIBE_MATTERHUB_TOPICS and settings.MATTERHUB_ID:
-        topics.extend([
-            f"matterhub/{settings.MATTERHUB_ID}/git/update",
-            f"matterhub/update/specific/{settings.MATTERHUB_ID}",
-        ])
+        _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/git/update")
+        _append_unique_topic(topics, f"matterhub/update/specific/{settings.MATTERHUB_ID}")
     return topics
 
 
@@ -49,15 +50,49 @@ def subscribe_topics(topics: Iterable[str]) -> None:
                     print(f"❌ 토픽 구독 최종 실패: {topic}")
 
 
+def build_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> List[str]:
+    connection_info = aws_client.describe_connection()
+    subscribe_topics = list(topics)
+    lines = [
+        "[MQTT] 시작 설정",
+        f"[MQTT] endpoint={connection_info['endpoint']}",
+        f"[MQTT] client_id={connection_info['client_id']}",
+        (
+            "[MQTT] cert_path="
+            f"{connection_info['cert_path']} "
+            f"(cert={'yes' if connection_info['cert_exists'] else 'no'}, "
+            f"key={'yes' if connection_info['key_exists'] else 'no'}, "
+            f"ca={'yes' if connection_info['ca_exists'] else 'no'})"
+        ),
+        f"[MQTT] request_topic={settings.KONAI_TOPIC_REQUEST or '(미설정)'}",
+        f"[MQTT] response_topic={settings.KONAI_TOPIC_RESPONSE or '(미설정)'}",
+        f"[MQTT] test_request_topic={settings.KONAI_TEST_TOPIC_REQUEST or '(미설정)'}",
+        f"[MQTT] test_response_topic={settings.KONAI_TEST_TOPIC_RESPONSE or '(미설정)'}",
+        f"[MQTT] matterhub_id={settings.MATTERHUB_ID or '(미설정)'}",
+        f"[MQTT] subscribe_count={len(subscribe_topics)}",
+    ]
+    lines.extend(
+        f"[MQTT] subscribe[{index}]={topic}"
+        for index, topic in enumerate(subscribe_topics, start=1)
+    )
+    return lines
+
+
+def log_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> None:
+    for line in build_startup_report(aws_client, topics):
+        print(line)
+
+
 def main() -> None:
     log_matterhub_status()
     update.start_queue_worker()
 
     aws_client = AWSIoTClient()
+    topics = build_subscribe_topics()
+    log_startup_report(aws_client, topics)
     connection = aws_client.connect_mqtt()
     runtime.set_connection(connection)
 
-    topics = build_subscribe_topics()
     print(f"matterhub_id: {settings.MATTERHUB_ID or '(미설정)'}")
     print(f"토픽 구독 시작 (총 {len(topics)}개)")
     subscribe_topics(topics)
