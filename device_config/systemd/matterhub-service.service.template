@@ -1,0 +1,16 @@
+[Unit]
+Description=@DESCRIPTION@
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+WorkingDirectory=@WORKING_DIRECTORY@
+ExecStart=@EXEC_START@
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
