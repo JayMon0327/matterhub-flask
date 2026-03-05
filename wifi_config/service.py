@@ -1,0 +1,419 @@
+from __future__ import annotations
+
+import subprocess
+import time
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+
+Runner = Callable[[list[str], int], subprocess.CompletedProcess[str]]
+
+
+def _default_runner(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+@dataclass
+class NmcliCommandError(RuntimeError):
+    command: list[str]
+    return_code: int
+    stdout: str
+    stderr: str
+
+    def __str__(self) -> str:
+        cmd = " ".join(self.command)
+        return f"Command failed ({self.return_code}): {cmd} :: {self.stderr or self.stdout}"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "command": " ".join(self.command),
+            "return_code": self.return_code,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+        }
+
+
+def _split_terse_line(line: str) -> list[str]:
+    parts: list[str] = []
+    buffer: list[str] = []
+    escaped = False
+
+    for char in line:
+        if escaped:
+            buffer.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == ":":
+            parts.append("".join(buffer))
+            buffer = []
+            continue
+        buffer.append(char)
+
+    if escaped:
+        buffer.append("\\")
+    parts.append("".join(buffer))
+    return parts
+
+
+def _parse_terse_rows(output: str, columns: list[str]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        values = _split_terse_line(line)
+        if len(values) < len(columns):
+            values.extend([""] * (len(columns) - len(values)))
+        if len(values) > len(columns):
+            values = values[: len(columns) - 1] + [":".join(values[len(columns) - 1 :])]
+        rows.append({column: values[index] for index, column in enumerate(columns)})
+    return rows
+
+
+class WifiConfigService:
+    def __init__(
+        self,
+        *,
+        interface: str = "wlan0",
+        default_health_host: str = "8.8.8.8",
+        default_ap_ssid: str = "Matterhub-Setup-WhatsMatter",
+        ap_password: str = "matterhub1234",
+        ap_ipv4_cidr: str = "10.42.0.1/24",
+        runner: Optional[Runner] = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        monotonic_fn: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.interface = interface
+        self.default_health_host = default_health_host
+        self.default_ap_ssid = default_ap_ssid
+        self.ap_password = ap_password
+        self.ap_ipv4_cidr = ap_ipv4_cidr
+        self._runner: Runner = runner or _default_runner
+        self._sleep = sleep_fn
+        self._monotonic = monotonic_fn
+
+    def get_status(self) -> dict[str, object]:
+        rows = _parse_terse_rows(
+            self._run_nmcli(
+                ["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"], timeout=15
+            ),
+            ["DEVICE", "TYPE", "STATE", "CONNECTION"],
+        )
+
+        wifi_device = next((row for row in rows if row.get("DEVICE") == self.interface), None)
+        if wifi_device is None:
+            wifi_device = next((row for row in rows if row.get("TYPE") == "wifi"), {})
+
+        active = self.get_active_wifi_connection()
+        return {
+            "interface": self.interface,
+            "general_state": self._get_general_state(),
+            "wifi_device": wifi_device or {},
+            "active_connection": active,
+            "current_ssid": self._get_current_ssid(),
+        }
+
+    def scan_wifi(self, *, rescan: bool = True) -> list[dict[str, object]]:
+        args = [
+            "-t",
+            "-f",
+            "IN-USE,SSID,SIGNAL,SECURITY,BARS,CHAN",
+            "device",
+            "wifi",
+            "list",
+            "ifname",
+            self.interface,
+        ]
+        args.extend(["--rescan", "yes" if rescan else "no"])
+        rows = _parse_terse_rows(
+            self._run_nmcli(args, timeout=20),
+            ["IN-USE", "SSID", "SIGNAL", "SECURITY", "BARS", "CHAN"],
+        )
+
+        merged: dict[str, dict[str, object]] = {}
+        for row in rows:
+            ssid = row.get("SSID", "").strip()
+            if not ssid:
+                continue
+            try:
+                signal = int((row.get("SIGNAL") or "0").strip())
+            except ValueError:
+                signal = 0
+            candidate = {
+                "ssid": ssid,
+                "signal": signal,
+                "security": (row.get("SECURITY") or "").strip(),
+                "bars": (row.get("BARS") or "").strip(),
+                "channel": (row.get("CHAN") or "").strip(),
+                "in_use": (row.get("IN-USE") or "").strip() == "*",
+            }
+            previous = merged.get(ssid)
+            if previous is None or int(previous["signal"]) < signal:
+                merged[ssid] = candidate
+            elif candidate["in_use"]:
+                previous["in_use"] = True
+
+        return sorted(
+            merged.values(),
+            key=lambda item: (bool(item.get("in_use")), int(item.get("signal", 0))),
+            reverse=True,
+        )
+
+    def list_saved_connections(self) -> list[dict[str, object]]:
+        active_rows = _parse_terse_rows(
+            self._run_nmcli(
+                ["-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                timeout=15,
+            ),
+            ["NAME", "UUID", "TYPE", "DEVICE"],
+        )
+        active_uuids = {row.get("UUID") for row in active_rows if row.get("UUID")}
+
+        rows = _parse_terse_rows(
+            self._run_nmcli(
+                ["-t", "-f", "NAME,UUID,TYPE,AUTOCONNECT,DEVICE", "connection", "show"],
+                timeout=15,
+            ),
+            ["NAME", "UUID", "TYPE", "AUTOCONNECT", "DEVICE"],
+        )
+
+        saved: list[dict[str, object]] = []
+        for row in rows:
+            if row.get("TYPE") != "802-11-wireless":
+                continue
+            saved.append(
+                {
+                    "name": row.get("NAME", ""),
+                    "uuid": row.get("UUID", ""),
+                    "autoconnect": (row.get("AUTOCONNECT", "").lower() == "yes"),
+                    "device": row.get("DEVICE", ""),
+                    "active": row.get("UUID", "") in active_uuids,
+                }
+            )
+        return saved
+
+    def delete_saved_connection(self, connection_name: str) -> dict[str, object]:
+        if not connection_name.strip():
+            raise ValueError("connection_name is required")
+        self._run_nmcli(["connection", "delete", "id", connection_name], timeout=20)
+        return {"deleted": connection_name}
+
+    def start_ap_mode(self, *, ssid: Optional[str] = None, password: Optional[str] = None) -> dict[str, object]:
+        ap_ssid = (ssid or "").strip() or self._default_ap_ssid()
+        ap_password = (password or "").strip() or self.ap_password
+        if len(ap_password) < 8:
+            raise ValueError("AP password must be at least 8 characters")
+
+        self._run_nmcli(
+            [
+                "device",
+                "wifi",
+                "hotspot",
+                "ifname",
+                self.interface,
+                "ssid",
+                ap_ssid,
+                "password",
+                ap_password,
+            ],
+            timeout=40,
+        )
+        active = self.get_active_wifi_connection()
+        connection_name = (active or {}).get("name") or ap_ssid
+        self._configure_ap_ipv4(connection_name)
+        gateway_ip = self._ap_gateway_ip()
+        return {
+            "ssid": ap_ssid,
+            "interface": self.interface,
+            "security": "wpa2-psk",
+            "connection_name": connection_name,
+            "gateway_ip": gateway_ip,
+            "setup_url": f"http://{gateway_ip}:8100/local/admin/network",
+        }
+
+    def connect_wifi(
+        self,
+        *,
+        ssid: str,
+        password: Optional[str] = None,
+        hidden: bool = False,
+        timeout_seconds: int = 60,
+        health_host: Optional[str] = None,
+        rollback_on_failure: bool = True,
+        ap_mode_on_failure: bool = True,
+    ) -> dict[str, object]:
+        target_ssid = ssid.strip()
+        if not target_ssid:
+            raise ValueError("ssid is required")
+
+        previous = self.get_active_wifi_connection()
+        command = ["device", "wifi", "connect", target_ssid, "ifname", self.interface]
+        if password:
+            command.extend(["password", password])
+        if hidden:
+            command.extend(["hidden", "yes"])
+
+        connect_error: Optional[NmcliCommandError] = None
+        try:
+            self._run_nmcli(command, timeout=30)
+        except NmcliCommandError as exc:
+            connect_error = exc
+
+        health_ok = False
+        if connect_error is None:
+            health_ok = self._wait_for_health(
+                target_ssid=target_ssid,
+                timeout_seconds=max(10, int(timeout_seconds)),
+                health_host=(health_host or "").strip() or self.default_health_host,
+            )
+
+        rollback_attempted = False
+        rollback_success = False
+        if (connect_error or not health_ok) and rollback_on_failure and previous:
+            rollback_attempted = True
+            rollback_success = self._activate_connection(previous)
+
+        ap_mode_started = False
+        ap_mode_result: Optional[dict[str, object]] = None
+        if (connect_error or not health_ok) and ap_mode_on_failure and not rollback_success:
+            ap_mode_result = self.start_ap_mode()
+            ap_mode_started = True
+
+        success = connect_error is None and health_ok
+        result: dict[str, object] = {
+            "success": success,
+            "target_ssid": target_ssid,
+            "hidden": hidden,
+            "health_check_passed": health_ok,
+            "rollback_attempted": rollback_attempted,
+            "rollback_success": rollback_success,
+            "ap_mode_started": ap_mode_started,
+            "previous_connection": previous,
+            "active_connection": self.get_active_wifi_connection(),
+        }
+        if connect_error is not None:
+            result["error"] = connect_error.to_dict()
+        if ap_mode_result is not None:
+            result["ap_mode"] = ap_mode_result
+        return result
+
+    def get_active_wifi_connection(self) -> Optional[dict[str, str]]:
+        rows = _parse_terse_rows(
+            self._run_nmcli(
+                ["-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                timeout=10,
+            ),
+            ["NAME", "UUID", "TYPE", "DEVICE"],
+        )
+        for row in rows:
+            if row.get("TYPE") == "802-11-wireless":
+                return {
+                    "name": row.get("NAME", ""),
+                    "uuid": row.get("UUID", ""),
+                    "device": row.get("DEVICE", ""),
+                }
+        return None
+
+    def _activate_connection(self, previous: dict[str, str]) -> bool:
+        uuid = (previous.get("uuid") or "").strip()
+        name = (previous.get("name") or "").strip()
+        if not uuid and not name:
+            return False
+
+        command = ["connection", "up"]
+        if uuid:
+            command.extend(["uuid", uuid])
+        else:
+            command.extend(["id", name])
+        command.extend(["ifname", self.interface])
+
+        try:
+            self._run_nmcli(command, timeout=30)
+            return True
+        except NmcliCommandError:
+            return False
+
+    def _wait_for_health(self, *, target_ssid: str, timeout_seconds: int, health_host: str) -> bool:
+        deadline = self._monotonic() + timeout_seconds
+        while self._monotonic() <= deadline:
+            active = self.get_active_wifi_connection()
+            current_ssid = self._get_current_ssid()
+            general_state = self._get_general_state()
+
+            on_target = bool(current_ssid and current_ssid == target_ssid)
+            if not on_target and active:
+                on_target = active.get("name") == target_ssid
+
+            if on_target and general_state.startswith("connected"):
+                if not health_host or self._ping_host(health_host):
+                    return True
+            self._sleep(2)
+        return False
+
+    def _get_current_ssid(self) -> Optional[str]:
+        rows = _parse_terse_rows(
+            self._run_nmcli(
+                ["-t", "-f", "IN-USE,SSID", "device", "wifi", "list", "ifname", self.interface],
+                timeout=10,
+            ),
+            ["IN-USE", "SSID"],
+        )
+        active = next((row for row in rows if row.get("IN-USE", "").strip() == "*"), None)
+        if active and active.get("SSID"):
+            return active["SSID"].strip()
+        return None
+
+    def _get_general_state(self) -> str:
+        output = self._run_nmcli(["-t", "-f", "STATE", "general", "status"], timeout=10)
+        return output.splitlines()[0].strip() if output else ""
+
+    def _ping_host(self, host: str) -> bool:
+        result = self._runner(["ping", "-c", "1", "-W", "1", host], 5)
+        return result.returncode == 0
+
+    def _run_nmcli(self, args: list[str], *, timeout: int) -> str:
+        command = ["nmcli", *args]
+        result = self._runner(command, timeout)
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        if result.returncode != 0:
+            raise NmcliCommandError(
+                command=command,
+                return_code=result.returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        return stdout
+
+    def _configure_ap_ipv4(self, connection_name: str) -> None:
+        self._run_nmcli(
+            [
+                "connection",
+                "modify",
+                "id",
+                connection_name,
+                "ipv4.method",
+                "shared",
+                "ipv4.addresses",
+                self.ap_ipv4_cidr,
+                "ipv6.method",
+                "ignore",
+            ],
+            timeout=20,
+        )
+        self._run_nmcli(
+            ["connection", "up", "id", connection_name, "ifname", self.interface],
+            timeout=30,
+        )
+
+    def _ap_gateway_ip(self) -> str:
+        cidr = self.ap_ipv4_cidr.strip()
+        if "/" in cidr:
+            return cidr.split("/", 1)[0]
+        return cidr
+
+    def _default_ap_ssid(self) -> str:
+        return self.default_ap_ssid

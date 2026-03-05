@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MatterHub Wi-Fi 설정 | WhatsMatter Inc.</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-top: #eff7f2;
+        --bg-bottom: #fef8ef;
+        --ink: #12333c;
+        --muted: #5a7078;
+        --line: #d1dde0;
+        --card: rgba(255, 255, 255, 0.8);
+        --teal: #0f766e;
+        --teal-deep: #0a5852;
+        --orange: #d97706;
+        --danger: #b42318;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 85% -10%, rgba(217, 119, 6, 0.18), transparent 30%),
+          radial-gradient(circle at -15% 20%, rgba(15, 118, 110, 0.2), transparent 35%),
+          linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+        min-height: 100vh;
+      }
+
+      .shell {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 20px 16px 28px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(1.3rem, 3.8vw, 2rem);
+        line-height: 1.15;
+      }
+
+      .hero p {
+        margin: 8px 0 0;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 14px;
+        backdrop-filter: blur(4px);
+        box-shadow: 0 8px 26px rgba(17, 51, 60, 0.06);
+      }
+
+      .card.full {
+        grid-column: 1 / -1;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 1.05rem;
+      }
+
+      .status-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .status-table th,
+      .status-table td {
+        text-align: left;
+        padding: 7px 8px;
+        border-bottom: 1px dashed var(--line);
+        vertical-align: top;
+      }
+
+      .status-table th {
+        width: 180px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .btn-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font: inherit;
+        cursor: pointer;
+        color: #fff;
+        background: var(--teal);
+        transition: transform 0.12s ease, opacity 0.15s ease, background 0.2s ease;
+      }
+
+      button:hover {
+        background: var(--teal-deep);
+        transform: translateY(-1px);
+      }
+
+      button.secondary {
+        background: var(--orange);
+      }
+
+      button.danger {
+        background: var(--danger);
+      }
+
+      button.slim {
+        padding: 6px 9px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+      }
+
+      input[type="text"],
+      input[type="password"],
+      input[type="number"] {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 9px 10px;
+        font: inherit;
+        background: #fff;
+        color: var(--ink);
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .field-grid .full {
+        grid-column: 1 / -1;
+      }
+
+      label {
+        display: block;
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+
+      .list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 8px;
+      }
+
+      .network-item,
+      .saved-item {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 9px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+        background: #fff;
+      }
+
+      .meta {
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .status-note {
+        margin-top: 10px;
+        min-height: 1.4em;
+        color: var(--muted);
+      }
+
+      .status-note.error {
+        color: var(--danger);
+      }
+
+      @media (max-width: 880px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .field-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <h1>MatterHub Wi-Fi 설정 센터</h1>
+          <p>로컬 전용 설정 페이지 · 인터페이스: <strong id="iface">{{ interface }}</strong></p>
+          <p><strong>WhatsMatter Inc.</strong></p>
+        </div>
+        <div class="btn-row">
+          <button id="btnRefresh">새로고침</button>
+        </div>
+      </section>
+
+      <section class="card full">
+        <h2>네트워크 상태</h2>
+        <table class="status-table">
+          <tbody>
+            <tr><th>일반 상태</th><td id="stGeneral">-</td></tr>
+            <tr><th>현재 SSID</th><td id="stSsid">-</td></tr>
+            <tr><th>활성 프로필</th><td id="stProfile">-</td></tr>
+            <tr><th>장치 상태</th><td id="stDevice">-</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="grid">
+        <section class="card">
+          <h2>주변 Wi-Fi</h2>
+          <div class="btn-row" style="margin-bottom: 10px">
+            <button id="btnScan">스캔</button>
+          </div>
+          <ul class="list" id="scanList"></ul>
+        </section>
+
+        <section class="card">
+          <h2>저장된 연결</h2>
+          <ul class="list" id="savedList"></ul>
+        </section>
+
+        <section class="card full">
+          <h2>Wi-Fi 연결</h2>
+          <form id="connectForm">
+            <div class="field-grid">
+              <div>
+                <label for="ssid">SSID</label>
+                <input id="ssid" name="ssid" type="text" placeholder="SSID 입력" required />
+              </div>
+              <div>
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" placeholder="Password 입력" />
+              </div>
+              <div class="full btn-row">
+                <button type="submit">연결</button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <section class="card full">
+          <h2>복구 모드 (AP)</h2>
+          <p class="meta">
+            현재 Wi-Fi 연결이 되지 않거나 설정을 처음부터 다시 해야 할 때 사용합니다.
+            복구 모드를 시작하면 장비가 임시 Wi-Fi(AP)를 열고, 해당 AP에 접속해 다시 설정할 수 있습니다.
+          </p>
+          <div class="field-grid">
+            <div>
+              <label for="apSsid">AP SSID (선택)</label>
+              <input id="apSsid" type="text" placeholder="Matterhub-Setup-WhatsMatter" />
+            </div>
+            <div>
+              <label for="apPassword">AP Password (선택)</label>
+              <input id="apPassword" type="password" placeholder="최소 8자" />
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top: 10px">
+            <button id="btnApMode" class="secondary">AP 복구 모드 시작</button>
+          </div>
+        </section>
+      </section>
+
+      <p id="statusNote" class="status-note"></p>
+    </main>
+
+    <script>
+      const API = {
+        status: "/local/admin/network/status",
+        scan: "/local/admin/network/wifi/scan",
+        connect: "/local/admin/network/wifi/connect",
+        saved: "/local/admin/network/wifi/saved",
+        apMode: "/local/admin/network/recovery/ap-mode",
+      };
+
+      const ui = {
+        stGeneral: document.getElementById("stGeneral"),
+        stSsid: document.getElementById("stSsid"),
+        stProfile: document.getElementById("stProfile"),
+        stDevice: document.getElementById("stDevice"),
+        scanList: document.getElementById("scanList"),
+        savedList: document.getElementById("savedList"),
+        connectForm: document.getElementById("connectForm"),
+        ssid: document.getElementById("ssid"),
+        password: document.getElementById("password"),
+        apSsid: document.getElementById("apSsid"),
+        apPassword: document.getElementById("apPassword"),
+        statusNote: document.getElementById("statusNote"),
+      };
+
+      function setNote(message, isError = false) {
+        ui.statusNote.textContent = message || "";
+        ui.statusNote.classList.toggle("error", Boolean(isError));
+      }
+
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) {
+          const msg =
+            payload?.error?.message ||
+            payload?.error?.stderr ||
+            payload?.error?.stdout ||
+            "Request failed";
+          throw new Error(msg);
+        }
+        return payload.data;
+      }
+
+      function renderStatus(data) {
+        const active = data.active_connection || {};
+        ui.stGeneral.textContent = data.general_state || "-";
+        ui.stSsid.textContent = data.current_ssid || "-";
+        ui.stProfile.textContent = active.name ? `${active.name} (${active.uuid || "-"})` : "-";
+        const dev = data.wifi_device || {};
+        ui.stDevice.textContent = dev.STATE ? `${dev.DEVICE || "-"} / ${dev.STATE}` : "-";
+      }
+
+      function renderScan(list) {
+        if (!Array.isArray(list) || list.length === 0) {
+          ui.scanList.innerHTML = "<li class='meta'>검색된 Wi-Fi가 없습니다.</li>";
+          return;
+        }
+        ui.scanList.innerHTML = list
+          .map((network) => {
+            const marker = network.in_use ? "연결됨" : "";
+            const sec = network.security || "open";
+            return `
+              <li class="network-item">
+                <div>
+                  <div><strong>${network.ssid}</strong> ${marker ? `· ${marker}` : ""}</div>
+                  <div class="meta">신호: ${network.signal} · 보안: ${sec}</div>
+                </div>
+                <button class="slim" data-ssid="${network.ssid}">선택</button>
+              </li>
+            `;
+          })
+          .join("");
+        ui.scanList.querySelectorAll("button[data-ssid]").forEach((button) => {
+          button.addEventListener("click", () => {
+            ui.ssid.value = button.dataset.ssid || "";
+            ui.password.focus();
+          });
+        });
+      }
+
+      function renderSaved(list) {
+        if (!Array.isArray(list) || list.length === 0) {
+          ui.savedList.innerHTML = "<li class='meta'>저장된 Wi-Fi 프로필이 없습니다.</li>";
+          return;
+        }
+        ui.savedList.innerHTML = list
+          .map((item) => {
+            const active = item.active ? "활성" : "비활성";
+            return `
+              <li class="saved-item">
+                <div>
+                  <div><strong>${item.name}</strong></div>
+                  <div class="meta">UUID: ${item.uuid || "-"} · ${active}</div>
+                </div>
+                <button class="slim danger" data-delete="${encodeURIComponent(item.name)}">삭제</button>
+              </li>
+            `;
+          })
+          .join("");
+        ui.savedList.querySelectorAll("button[data-delete]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const encodedName = button.dataset.delete;
+            if (!encodedName) {
+              return;
+            }
+            try {
+              await requestJson(`${API.saved}/${encodedName}`, { method: "DELETE" });
+              setNote("저장된 연결을 삭제했습니다.");
+              await refreshSaved();
+              await refreshStatus();
+            } catch (error) {
+              setNote(error.message, true);
+            }
+          });
+        });
+      }
+
+      async function refreshStatus() {
+        const status = await requestJson(API.status);
+        renderStatus(status);
+      }
+
+      async function refreshScan() {
+        const data = await requestJson(`${API.scan}?rescan=1`);
+        renderScan(data);
+      }
+
+      async function refreshSaved() {
+        const data = await requestJson(API.saved);
+        renderSaved(data);
+      }
+
+      async function refreshAll() {
+        setNote("네트워크 정보를 새로고침하는 중입니다...");
+        try {
+          await Promise.all([refreshStatus(), refreshScan(), refreshSaved()]);
+          setNote("준비 완료");
+        } catch (error) {
+          setNote(error.message, true);
+        }
+      }
+
+      ui.connectForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setNote("Wi-Fi 연결을 시도하는 중입니다...");
+        try {
+          const payload = {
+            ssid: ui.ssid.value.trim(),
+            password: ui.password.value.trim() || null,
+            rollback_on_failure: true,
+            ap_mode_on_failure: true,
+          };
+          const result = await requestJson(API.connect, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+
+          if (result.success) {
+            setNote(`연결 성공: ${result.target_ssid}`);
+          } else if (result.ap_mode_started) {
+            setNote("연결 실패: AP 복구 모드를 시작했습니다.", true);
+          } else if (result.rollback_attempted) {
+            setNote("연결 실패: 이전 Wi-Fi 프로필로 롤백했습니다.", true);
+          } else {
+            setNote("연결 실패", true);
+          }
+          await refreshAll();
+        } catch (error) {
+          setNote(error.message, true);
+        }
+      });
+
+      document.getElementById("btnRefresh").addEventListener("click", refreshAll);
+      document.getElementById("btnScan").addEventListener("click", async () => {
+        setNote("주변 Wi-Fi를 스캔하는 중입니다...");
+        try {
+          await refreshScan();
+          setNote("스캔 완료");
+        } catch (error) {
+          setNote(error.message, true);
+        }
+      });
+      document.getElementById("btnApMode").addEventListener("click", async () => {
+        setNote("AP 복구 모드를 시작하는 중입니다...");
+        try {
+          const payload = {
+            ssid: ui.apSsid.value.trim() || null,
+            password: ui.apPassword.value.trim() || null,
+          };
+          const result = await requestJson(API.apMode, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          const setupUrl = result.setup_url ? ` (${result.setup_url})` : "";
+          setNote(`AP 모드 시작: ${result.ssid}${setupUrl}`);
+          await refreshStatus();
+        } catch (error) {
+          setNote(error.message, true);
+        }
+      });
+
+      refreshAll();
+    </script>
+  </body>
+</html>

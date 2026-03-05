@@ -19,6 +19,8 @@ import os, sys
 import subprocess
 
 from libs.edit import deleteItem, file_changed_request, putItem, update_env_file  # type: ignore
+from wifi_config.api import create_wifi_blueprint
+from wifi_config.bootstrap import ensure_bootstrap_ap
 
 env_file = find_dotenv()
 load_dotenv()
@@ -68,6 +70,21 @@ def config():
 
 
 app = Flask(__name__)
+app.register_blueprint(create_wifi_blueprint())
+
+
+def _start_wifi_bootstrap_thread() -> None:
+    def _run() -> None:
+        result = ensure_bootstrap_ap()
+        print(
+            "[WIFI][BOOTSTRAP] result "
+            f"reason={result.get('reason')} started={result.get('started')}"
+        )
+
+    threading.Thread(target=_run, daemon=True, name="wifi-bootstrap").start()
+
+
+_start_wifi_bootstrap_thread()
 
 @app.route('/test', methods=['POST'])
 def test():
