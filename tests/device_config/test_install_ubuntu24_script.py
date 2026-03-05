@@ -102,6 +102,25 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         self.assertIn("--allow-inbound-port 443", output)
         self.assertIn("--dry-run", output)
 
+    def test_dry_run_can_chain_local_console_pam_hardening(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(INSTALL_SCRIPT),
+                "--dry-run",
+                "--harden-local-console-pam",
+            ],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
+        self.assertIn("로컬 콘솔 로그인 제한(PAM) 실행", output)
+        self.assertIn("harden_local_console_pam.sh", output)
+        self.assertIn("--run-user", output)
+        self.assertIn("--dry-run", output)
+
 
 if __name__ == "__main__":
     unittest.main()

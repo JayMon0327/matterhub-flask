@@ -13,6 +13,7 @@ SKIP_OS_PACKAGES=0
 SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
 HARDEN_REVERSE_TUNNEL_ONLY=0
+HARDEN_LOCAL_CONSOLE_PAM=0
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -121,6 +122,7 @@ Options:
   --support-relay-access-pubkey <k>  Pass through
   --harden-reverse-tunnel-only       Pass through
   --harden-allow-inbound-port <p>    Pass through (repeatable)
+  --harden-local-console-pam         Pass through
   -h, --help                         Show help
 EOF
 }
@@ -215,6 +217,10 @@ while [ "$#" -gt 0 ]; do
       HARDEN_ALLOW_INBOUND_PORTS+=("$2")
       shift 2
       ;;
+    --harden-local-console-pam)
+      HARDEN_LOCAL_CONSOLE_PAM=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -307,6 +313,9 @@ for port in "${HARDEN_ALLOW_INBOUND_PORTS[@]-}"; do
   fi
   install_cmd+=(--harden-allow-inbound-port "$port")
 done
+if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
+  install_cmd+=(--harden-local-console-pam)
+fi
 
 log "install_ubuntu24.sh 실행"
 run_cmd "${install_cmd[@]}"

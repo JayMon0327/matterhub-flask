@@ -13,6 +13,7 @@ SKIP_OS_PACKAGES=0
 SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
 HARDEN_REVERSE_TUNNEL_ONLY=0
+HARDEN_LOCAL_CONSOLE_PAM=0
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -79,6 +80,8 @@ Options:
                       Apply reverse-tunnel-only access hardening (no direct inbound SSH).
   --harden-allow-inbound-port
                       Keep inbound TCP port open under UFW policy (repeatable).
+  --harden-local-console-pam
+                      Apply PAM policy to block local-console login for runtime account.
 
 Environment variables:
   RUN_USER     systemd service user (default: current shell user)
@@ -139,6 +142,9 @@ while [ "$#" -gt 0 ]; do
     --harden-allow-inbound-port)
       HARDEN_ALLOW_INBOUND_PORTS+=("$2")
       shift
+      ;;
+    --harden-local-console-pam)
+      HARDEN_LOCAL_CONSOLE_PAM=1
       ;;
     -h|--help)
       usage
@@ -218,6 +224,10 @@ if [ "$HARDEN_REVERSE_TUNNEL_ONLY" -eq 1 ]; then
   else
     log "하드닝 inbound 예외 포트 없음 (모든 inbound 차단)"
   fi
+fi
+
+if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
+  log "로컬 콘솔 로그인 제한(PAM): 적용 예정"
 fi
 
 if [ "$SKIP_OS_PACKAGES" -eq 0 ]; then
@@ -357,6 +367,25 @@ if [ "$HARDEN_REVERSE_TUNNEL_ONLY" -eq 1 ]; then
 
   log "reverse tunnel only 하드닝 실행"
   run_cmd "${harden_cmd[@]}"
+fi
+
+if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
+  PAM_HARDEN_SCRIPT="$SCRIPT_DIR/harden_local_console_pam.sh"
+  if [ ! -f "$PAM_HARDEN_SCRIPT" ]; then
+    echo "harden_local_console_pam.sh not found: $PAM_HARDEN_SCRIPT" >&2
+    exit 1
+  fi
+
+  pam_harden_cmd=(
+    bash "$PAM_HARDEN_SCRIPT"
+    --run-user "$RUN_USER"
+  )
+  if [ "$DRY_RUN" -eq 1 ]; then
+    pam_harden_cmd+=(--dry-run)
+  fi
+
+  log "로컬 콘솔 로그인 제한(PAM) 실행"
+  run_cmd "${pam_harden_cmd[@]}"
 fi
 
 log "설치 완료"

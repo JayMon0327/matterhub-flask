@@ -73,3 +73,32 @@ j <hub_id>
 - 하드닝 적용 후에는 장비 내부 IP로 직접 SSH 접속이 차단된다.
 - relay 또는 key 설정이 잘못된 상태에서 적용하면 복구 작업이 어려워진다.
 - 반드시 `--dry-run`으로 계획을 먼저 확인하고 적용한다.
+
+## 7. 로컬 콘솔 로그인(PAM) 제한
+
+물리 모니터/키보드 연결 시 로그인까지 제한하려면 아래 스크립트를 추가 적용한다.
+
+- `device_config/harden_local_console_pam.sh`
+
+실행:
+
+```bash
+cd /home/whatsmatter/Desktop/matterhub
+bash device_config/harden_local_console_pam.sh --run-user whatsmatter
+```
+
+적용 내용:
+
+- `/etc/pam.d/login` 에 `pam_access.so` 활성화
+- `/etc/security/access.conf` 에 아래 정책 추가
+  - `+:root:LOCAL`
+  - `-:whatsmatter:LOCAL`
+
+통합 설치에서 같이 적용:
+
+```bash
+bash device_config/setup_initial_device.sh \
+  --setup-support-tunnel \
+  --harden-reverse-tunnel-only \
+  --harden-local-console-pam
+```

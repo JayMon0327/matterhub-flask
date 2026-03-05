@@ -97,6 +97,23 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         self.assertIn("--harden-reverse-tunnel-only", output)
         self.assertIn("--harden-allow-inbound-port 80", output)
 
+    def test_dry_run_passes_local_console_pam_option(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(SETUP_SCRIPT),
+                "--dry-run",
+                "--harden-local-console-pam",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output = result.stdout
+        self.assertIn("--harden-local-console-pam", output)
+
 
 if __name__ == "__main__":
     unittest.main()

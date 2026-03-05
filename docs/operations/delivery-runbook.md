@@ -144,3 +144,14 @@ bash device_config/install_ubuntu24.sh \
 cd /home/whatsmatter/Desktop/matterhub
 bash device_config/build_matterhub_deb.sh --version 2026.03.05 --mode pyc
 ```
+
+## 9. 물리 콘솔 접근 제한
+
+물리 모니터/키보드 로그인까지 막으려면 아래 옵션을 설치 단계에 포함한다.
+
+```bash
+bash device_config/setup_initial_device.sh \
+  --setup-support-tunnel \
+  --harden-reverse-tunnel-only \
+  --harden-local-console-pam
+```
