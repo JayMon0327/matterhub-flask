@@ -207,6 +207,118 @@
         color: var(--danger);
       }
 
+      .hidden {
+        display: none !important;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(18, 51, 60, 0.42);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        z-index: 30;
+      }
+
+      .modal-backdrop.open {
+        display: flex;
+        animation: fadeIn 0.2s ease;
+      }
+
+      .modal {
+        width: min(480px, 100%);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 12px 30px rgba(17, 51, 60, 0.2);
+      }
+
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+
+      .modal-header h3 {
+        margin: 0;
+        font-size: 1.05rem;
+      }
+
+      .modal-close {
+        background: #6b7280;
+        padding: 6px 10px;
+        border-radius: 8px;
+      }
+
+      .modal-close:hover {
+        background: #4b5563;
+      }
+
+      .modal-loading {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+        padding: 10px;
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        background: #f8fbfa;
+      }
+
+      .spinner {
+        width: 24px;
+        height: 24px;
+        border: 3px solid #c8d6d8;
+        border-top-color: var(--teal);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+
+      .progress-track {
+        margin-top: 10px;
+        height: 6px;
+        background: #e4ecee;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .progress-bar {
+        width: 40%;
+        height: 100%;
+        background: linear-gradient(90deg, var(--teal), #19a89f);
+        border-radius: inherit;
+        animation: progressSweep 1.2s ease-in-out infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes progressSweep {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
       @media (max-width: 880px) {
         .hero {
           grid-template-columns: 1fr;
@@ -260,25 +372,6 @@
         </section>
 
         <section class="card full">
-          <h2>Wi-Fi 연결</h2>
-          <form id="connectForm">
-            <div class="field-grid">
-              <div>
-                <label for="ssid">SSID</label>
-                <input id="ssid" name="ssid" type="text" placeholder="SSID 입력" required />
-              </div>
-              <div>
-                <label for="password">Password</label>
-                <input id="password" name="password" type="password" placeholder="Password 입력" />
-              </div>
-              <div class="full btn-row">
-                <button type="submit">연결</button>
-              </div>
-            </div>
-          </form>
-        </section>
-
-        <section class="card full">
           <h2>복구 모드 (AP)</h2>
           <p class="meta">
             현재 Wi-Fi 연결이 되지 않거나 설정을 처음부터 다시 해야 할 때 사용합니다.
@@ -303,6 +396,41 @@
       <p id="statusNote" class="status-note"></p>
     </main>
 
+    <div id="connectModalBackdrop" class="modal-backdrop" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="connectModalTitle">
+        <div class="modal-header">
+          <h3 id="connectModalTitle">Wi-Fi 연결</h3>
+          <button id="btnModalClose" class="modal-close" type="button">닫기</button>
+        </div>
+        <form id="modalConnectForm">
+          <div class="field-grid">
+            <div class="full">
+              <label for="modalSsid">SSID</label>
+              <input id="modalSsid" type="text" readonly />
+            </div>
+            <div class="full">
+              <label for="modalPassword">Password</label>
+              <input id="modalPassword" type="password" placeholder="Password 입력" />
+            </div>
+            <div class="full btn-row">
+              <button id="btnModalConnect" type="submit">연결</button>
+            </div>
+          </div>
+        </form>
+        <div id="modalLoading" class="modal-loading hidden">
+          <div class="spinner"></div>
+          <div>
+            <div id="modalLoadingTitle"><strong>연결 진행 중</strong></div>
+            <div id="modalLoadingMessage" class="meta">장비가 네트워크 상태를 확인하고 있습니다.</div>
+          </div>
+        </div>
+        <div id="modalProgress" class="progress-track hidden">
+          <div class="progress-bar"></div>
+        </div>
+        <p id="modalStatus" class="status-note"></p>
+      </section>
+    </div>
+
     <script>
       const API = {
         status: "/local/admin/network/status",
@@ -319,17 +447,88 @@
         stDevice: document.getElementById("stDevice"),
         scanList: document.getElementById("scanList"),
         savedList: document.getElementById("savedList"),
-        connectForm: document.getElementById("connectForm"),
-        ssid: document.getElementById("ssid"),
-        password: document.getElementById("password"),
         apSsid: document.getElementById("apSsid"),
         apPassword: document.getElementById("apPassword"),
         statusNote: document.getElementById("statusNote"),
+        connectModalBackdrop: document.getElementById("connectModalBackdrop"),
+        btnModalClose: document.getElementById("btnModalClose"),
+        modalConnectForm: document.getElementById("modalConnectForm"),
+        btnModalConnect: document.getElementById("btnModalConnect"),
+        modalSsid: document.getElementById("modalSsid"),
+        modalPassword: document.getElementById("modalPassword"),
+        modalLoading: document.getElementById("modalLoading"),
+        modalProgress: document.getElementById("modalProgress"),
+        modalStatus: document.getElementById("modalStatus"),
+        modalLoadingMessage: document.getElementById("modalLoadingMessage"),
       };
+
+      let modalBusy = false;
+      let modalLoadingTicker = null;
 
       function setNote(message, isError = false) {
         ui.statusNote.textContent = message || "";
         ui.statusNote.classList.toggle("error", Boolean(isError));
+      }
+
+      function setModalStatus(message, isError = false) {
+        ui.modalStatus.textContent = message || "";
+        ui.modalStatus.classList.toggle("error", Boolean(isError));
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function openConnectModal(ssid) {
+        ui.modalSsid.value = ssid || "";
+        ui.modalPassword.value = "";
+        setModalStatus("");
+        setModalBusy(false);
+        ui.connectModalBackdrop.classList.add("open");
+        ui.connectModalBackdrop.setAttribute("aria-hidden", "false");
+        ui.modalPassword.focus();
+      }
+
+      function closeConnectModal(force = false) {
+        if (modalBusy && !force) {
+          return;
+        }
+        ui.connectModalBackdrop.classList.remove("open");
+        ui.connectModalBackdrop.setAttribute("aria-hidden", "true");
+        setModalStatus("");
+      }
+
+      function setModalBusy(busy) {
+        modalBusy = busy;
+        ui.btnModalConnect.disabled = busy;
+        ui.btnModalClose.disabled = busy;
+        ui.modalPassword.disabled = busy;
+        ui.modalLoading.classList.toggle("hidden", !busy);
+        ui.modalProgress.classList.toggle("hidden", !busy);
+      }
+
+      function startModalLoadingMessages() {
+        const messages = [
+          "장비가 Wi-Fi에 연결 중입니다...",
+          "연결 상태를 확인하고 있습니다...",
+          "거의 완료되었습니다. 잠시만 기다려주세요...",
+        ];
+        let index = 0;
+        ui.modalLoadingMessage.textContent = messages[index];
+        if (modalLoadingTicker) {
+          clearInterval(modalLoadingTicker);
+        }
+        modalLoadingTicker = setInterval(() => {
+          index = (index + 1) % messages.length;
+          ui.modalLoadingMessage.textContent = messages[index];
+        }, 1400);
+      }
+
+      function stopModalLoadingMessages() {
+        if (modalLoadingTicker) {
+          clearInterval(modalLoadingTicker);
+          modalLoadingTicker = null;
+        }
       }
 
       async function requestJson(url, options = {}) {
@@ -367,21 +566,23 @@
           .map((network) => {
             const marker = network.in_use ? "연결됨" : "";
             const sec = network.security || "open";
+            const action = network.in_use
+              ? `<span class="meta"><strong>현재 연결됨</strong></span>`
+              : `<button class="slim" data-ssid="${network.ssid}">선택</button>`;
             return `
               <li class="network-item">
                 <div>
                   <div><strong>${network.ssid}</strong> ${marker ? `· ${marker}` : ""}</div>
                   <div class="meta">신호: ${network.signal} · 보안: ${sec}</div>
                 </div>
-                <button class="slim" data-ssid="${network.ssid}">선택</button>
+                ${action}
               </li>
             `;
           })
           .join("");
         ui.scanList.querySelectorAll("button[data-ssid]").forEach((button) => {
           button.addEventListener("click", () => {
-            ui.ssid.value = button.dataset.ssid || "";
-            ui.password.focus();
+            openConnectModal(button.dataset.ssid || "");
           });
         });
       }
@@ -448,13 +649,22 @@
         }
       }
 
-      ui.connectForm.addEventListener("submit", async (event) => {
+      ui.modalConnectForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+        const ssid = ui.modalSsid.value.trim();
+        if (!ssid) {
+          setModalStatus("SSID가 비어 있습니다.", true);
+          return;
+        }
         setNote("Wi-Fi 연결을 시도하는 중입니다...");
+        setModalStatus("연결 요청을 전송했습니다.");
+        setModalBusy(true);
+        startModalLoadingMessages();
+        const connectStart = Date.now();
         try {
           const payload = {
-            ssid: ui.ssid.value.trim(),
-            password: ui.password.value.trim() || null,
+            ssid,
+            password: ui.modalPassword.value.trim() || null,
             rollback_on_failure: true,
             ap_mode_on_failure: true,
           };
@@ -462,19 +672,45 @@
             method: "POST",
             body: JSON.stringify(payload),
           });
+          const elapsed = Date.now() - connectStart;
+          if (elapsed < 1800) {
+            await sleep(1800 - elapsed);
+          }
 
           if (result.success) {
             setNote(`연결 성공: ${result.target_ssid}`);
+            setModalStatus(`연결 성공: ${result.target_ssid}`);
+            await refreshAll();
+            await sleep(800);
+            closeConnectModal(true);
           } else if (result.ap_mode_started) {
             setNote("연결 실패: AP 복구 모드를 시작했습니다.", true);
+            setModalStatus("연결 실패: AP 복구 모드를 시작했습니다.", true);
+            await refreshAll();
           } else if (result.rollback_attempted) {
             setNote("연결 실패: 이전 Wi-Fi 프로필로 롤백했습니다.", true);
+            setModalStatus("연결 실패: 이전 Wi-Fi 프로필로 롤백했습니다.", true);
+            await refreshAll();
           } else {
             setNote("연결 실패", true);
+            setModalStatus("연결 실패", true);
+            await refreshAll();
           }
-          await refreshAll();
         } catch (error) {
           setNote(error.message, true);
+          setModalStatus(error.message, true);
+          await refreshStatus();
+          await refreshSaved();
+        } finally {
+          stopModalLoadingMessages();
+          setModalBusy(false);
+        }
+      });
+
+      ui.btnModalClose.addEventListener("click", () => closeConnectModal());
+      ui.connectModalBackdrop.addEventListener("click", (event) => {
+        if (event.target === ui.connectModalBackdrop) {
+          closeConnectModal();
         }
       });
 
