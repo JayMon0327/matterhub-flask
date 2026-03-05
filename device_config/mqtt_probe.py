@@ -124,8 +124,8 @@ def run_probe(
 
     connection = mqtt_client.connect_mqtt()
 
-    def on_message(received_topic, payload, **kwargs):
-        print(f"[PROBE] 메시지 수신: {received_topic}")
+    def on_message(topic, payload, **kwargs):
+        print(f"[PROBE] 메시지 수신: {topic}")
         print(payload.decode("utf-8", errors="ignore"))
 
     try:
