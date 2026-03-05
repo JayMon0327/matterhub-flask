@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import random
 import time
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Dict, Iterable, Optional, Sequence
 
 from awscrt import io, mqtt
 from awsiot import mqtt_connection_builder
@@ -183,13 +183,29 @@ def subscribe(topic: str, callback: Callable) -> None:
     print(f"✅ SUBSCRIBE 성공: {topic}")
 
 
-def resubscribe(topics: Sequence[str], callback: Callable) -> None:
+def resubscribe(topics: Sequence[str], callback: Callable) -> Dict[str, bool]:
+    results: Dict[str, bool] = {}
     for topic in topics:
         try:
             print(f"SUBSCRIBE 재요청: {topic}")
             subscribe(topic, callback)
+            results[topic] = True
         except Exception as exc:
             print(f"❌ 토픽 재구독 실패: {topic} - {exc!r} ({type(exc).__name__})")
+            results[topic] = False
+    return results
+
+
+def log_resubscribe_results(results: Dict[str, bool]) -> None:
+    success_topics = [topic for topic, success in results.items() if success]
+    failed_topics = [topic for topic, success in results.items() if not success]
+    print(
+        f"[MQTT] resubscribe_summary success={len(success_topics)} failed={len(failed_topics)}"
+    )
+    for topic in success_topics:
+        print(f"[MQTT] resubscribe_result status=success topic={topic}")
+    for topic in failed_topics:
+        print(f"[MQTT] resubscribe_result status=failed topic={topic}")
 
 
 def check_mqtt_connection(
@@ -224,6 +240,7 @@ def check_mqtt_connection(
         return False
 
     reset_reconnect_attempts()
-    resubscribe(list(topics), callback)
+    resubscribe_results = resubscribe(list(topics), callback)
+    log_resubscribe_results(resubscribe_results)
     print("MQTT 재연결 성공")
-    return True
+    return all(resubscribe_results.values())

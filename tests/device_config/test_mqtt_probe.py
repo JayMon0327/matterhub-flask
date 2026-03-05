@@ -8,6 +8,22 @@ from device_config import mqtt_probe
 
 
 class MqttProbeTest(unittest.TestCase):
+    def test_resolve_probe_targets_expands_both_modes(self) -> None:
+        settings = types.SimpleNamespace(
+            KONAI_TOPIC_REQUEST="update/delta/dev/example",
+            KONAI_TOPIC_RESPONSE="update/reported/dev/example",
+            KONAI_TEST_TOPIC_REQUEST="",
+            KONAI_TEST_TOPIC_RESPONSE="",
+        )
+        with patch.object(mqtt_probe, "_load_settings", return_value=settings):
+            self.assertEqual(
+                [
+                    ("request", "update/delta/dev/example"),
+                    ("response", "update/reported/dev/example"),
+                ],
+                mqtt_probe.resolve_probe_targets("both"),
+            )
+
     def test_resolve_probe_topic_uses_response_topic_for_reported(self) -> None:
         settings = types.SimpleNamespace(
             KONAI_TOPIC_REQUEST="update/delta/dev/example",
@@ -60,7 +76,7 @@ class MqttProbeTest(unittest.TestCase):
             KONAI_TEST_TOPIC_RESPONSE="",
         )
         with patch.object(mqtt_probe, "_load_settings", return_value=settings):
-            with patch.object(mqtt_probe, "run_probe", return_value=0) as run_probe_mock:
+            with patch.object(mqtt_probe, "run_probe_targets", return_value=0) as run_probe_mock:
                 exit_code = mqtt_probe.main(
                     [
                         "--topic-mode",
@@ -76,8 +92,7 @@ class MqttProbeTest(unittest.TestCase):
 
         self.assertEqual(0, exit_code)
         run_probe_mock.assert_called_once_with(
-            topic_mode="custom",
-            topic="topic/custom",
+            targets=[("custom", "topic/custom")],
             listen_seconds=1.5,
             client_id="probe-client",
         )

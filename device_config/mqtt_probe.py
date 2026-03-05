@@ -1,13 +1,38 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
+from pathlib import Path
 from typing import Iterable, Optional
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 def _load_settings():
     from mqtt_pkg import settings
 
     return settings
+
+
+def resolve_probe_targets(topic_mode: str, custom_topic: Optional[str] = None) -> list[tuple[str, str]]:
+    if topic_mode == "both":
+        targets = [
+            ("request", resolve_probe_topic("request", custom_topic)),
+            ("response", resolve_probe_topic("response", custom_topic)),
+        ]
+        unique_targets: list[tuple[str, str]] = []
+        seen_topics: set[str] = set()
+        for label, topic in targets:
+            if topic in seen_topics:
+                continue
+            seen_topics.add(topic)
+            unique_targets.append((label, topic))
+        return unique_targets
+    return [(topic_mode, resolve_probe_topic(topic_mode, custom_topic))]
 
 
 def resolve_probe_topic(topic_mode: str, custom_topic: Optional[str] = None) -> str:
@@ -60,6 +85,11 @@ def build_probe_plan(
             "[PROBE] 주의: 기본 client_id를 사용합니다. matterhub-mqtt.service와 동시에 실행하지 마세요."
         )
     return lines
+
+
+def build_probe_result_lines(label: str, topic: str, success: bool) -> list[str]:
+    result = "success" if success else "failed"
+    return [f"[PROBE] result label={label} status={result} topic={topic}"]
 
 
 def print_lines(lines: Iterable[str]) -> None:
@@ -120,6 +150,25 @@ def run_probe(
             print(f"[PROBE] disconnect 경고: {exc!r} ({type(exc).__name__})")
 
 
+def run_probe_targets(
+    targets: Iterable[tuple[str, str]],
+    listen_seconds: float,
+    client_id: Optional[str] = None,
+) -> int:
+    overall_success = True
+    for label, topic in targets:
+        probe_exit_code = run_probe(
+            topic_mode=label,
+            topic=topic,
+            listen_seconds=listen_seconds,
+            client_id=client_id,
+        )
+        success = probe_exit_code == 0
+        print_lines(build_probe_result_lines(label, topic, success))
+        overall_success = overall_success and success
+    return 0 if overall_success else 1
+
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Konai MQTT request/response topic subscription probe"
@@ -129,6 +178,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         choices=[
             "request",
             "response",
+            "both",
             "delta",
             "reported",
             "test-request",
@@ -159,11 +209,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
-    resolved_topic = resolve_probe_topic(args.topic_mode, args.topic)
+    resolved_targets = resolve_probe_targets(args.topic_mode, args.topic)
     resolved_client_id = (args.client_id or "").strip() or None
-    return run_probe(
-        topic_mode=args.topic_mode,
-        topic=resolved_topic,
+    return run_probe_targets(
+        targets=resolved_targets,
         listen_seconds=max(0.0, args.listen_seconds),
         client_id=resolved_client_id,
     )

@@ -5,7 +5,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -139,6 +139,26 @@ class MqttEntrypointTest(unittest.TestCase):
         self.assertIn("[MQTT] response_topic=update/reported/dev/example", report)
         self.assertIn("[MQTT] subscribe_count=3", report)
         self.assertIn("[MQTT] subscribe[1]=update/delta/dev/example", report)
+
+    def test_log_subscribe_results_prints_topic_statuses(self) -> None:
+        module = load_mqtt_module()
+
+        with patch("builtins.print") as print_mock:
+            module.log_subscribe_results(
+                {
+                    "update/delta/dev/example": False,
+                    "matterhub/hub-1/git/update": True,
+                },
+                phase="startup",
+            )
+
+        print_mock.assert_any_call("[MQTT] subscribe_summary phase=startup success=1 failed=1")
+        print_mock.assert_any_call(
+            "[MQTT] subscribe_result phase=startup status=success topic=matterhub/hub-1/git/update"
+        )
+        print_mock.assert_any_call(
+            "[MQTT] subscribe_result phase=startup status=failed topic=update/delta/dev/example"
+        )
 
 
 if __name__ == "__main__":

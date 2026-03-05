@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Iterable, List
+from typing import Dict, Iterable, List
 
 from mqtt_pkg import callbacks, runtime, settings, state, test_subscriber, update
 from mqtt_pkg.runtime import AWSIoTClient
@@ -29,14 +29,17 @@ def build_subscribe_topics() -> List[str]:
     return topics
 
 
-def subscribe_topics(topics: Iterable[str]) -> None:
+def subscribe_topics(topics: Iterable[str]) -> Dict[str, bool]:
     topics = list(topics)
+    results: Dict[str, bool] = {}
     for topic in topics:
         max_retries = 3
         base_delay = 1
+        results[topic] = False
         for attempt in range(max_retries):
             try:
                 runtime.subscribe(topic, callbacks.mqtt_callback)
+                results[topic] = True
                 break
             except Exception as exc:
                 print(
@@ -48,6 +51,19 @@ def subscribe_topics(topics: Iterable[str]) -> None:
                     time.sleep(delay)
                 else:
                     print(f"❌ 토픽 구독 최종 실패: {topic}")
+    return results
+
+
+def log_subscribe_results(results: Dict[str, bool], phase: str) -> None:
+    success_topics = [topic for topic, success in results.items() if success]
+    failed_topics = [topic for topic, success in results.items() if not success]
+    print(
+        f"[MQTT] subscribe_summary phase={phase} success={len(success_topics)} failed={len(failed_topics)}"
+    )
+    for topic in success_topics:
+        print(f"[MQTT] subscribe_result phase={phase} status=success topic={topic}")
+    for topic in failed_topics:
+        print(f"[MQTT] subscribe_result phase={phase} status=failed topic={topic}")
 
 
 def build_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> List[str]:
@@ -95,7 +111,8 @@ def main() -> None:
 
     print(f"matterhub_id: {settings.MATTERHUB_ID or '(미설정)'}")
     print(f"토픽 구독 시작 (총 {len(topics)}개)")
-    subscribe_topics(topics)
+    subscribe_results = subscribe_topics(topics)
+    log_subscribe_results(subscribe_results, phase="startup")
     print("모든 토픽 구독 완료")
 
     state.publish_bootstrap_all_states()

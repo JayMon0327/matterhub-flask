@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 def load_runtime_module():
@@ -78,6 +78,24 @@ class RuntimeDescribeConnectionTest(unittest.TestCase):
         self.assertFalse(description["cert_exists"])
         self.assertFalse(description["key_exists"])
         self.assertFalse(description["ca_exists"])
+
+    def test_resubscribe_returns_per_topic_results(self) -> None:
+        runtime = load_runtime_module()
+        subscribe_mock = Mock(side_effect=[None, RuntimeError("boom")])
+
+        with patch.object(runtime, "subscribe", subscribe_mock):
+            results = runtime.resubscribe(
+                ["update/reported/dev/example", "update/delta/dev/example"],
+                callback=Mock(),
+            )
+
+        self.assertEqual(
+            {
+                "update/reported/dev/example": True,
+                "update/delta/dev/example": False,
+            },
+            results,
+        )
 
 
 if __name__ == "__main__":
