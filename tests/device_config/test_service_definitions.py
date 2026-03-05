@@ -55,6 +55,11 @@ class ServiceDefinitionsTest(unittest.TestCase):
         for service in get_service_definitions():
             self.assertEqual(DEFAULT_HARDENING_DIRECTIVES, service.hardening_directives)
 
+    def test_support_tunnel_has_unit_start_limit_override(self) -> None:
+        support_tunnel = [s for s in get_service_definitions() if s.service_name == "matterhub-support-tunnel"][0]
+        self.assertIn("StartLimitIntervalSec=0", support_tunnel.unit_directives)
+        self.assertIn("StartLimitBurst=0", support_tunnel.unit_directives)
+
 
 if __name__ == "__main__":
     unittest.main()

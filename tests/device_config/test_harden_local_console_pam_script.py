@@ -15,12 +15,27 @@ class HardenLocalConsolePamScriptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             pam_login = Path(temp_dir) / "login"
             access_conf = Path(temp_dir) / "access.conf"
+            gdm_password = Path(temp_dir) / "gdm-password"
+            gdm_autologin = Path(temp_dir) / "gdm-autologin"
+            gdm_custom = Path(temp_dir) / "custom.conf"
             pam_login.write_text(
                 "auth requisite pam_securetty.so\n# account required pam_access.so\n",
                 encoding="utf-8",
             )
+            gdm_password.write_text(
+                "@include common-auth\n@include common-account\n",
+                encoding="utf-8",
+            )
+            gdm_autologin.write_text(
+                "@include common-auth\n@include common-account\n",
+                encoding="utf-8",
+            )
             access_conf.write_text(
                 "+:root:ALL\n",
+                encoding="utf-8",
+            )
+            gdm_custom.write_text(
+                "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=whatsmatter\n",
                 encoding="utf-8",
             )
 
@@ -33,8 +48,14 @@ class HardenLocalConsolePamScriptTest(unittest.TestCase):
                     "whatsmatter",
                     "--pam-login-path",
                     str(pam_login),
+                    "--gdm-password-pam",
+                    str(gdm_password),
+                    "--gdm-autologin-pam",
+                    str(gdm_autologin),
                     "--access-conf",
                     str(access_conf),
+                    "--gdm-custom-conf",
+                    str(gdm_custom),
                 ],
                 cwd=PROJECT_ROOT,
                 check=True,
@@ -45,6 +66,7 @@ class HardenLocalConsolePamScriptTest(unittest.TestCase):
             self.assertIn("uncommented pam_access", output)
             self.assertIn("MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN", output)
             self.assertIn("-:whatsmatter:LOCAL", output)
+            self.assertIn("AutomaticLoginEnable=false", output)
 
 
 if __name__ == "__main__":

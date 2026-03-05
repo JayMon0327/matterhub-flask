@@ -13,6 +13,7 @@ class ServiceDefinition:
     description: str
     script_path: Path
     enabled_by_default: bool = True
+    unit_directives: tuple[str, ...] = ()
     hardening_directives: tuple[str, ...] = ()
 
 
@@ -62,6 +63,10 @@ SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
         description="MatterHub Support Tunnel",
         script_path=Path("support_tunnel.py"),
         enabled_by_default=False,
+        unit_directives=(
+            "StartLimitIntervalSec=0",
+            "StartLimitBurst=0",
+        ),
         hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
 )
@@ -95,6 +100,7 @@ def build_service_context(
     project_root = Path(project_root)
     return {
         "@DESCRIPTION@": service.description,
+        "@UNIT_DIRECTIVES@": "\n".join(service.unit_directives),
         "@RUN_USER@": run_user,
         "@WORKING_DIRECTORY@": str(project_root),
         "@EXEC_START@": build_exec_start(project_root, service.script_path),

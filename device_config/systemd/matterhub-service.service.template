@@ -2,6 +2,7 @@
 Description=@DESCRIPTION@
 After=network-online.target
 Wants=network-online.target
+@UNIT_DIRECTIVES@
 
 [Service]
 Type=simple

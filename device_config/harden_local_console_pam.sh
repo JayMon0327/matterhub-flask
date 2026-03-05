@@ -4,7 +4,11 @@ set -euo pipefail
 
 RUN_USER="${RUN_USER:-$(id -un)}"
 PAM_LOGIN_PATH="${PAM_LOGIN_PATH:-/etc/pam.d/login}"
+GDM_PASSWORD_PAM_PATH="${GDM_PASSWORD_PAM_PATH:-/etc/pam.d/gdm-password}"
+GDM_AUTOLOGIN_PAM_PATH="${GDM_AUTOLOGIN_PAM_PATH:-/etc/pam.d/gdm-autologin}"
 ACCESS_CONF_PATH="${ACCESS_CONF_PATH:-/etc/security/access.conf}"
+GDM_CUSTOM_CONF_PATH="${GDM_CUSTOM_CONF_PATH:-/etc/gdm3/custom.conf}"
+DISABLE_GDM_AUTOLOGIN=1
 DRY_RUN=0
 
 MARKER_BEGIN="# MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN"
@@ -41,7 +45,15 @@ Apply PAM rule to deny local-console login for the runtime account while keeping
 Options:
   --run-user <user>       Runtime user denied on local console (default: current user)
   --pam-login-path <path> PAM login file (default: /etc/pam.d/login)
+  --gdm-password-pam <path>
+                         GDM password PAM file (default: /etc/pam.d/gdm-password)
+  --gdm-autologin-pam <path>
+                         GDM autologin PAM file (default: /etc/pam.d/gdm-autologin)
   --access-conf <path>    access.conf path (default: /etc/security/access.conf)
+  --gdm-custom-conf <path>
+                         GDM custom.conf path (default: /etc/gdm3/custom.conf)
+  --skip-disable-gdm-autologin
+                         Keep current GDM autologin settings.
   --dry-run               Show planned actions only
   -h, --help              Show help
 EOF
@@ -57,9 +69,25 @@ while [ "$#" -gt 0 ]; do
       PAM_LOGIN_PATH="$2"
       shift 2
       ;;
+    --gdm-password-pam)
+      GDM_PASSWORD_PAM_PATH="$2"
+      shift 2
+      ;;
+    --gdm-autologin-pam)
+      GDM_AUTOLOGIN_PAM_PATH="$2"
+      shift 2
+      ;;
     --access-conf)
       ACCESS_CONF_PATH="$2"
       shift 2
+      ;;
+    --gdm-custom-conf)
+      GDM_CUSTOM_CONF_PATH="$2"
+      shift 2
+      ;;
+    --skip-disable-gdm-autologin)
+      DISABLE_GDM_AUTOLOGIN=0
+      shift
       ;;
     --dry-run)
       DRY_RUN=1
@@ -90,29 +118,45 @@ trap cleanup EXIT
 
 LOGIN_TMP="$TMP_DIR/login"
 ACCESS_TMP="$TMP_DIR/access.conf"
+GDM_PASSWORD_TMP="$TMP_DIR/gdm-password"
+GDM_AUTOLOGIN_TMP="$TMP_DIR/gdm-autologin"
+GDM_CUSTOM_TMP="$TMP_DIR/gdm-custom.conf"
 
 if [ ! -f "$PAM_LOGIN_PATH" ]; then
   echo "PAM login file not found: $PAM_LOGIN_PATH" >&2
   exit 1
 fi
 
-cp "$PAM_LOGIN_PATH" "$LOGIN_TMP"
-if grep -Eq '^[[:space:]]*account[[:space:]]+required[[:space:]]+pam_access\.so([[:space:]]|$)' "$LOGIN_TMP"; then
-  log "pam_access is already enabled in ${PAM_LOGIN_PATH}"
-elif grep -Eq '^[[:space:]]*#[[:space:]]*account[[:space:]]+required[[:space:]]+pam_access\.so([[:space:]]|$)' "$LOGIN_TMP"; then
-  awk '
-    {
-      if ($0 ~ /^[[:space:]]*#[[:space:]]*account[[:space:]]+required[[:space:]]+pam_access\.so([[:space:]]|$)/) {
-        sub(/^[[:space:]]*#[[:space:]]*/, "", $0)
+ensure_pam_access_line() {
+  local source_path="$1"
+  local output_path="$2"
+
+  cp "$source_path" "$output_path"
+  if grep -Eq '^[[:space:]]*account[[:space:]]+required[[:space:]]+pam_access\.so([[:space:]]|$)' "$output_path"; then
+    log "pam_access is already enabled in ${source_path}"
+  elif grep -Eq '^[[:space:]]*#[[:space:]]*account[[:space:]]+required[[:space:]]+pam_access\.so([[:space:]]|$)' "$output_path"; then
+    awk '
+      {
+        if ($0 ~ /^[[:space:]]*#[[:space:]]*account[[:space:]]+required[[:space:]]+pam_access\.so([[:space:]]|$)/) {
+          sub(/^[[:space:]]*#[[:space:]]*/, "", $0)
+        }
+        print
       }
-      print
-    }
-  ' "$LOGIN_TMP" > "$LOGIN_TMP.new"
-  mv "$LOGIN_TMP.new" "$LOGIN_TMP"
-  log "uncommented pam_access in ${PAM_LOGIN_PATH}"
-else
-  printf '\naccount required pam_access.so\n' >> "$LOGIN_TMP"
-  log "appended pam_access entry to ${PAM_LOGIN_PATH}"
+    ' "$output_path" > "$output_path.new"
+    mv "$output_path.new" "$output_path"
+    log "uncommented pam_access in ${source_path}"
+  else
+    printf '\naccount required pam_access.so\n' >> "$output_path"
+    log "appended pam_access entry to ${source_path}"
+  fi
+}
+
+ensure_pam_access_line "$PAM_LOGIN_PATH" "$LOGIN_TMP"
+if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
+  ensure_pam_access_line "$GDM_PASSWORD_PAM_PATH" "$GDM_PASSWORD_TMP"
+fi
+if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
+  ensure_pam_access_line "$GDM_AUTOLOGIN_PAM_PATH" "$GDM_AUTOLOGIN_TMP"
 fi
 
 if [ -f "$ACCESS_CONF_PATH" ]; then
@@ -135,14 +179,48 @@ fi
 
 log "installing PAM login policy: ${PAM_LOGIN_PATH}"
 sudo_cmd install -m 0644 "$LOGIN_TMP" "$PAM_LOGIN_PATH"
+if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
+  log "installing GDM password PAM policy: ${GDM_PASSWORD_PAM_PATH}"
+  sudo_cmd install -m 0644 "$GDM_PASSWORD_TMP" "$GDM_PASSWORD_PAM_PATH"
+fi
+if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
+  log "installing GDM autologin PAM policy: ${GDM_AUTOLOGIN_PAM_PATH}"
+  sudo_cmd install -m 0644 "$GDM_AUTOLOGIN_TMP" "$GDM_AUTOLOGIN_PAM_PATH"
+fi
 log "installing access policy: ${ACCESS_CONF_PATH}"
 sudo_cmd install -m 0644 "$ACCESS_TMP" "$ACCESS_CONF_PATH"
+
+if [ "$DISABLE_GDM_AUTOLOGIN" -eq 1 ] && [ -f "$GDM_CUSTOM_CONF_PATH" ]; then
+  cp "$GDM_CUSTOM_CONF_PATH" "$GDM_CUSTOM_TMP"
+  if grep -Eq '^AutomaticLoginEnable=' "$GDM_CUSTOM_TMP"; then
+    awk '
+      {
+        if ($0 ~ /^AutomaticLoginEnable=/) {
+          print "AutomaticLoginEnable=false"
+        } else if ($0 ~ /^AutomaticLogin=/) {
+          print "#AutomaticLogin=disabled"
+        } else {
+          print
+        }
+      }
+    ' "$GDM_CUSTOM_TMP" > "$GDM_CUSTOM_TMP.new"
+    mv "$GDM_CUSTOM_TMP.new" "$GDM_CUSTOM_TMP"
+  else
+    printf '\n[daemon]\nAutomaticLoginEnable=false\n#AutomaticLogin=disabled\n' >> "$GDM_CUSTOM_TMP"
+  fi
+  log "installing GDM custom policy: ${GDM_CUSTOM_CONF_PATH}"
+  sudo_cmd install -m 0644 "$GDM_CUSTOM_TMP" "$GDM_CUSTOM_CONF_PATH"
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "pam login preview:"
   tail -n 12 "$LOGIN_TMP" | sed 's/^/[dry-run]   /'
   log "access.conf preview:"
   tail -n 12 "$ACCESS_TMP" | sed 's/^/[dry-run]   /'
+  if [ "$DISABLE_GDM_AUTOLOGIN" -eq 1 ] && [ -f "$GDM_CUSTOM_CONF_PATH" ]; then
+    log "gdm custom.conf preview:"
+    tail -n 12 "$GDM_CUSTOM_TMP" | sed 's/^/[dry-run]   /'
+  fi
 fi
 
 log "local console PAM hardening complete"

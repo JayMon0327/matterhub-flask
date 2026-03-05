@@ -4,6 +4,7 @@ import argparse
 import os
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
 
@@ -59,6 +60,8 @@ class TunnelConfig:
     autossh_gatetime: str
     relay_operator_user: str
     operator_key_path_hint: str
+    reconnect_delay_seconds: int
+    max_reconnect_delay_seconds: int
 
 
 def load_config(env: Mapping[str, str] | None = None) -> TunnelConfig:
@@ -93,6 +96,12 @@ def load_config(env: Mapping[str, str] | None = None) -> TunnelConfig:
         or "ec2-user",
         operator_key_path_hint=_strip_quotes(source.get("SUPPORT_TUNNEL_OPERATOR_KEY_PATH"))
         or "<relay-operator-key.pem>",
+        reconnect_delay_seconds=_env_int("SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS", default=5, env=source),
+        max_reconnect_delay_seconds=_env_int(
+            "SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS",
+            default=60,
+            env=source,
+        ),
     )
 
 
@@ -119,6 +128,14 @@ def validate_config(config: TunnelConfig) -> list[str]:
         errors.append("SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL must be greater than 0.")
     if config.server_alive_count_max <= 0:
         errors.append("SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX must be greater than 0.")
+    if config.reconnect_delay_seconds <= 0:
+        errors.append("SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS must be greater than 0.")
+    if config.max_reconnect_delay_seconds <= 0:
+        errors.append("SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS must be greater than 0.")
+    if config.max_reconnect_delay_seconds < config.reconnect_delay_seconds:
+        errors.append(
+            "SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS must be greater than or equal to SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS."
+        )
 
     return errors
 
@@ -209,6 +226,9 @@ def execute(
     *,
     dry_run: bool = False,
     runner: Callable[[Sequence[str], Mapping[str, str] | None], int] = _default_runner,
+    retry_forever: bool = True,
+    max_attempts: int | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> int:
     if not config.enabled:
         print("[SUPPORT_TUNNEL] disabled (SUPPORT_TUNNEL_ENABLED=0)")
@@ -230,13 +250,32 @@ def execute(
     if config.command == "autossh":
         run_env.setdefault("AUTOSSH_GATETIME", config.autossh_gatetime)
 
-    print("[SUPPORT_TUNNEL] starting reverse SSH tunnel")
-    return_code = runner(command, run_env)
-    if return_code == 0:
-        print("[SUPPORT_TUNNEL] process exited normally")
-    else:
-        print(f"[SUPPORT_TUNNEL][FAIL] process exited with code={return_code}")
-    return return_code
+    if not retry_forever:
+        print("[SUPPORT_TUNNEL] starting reverse SSH tunnel")
+        return_code = runner(command, run_env)
+        if return_code == 0:
+            print("[SUPPORT_TUNNEL] process exited normally")
+        else:
+            print(f"[SUPPORT_TUNNEL][FAIL] process exited with code={return_code}")
+        return return_code
+
+    attempt = 0
+    delay_seconds = config.reconnect_delay_seconds
+    while True:
+        attempt += 1
+        print(f"[SUPPORT_TUNNEL] starting reverse SSH tunnel (attempt={attempt})")
+        return_code = runner(command, run_env)
+        if return_code == 0:
+            print("[SUPPORT_TUNNEL][WARN] process exited normally, reconnect loop continues")
+        else:
+            print(f"[SUPPORT_TUNNEL][WARN] process exited with code={return_code}")
+
+        if max_attempts is not None and attempt >= max_attempts:
+            return return_code
+
+        print(f"[SUPPORT_TUNNEL] reconnecting in {delay_seconds}s")
+        sleep_fn(delay_seconds)
+        delay_seconds = min(delay_seconds * 2, config.max_reconnect_delay_seconds)
 
 
 def _build_parser() -> argparse.ArgumentParser:

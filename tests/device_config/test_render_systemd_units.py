@@ -77,6 +77,8 @@ class RenderSystemdUnitsTest(unittest.TestCase):
                 "ExecStart=/srv/matterhub/venv/bin/python /srv/matterhub/support_tunnel.py",
                 support_tunnel_text,
             )
+            self.assertIn("StartLimitIntervalSec=0", support_tunnel_text)
+            self.assertIn("StartLimitBurst=0", support_tunnel_text)
 
     def test_list_enabled_unit_names_excludes_support_tunnel(self) -> None:
         result = subprocess.run(

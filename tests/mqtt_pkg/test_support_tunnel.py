@@ -33,6 +33,8 @@ def _valid_config(**overrides: object) -> TunnelConfig:
         "autossh_gatetime": "0",
         "relay_operator_user": "ec2-user",
         "operator_key_path_hint": "<relay-operator-key.pem>",
+        "reconnect_delay_seconds": 5,
+        "max_reconnect_delay_seconds": 60,
     }
     data.update(overrides)
     return TunnelConfig(**data)
@@ -58,6 +60,8 @@ class SupportTunnelConfigTest(unittest.TestCase):
             "SUPPORT_TUNNEL_AUTOSSH_GATETIME": "5",
             "SUPPORT_TUNNEL_RELAY_OPERATOR_USER": "relayops",
             "SUPPORT_TUNNEL_OPERATOR_KEY_PATH": "/keys/relay.pem",
+            "SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS": "7",
+            "SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS": "30",
         }
 
         config = load_config(env=env)
@@ -75,6 +79,8 @@ class SupportTunnelConfigTest(unittest.TestCase):
         self.assertEqual("5", config.autossh_gatetime)
         self.assertEqual("relayops", config.relay_operator_user)
         self.assertEqual("/keys/relay.pem", config.operator_key_path_hint)
+        self.assertEqual(7, config.reconnect_delay_seconds)
+        self.assertEqual(30, config.max_reconnect_delay_seconds)
 
     def test_validate_config_reports_missing_required_fields(self) -> None:
         config = _valid_config(user=None, host=None, remote_port=None)
@@ -143,10 +149,37 @@ class SupportTunnelExecuteTest(unittest.TestCase):
 
         config = _valid_config(command="autossh", autossh_gatetime="10")
 
-        return_code = execute(config, runner=fake_runner)
+        return_code = execute(config, runner=fake_runner, retry_forever=False)
 
         self.assertEqual(0, return_code)
         self.assertEqual("10", captured_env.get("AUTOSSH_GATETIME"))
+
+    def test_execute_reconnect_loop_retries_with_backoff(self) -> None:
+        call_count = 0
+        sleep_calls: list[float] = []
+
+        def fake_runner(command: Sequence[str], env: Mapping[str, str] | None) -> int:
+            nonlocal call_count
+            call_count += 1
+            self.assertEqual("ssh", command[0])
+            return 255
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        config = _valid_config(reconnect_delay_seconds=2, max_reconnect_delay_seconds=5)
+
+        return_code = execute(
+            config,
+            runner=fake_runner,
+            retry_forever=True,
+            max_attempts=3,
+            sleep_fn=fake_sleep,
+        )
+
+        self.assertEqual(255, return_code)
+        self.assertEqual(3, call_count)
+        self.assertEqual([2, 4], sleep_calls)
 
 
 if __name__ == "__main__":

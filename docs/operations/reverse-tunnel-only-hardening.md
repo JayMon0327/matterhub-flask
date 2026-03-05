@@ -90,9 +90,11 @@ bash device_config/harden_local_console_pam.sh --run-user whatsmatter
 적용 내용:
 
 - `/etc/pam.d/login` 에 `pam_access.so` 활성화
+- `/etc/pam.d/gdm-password`, `/etc/pam.d/gdm-autologin` 에 `pam_access.so` 활성화 (파일 존재 시)
 - `/etc/security/access.conf` 에 아래 정책 추가
   - `+:root:LOCAL`
   - `-:whatsmatter:LOCAL`
+- `/etc/gdm3/custom.conf` 에서 자동로그인 비활성화 (`AutomaticLoginEnable=false`)
 
 통합 설치에서 같이 적용:
 
