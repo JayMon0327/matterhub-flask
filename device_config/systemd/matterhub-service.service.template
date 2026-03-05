@@ -11,6 +11,7 @@ ExecStart=@EXEC_START@
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=5
+@HARDENING_DIRECTIVES@
 
 [Install]
 WantedBy=multi-user.target

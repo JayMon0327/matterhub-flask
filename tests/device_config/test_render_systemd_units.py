@@ -66,6 +66,9 @@ class RenderSystemdUnitsTest(unittest.TestCase):
                 "ExecStart=/srv/matterhub/venv/bin/python /srv/matterhub/app.py",
                 api_text,
             )
+            self.assertIn("NoNewPrivileges=true", api_text)
+            self.assertIn("ProtectSystem=full", api_text)
+            self.assertIn("CapabilityBoundingSet=", api_text)
             self.assertIn(
                 "ExecStart=/srv/matterhub/venv/bin/python /srv/matterhub/mqtt.py",
                 mqtt_text,

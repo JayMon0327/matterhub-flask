@@ -12,6 +12,7 @@ SKIP_OS_PACKAGES=0
 
 SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
+HARDEN_REVERSE_TUNNEL_ONLY=0
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -19,6 +20,7 @@ SUPPORT_REMOTE_PORT="${SUPPORT_REMOTE_PORT:-${SUPPORT_TUNNEL_REMOTE_PORT:-}}"
 SUPPORT_DEVICE_USER="${SUPPORT_DEVICE_USER:-${SUPPORT_TUNNEL_DEVICE_USER:-$RUN_USER}}"
 SUPPORT_RELAY_OPERATOR_USER="${SUPPORT_RELAY_OPERATOR_USER:-${SUPPORT_TUNNEL_RELAY_OPERATOR_USER:-ec2-user}}"
 SUPPORT_RELAY_ACCESS_PUBKEY="${SUPPORT_RELAY_ACCESS_PUBKEY:-${SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY:-}}"
+HARDEN_ALLOW_INBOUND_PORTS=()
 
 WIFI_INTERFACE="${WIFI_INTERFACE:-wlan0}"
 WIFI_HEALTH_HOST="${WIFI_HEALTH_HOST:-8.8.8.8}"
@@ -117,6 +119,8 @@ Options:
   --support-device-user <user>       Pass through
   --support-relay-operator-user <u>  Pass through
   --support-relay-access-pubkey <k>  Pass through
+  --harden-reverse-tunnel-only       Pass through
+  --harden-allow-inbound-port <p>    Pass through (repeatable)
   -h, --help                         Show help
 EOF
 }
@@ -203,6 +207,14 @@ while [ "$#" -gt 0 ]; do
       SUPPORT_RELAY_ACCESS_PUBKEY="$2"
       shift 2
       ;;
+    --harden-reverse-tunnel-only)
+      HARDEN_REVERSE_TUNNEL_ONLY=1
+      shift
+      ;;
+    --harden-allow-inbound-port)
+      HARDEN_ALLOW_INBOUND_PORTS+=("$2")
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -286,6 +298,15 @@ fi
 if [ -n "$SUPPORT_RELAY_ACCESS_PUBKEY" ]; then
   install_cmd+=(--support-relay-access-pubkey "$SUPPORT_RELAY_ACCESS_PUBKEY")
 fi
+if [ "$HARDEN_REVERSE_TUNNEL_ONLY" -eq 1 ]; then
+  install_cmd+=(--harden-reverse-tunnel-only)
+fi
+for port in "${HARDEN_ALLOW_INBOUND_PORTS[@]-}"; do
+  if [ -z "$port" ]; then
+    continue
+  fi
+  install_cmd+=(--harden-allow-inbound-port "$port")
+done
 
 log "install_ubuntu24.sh 실행"
 run_cmd "${install_cmd[@]}"

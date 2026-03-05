@@ -77,6 +77,26 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         self.assertIn("--support-remote-port 22608", output)
         self.assertIn("--support-relay-operator-user ec2-user", output)
 
+    def test_dry_run_passes_hardening_options_to_install_script(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(SETUP_SCRIPT),
+                "--dry-run",
+                "--harden-reverse-tunnel-only",
+                "--harden-allow-inbound-port",
+                "80",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output = result.stdout
+        self.assertIn("--harden-reverse-tunnel-only", output)
+        self.assertIn("--harden-allow-inbound-port 80", output)
+
 
 if __name__ == "__main__":
     unittest.main()

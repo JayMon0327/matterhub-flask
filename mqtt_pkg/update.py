@@ -260,13 +260,14 @@ def handle_update_command(message: Dict[str, Any]) -> None:
     try:
         command = message.get("command")
         update_id = message.get("update_id")
-
-        if command == "git_update":
-            print(f"🚀 Git 업데이트 명령 수신: {update_id}")
-            send_immediate_response(message, "queued")
-            update_queue.put(message)
-            print(f"📥 업데이트 명령이 큐에 추가됨: {update_id}")
-            print(f"큐 크기: {update_queue.qsize()}")
+        print(
+            "[UPDATE][DISABLED] command ignored "
+            f"(command={command}, update_id={update_id}, reason=reverse_tunnel_only)"
+        )
+        send_error_response(
+            message,
+            "REMOTE_UPDATE_DISABLED: use reverse tunnel maintenance workflow",
+        )
     except Exception as exc:
         print(f"❌ Git 업데이트 실패: {exc}")
         send_error_response(message, str(exc))
@@ -278,4 +279,3 @@ def start_queue_worker() -> threading.Thread:
     worker.start()
     print("✅ 업데이트 큐 처리 스레드 시작됨")
     return worker
-

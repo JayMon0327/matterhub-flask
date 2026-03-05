@@ -78,6 +78,30 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         self.assertIn("--enable-now", output)
         self.assertIn("--dry-run", output)
 
+    def test_dry_run_can_chain_reverse_tunnel_only_hardening(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(INSTALL_SCRIPT),
+                "--dry-run",
+                "--harden-reverse-tunnel-only",
+                "--harden-allow-inbound-port",
+                "80",
+                "--harden-allow-inbound-port",
+                "443",
+            ],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
+        self.assertIn("reverse tunnel only 하드닝 실행", output)
+        self.assertIn("harden_reverse_tunnel_only.sh", output)
+        self.assertIn("--allow-inbound-port 80", output)
+        self.assertIn("--allow-inbound-port 443", output)
+        self.assertIn("--dry-run", output)
+
 
 if __name__ == "__main__":
     unittest.main()

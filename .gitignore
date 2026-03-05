@@ -37,4 +37,7 @@ __init__.py
 !tests/mqtt_pkg/__init__.py
 
 KONAI_CERTIFICATE_GUIDE.md
-docs/
+awsCertificates/
+awsCredentialDocs/
+device_config/relay/
+codex_context.md

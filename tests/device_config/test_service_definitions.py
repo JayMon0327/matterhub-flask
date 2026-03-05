@@ -6,6 +6,7 @@ from pathlib import Path
 from device_config.service_definitions import (
     build_exec_start,
     build_service_context,
+    DEFAULT_HARDENING_DIRECTIVES,
     get_enabled_service_definitions,
     get_service_definitions,
     get_unit_name,
@@ -48,6 +49,11 @@ class ServiceDefinitionsTest(unittest.TestCase):
         self.assertEqual("MatterHub Flask API", context["@DESCRIPTION@"])
         self.assertEqual("whatsmatter", context["@RUN_USER@"])
         self.assertEqual("/srv/matterhub", context["@WORKING_DIRECTORY@"])
+        self.assertIn("NoNewPrivileges=true", context["@HARDENING_DIRECTIVES@"])
+
+    def test_default_hardening_directives_attached(self) -> None:
+        for service in get_service_definitions():
+            self.assertEqual(DEFAULT_HARDENING_DIRECTIVES, service.hardening_directives)
 
 
 if __name__ == "__main__":

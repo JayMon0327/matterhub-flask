@@ -13,6 +13,23 @@ class ServiceDefinition:
     description: str
     script_path: Path
     enabled_by_default: bool = True
+    hardening_directives: tuple[str, ...] = ()
+
+
+DEFAULT_HARDENING_DIRECTIVES: tuple[str, ...] = (
+    "NoNewPrivileges=true",
+    "PrivateTmp=true",
+    "ProtectSystem=full",
+    "ProtectControlGroups=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelModules=true",
+    "RestrictSUIDSGID=true",
+    "LockPersonality=true",
+    "RestrictRealtime=true",
+    "CapabilityBoundingSet=",
+    "AmbientCapabilities=",
+    "UMask=0077",
+)
 
 
 SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
@@ -20,27 +37,32 @@ SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
         service_name="matterhub-api",
         description="MatterHub Flask API",
         script_path=Path("app.py"),
+        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
     ServiceDefinition(
         service_name="matterhub-mqtt",
         description="MatterHub MQTT Worker",
         script_path=Path("mqtt.py"),
+        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
     ServiceDefinition(
         service_name="matterhub-rule-engine",
         description="MatterHub Rule Engine",
         script_path=Path("sub/ruleEngine.py"),
+        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
     ServiceDefinition(
         service_name="matterhub-notifier",
         description="MatterHub Notifier",
         script_path=Path("sub/notifier.py"),
+        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
     ServiceDefinition(
         service_name="matterhub-support-tunnel",
         description="MatterHub Support Tunnel",
         script_path=Path("support_tunnel.py"),
         enabled_by_default=False,
+        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
 )
 
@@ -76,6 +98,7 @@ def build_service_context(
         "@RUN_USER@": run_user,
         "@WORKING_DIRECTORY@": str(project_root),
         "@EXEC_START@": build_exec_start(project_root, service.script_path),
+        "@HARDENING_DIRECTIVES@": "\n".join(service.hardening_directives),
     }
 
 

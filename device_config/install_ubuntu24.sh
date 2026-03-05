@@ -12,6 +12,7 @@ DRY_RUN=0
 SKIP_OS_PACKAGES=0
 SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
+HARDEN_REVERSE_TUNNEL_ONLY=0
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -19,6 +20,7 @@ SUPPORT_REMOTE_PORT="${SUPPORT_REMOTE_PORT:-${SUPPORT_TUNNEL_REMOTE_PORT:-}}"
 SUPPORT_DEVICE_USER="${SUPPORT_DEVICE_USER:-${SUPPORT_TUNNEL_DEVICE_USER:-$RUN_USER}}"
 SUPPORT_RELAY_OPERATOR_USER="${SUPPORT_RELAY_OPERATOR_USER:-${SUPPORT_TUNNEL_RELAY_OPERATOR_USER:-ec2-user}}"
 SUPPORT_RELAY_ACCESS_PUBKEY="${SUPPORT_RELAY_ACCESS_PUBKEY:-${SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY:-}}"
+HARDEN_ALLOW_INBOUND_PORTS=()
 POLKIT_RULE_PATH="${POLKIT_RULE_PATH:-/etc/polkit-1/rules.d/49-matterhub-networkmanager.rules}"
 
 log() {
@@ -73,6 +75,10 @@ Options:
                       Relay login SSH user for operator command output.
   --support-relay-access-pubkey
                       Relay hub-access public key to append on device authorized_keys.
+  --harden-reverse-tunnel-only
+                      Apply reverse-tunnel-only access hardening (no direct inbound SSH).
+  --harden-allow-inbound-port
+                      Keep inbound TCP port open under UFW policy (repeatable).
 
 Environment variables:
   RUN_USER     systemd service user (default: current shell user)
@@ -125,6 +131,13 @@ while [ "$#" -gt 0 ]; do
       ;;
     --support-relay-access-pubkey)
       SUPPORT_RELAY_ACCESS_PUBKEY="$2"
+      shift
+      ;;
+    --harden-reverse-tunnel-only)
+      HARDEN_REVERSE_TUNNEL_ONLY=1
+      ;;
+    --harden-allow-inbound-port)
+      HARDEN_ALLOW_INBOUND_PORTS+=("$2")
       shift
       ;;
     -h|--help)
@@ -195,6 +208,15 @@ if [ "$SETUP_SUPPORT_TUNNEL" -eq 1 ]; then
   fi
   if [ -n "$SUPPORT_RELAY_OPERATOR_USER" ]; then
     log "reverse tunnel relay operator user: $SUPPORT_RELAY_OPERATOR_USER"
+  fi
+fi
+
+if [ "$HARDEN_REVERSE_TUNNEL_ONLY" -eq 1 ]; then
+  log "reverse tunnel only 하드닝: 적용 예정"
+  if [ "${#HARDEN_ALLOW_INBOUND_PORTS[@]}" -gt 0 ]; then
+    log "하드닝 inbound 예외 포트: ${HARDEN_ALLOW_INBOUND_PORTS[*]}"
+  else
+    log "하드닝 inbound 예외 포트 없음 (모든 inbound 차단)"
   fi
 fi
 
@@ -309,6 +331,32 @@ if [ "$SETUP_SUPPORT_TUNNEL" -eq 1 ]; then
 
   log "reverse tunnel 초기 설정 실행"
   run_cmd "${setup_cmd[@]}"
+fi
+
+if [ "$HARDEN_REVERSE_TUNNEL_ONLY" -eq 1 ]; then
+  HARDEN_SCRIPT="$SCRIPT_DIR/harden_reverse_tunnel_only.sh"
+  if [ ! -f "$HARDEN_SCRIPT" ]; then
+    echo "harden_reverse_tunnel_only.sh not found: $HARDEN_SCRIPT" >&2
+    exit 1
+  fi
+
+  harden_cmd=(
+    bash "$HARDEN_SCRIPT"
+    --run-user "$RUN_USER"
+    --env-file "$PROJECT_ROOT/.env"
+  )
+  for port in "${HARDEN_ALLOW_INBOUND_PORTS[@]-}"; do
+    if [ -z "$port" ]; then
+      continue
+    fi
+    harden_cmd+=(--allow-inbound-port "$port")
+  done
+  if [ "$DRY_RUN" -eq 1 ]; then
+    harden_cmd+=(--dry-run)
+  fi
+
+  log "reverse tunnel only 하드닝 실행"
+  run_cmd "${harden_cmd[@]}"
 fi
 
 log "설치 완료"

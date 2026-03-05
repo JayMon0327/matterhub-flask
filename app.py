@@ -16,7 +16,6 @@ from sub.scheduler import *
 from sub.ruleEngine import *
 from dotenv import load_dotenv, find_dotenv
 import os, sys
-import subprocess
 
 from libs.edit import deleteItem, file_changed_request, putItem, update_env_file  # type: ignore
 from wifi_config.api import create_wifi_blueprint
@@ -128,22 +127,10 @@ def configAwsId():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.method == 'POST':
-        # GitHub에서 보내는 이벤트가 맞는지 확인 (옵션)
-        # data = request.json
-        # if data['ref'] == 'refs/heads/master':  # main 브랜치가 업데이트된 경우
-            # git pull로 코드 업데이트
-        subprocess.run(['git', 'pull','origin','master'])
-        # Flask 서버 재시작 (필요한 경우)
-        try:
-            # print("프로그램을 재시작합니다...")
-            # time.sleep(1)  # 재시작 전 잠깐 대기 (옵션)
-            # os.execv(sys.executable, ['python'] + sys.argv)
-            return 'Success', 200
-        except Exception as e:
-            print(f"재시작 중 에러가 발생했습니다: {e}")
-            return 'No update', 200
-    return 'Invalid request', 400
+    return jsonify({
+        "status": "disabled",
+        "message": "webhook update is disabled; use reverse tunnel maintenance workflow",
+    }), 410
 
 @app.route('/local/api', methods=["POST","DELETE", "PUT", "GET"])
 def home():
