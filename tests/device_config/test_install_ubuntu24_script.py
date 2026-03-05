@@ -25,11 +25,15 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         )
 
         output = result.stdout
-        self.assertIn("python3-venv python3-pip network-manager", output)
+        self.assertIn("python3-venv python3-pip network-manager autossh", output)
         self.assertIn("matterhub-api.service matterhub-mqtt.service", output)
+        self.assertIn("matterhub-support-tunnel.service", output)
         self.assertIn("systemctl daemon-reload", output)
         self.assertIn("systemctl enable", output)
         self.assertIn("render_systemd_units.py", output)
+        enable_lines = [line for line in output.splitlines() if "systemctl enable" in line]
+        self.assertTrue(enable_lines)
+        self.assertTrue(all("matterhub-support-tunnel.service" not in line for line in enable_lines))
 
     def test_dry_run_can_skip_os_packages(self) -> None:
         result = subprocess.run(
@@ -40,6 +44,39 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
             text=True,
         )
         self.assertIn("OS 패키지 설치 단계 생략", result.stdout)
+
+    def test_dry_run_can_chain_support_tunnel_setup(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(INSTALL_SCRIPT),
+                "--dry-run",
+                "--setup-support-tunnel",
+                "--support-host",
+                "support.whatsmatter.local",
+                "--support-user",
+                "whatsmatter",
+                "--support-remote-port",
+                "22608",
+                "--support-device-user",
+                "whatsmatter",
+                "--enable-support-tunnel-now",
+            ],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
+        self.assertIn("reverse tunnel 초기 설정 실행", output)
+        self.assertIn("setup_support_tunnel.sh", output)
+        self.assertIn("--host support.whatsmatter.local", output)
+        self.assertIn("--user whatsmatter", output)
+        self.assertIn("--remote-port 22608", output)
+        self.assertIn("--device-user whatsmatter", output)
+        self.assertIn("--relay-operator-user ec2-user", output)
+        self.assertIn("--enable-now", output)
+        self.assertIn("--dry-run", output)
 
 
 if __name__ == "__main__":

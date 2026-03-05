@@ -12,6 +12,7 @@ class ServiceDefinition:
     service_name: str
     description: str
     script_path: Path
+    enabled_by_default: bool = True
 
 
 SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
@@ -35,11 +36,21 @@ SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
         description="MatterHub Notifier",
         script_path=Path("sub/notifier.py"),
     ),
+    ServiceDefinition(
+        service_name="matterhub-support-tunnel",
+        description="MatterHub Support Tunnel",
+        script_path=Path("support_tunnel.py"),
+        enabled_by_default=False,
+    ),
 )
 
 
 def get_service_definitions() -> tuple[ServiceDefinition, ...]:
     return SERVICE_DEFINITIONS
+
+
+def get_enabled_service_definitions() -> tuple[ServiceDefinition, ...]:
+    return tuple(service for service in SERVICE_DEFINITIONS if service.enabled_by_default)
 
 
 def get_unit_name(service: ServiceDefinition) -> str:

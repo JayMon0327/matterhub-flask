@@ -7,6 +7,7 @@ from pathlib import Path
 try:
     from device_config.service_definitions import (
         build_service_context,
+        get_enabled_service_definitions,
         get_service_definitions,
         get_unit_name,
         render_systemd_unit,
@@ -14,6 +15,7 @@ try:
 except ImportError:
     from service_definitions import (  # type: ignore
         build_service_context,
+        get_enabled_service_definitions,
         get_service_definitions,
         get_unit_name,
         render_systemd_unit,
@@ -45,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the unit filenames and exit.",
     )
+    parser.add_argument(
+        "--list-enabled-unit-names",
+        action="store_true",
+        help="Print unit filenames enabled by default and exit.",
+    )
     return parser.parse_args()
 
 
@@ -64,6 +71,11 @@ def main() -> int:
 
     if args.list_unit_names:
         for service in get_service_definitions():
+            print(get_unit_name(service))
+        return 0
+
+    if args.list_enabled_unit_names:
+        for service in get_enabled_service_definitions():
             print(get_unit_name(service))
         return 0
 
