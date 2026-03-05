@@ -174,19 +174,28 @@ class WifiConfigService:
 
         rows = _parse_terse_rows(
             self._run_nmcli(
-                ["-t", "-f", "NAME,UUID,TYPE,AUTOCONNECT,DEVICE", "connection", "show"],
+                [
+                    "-t",
+                    "-f",
+                    "NAME,UUID,TYPE,AUTOCONNECT,DEVICE,802-11-wireless.ssid",
+                    "connection",
+                    "show",
+                ],
                 timeout=15,
             ),
-            ["NAME", "UUID", "TYPE", "AUTOCONNECT", "DEVICE"],
+            ["NAME", "UUID", "TYPE", "AUTOCONNECT", "DEVICE", "SSID"],
         )
 
         saved: list[dict[str, object]] = []
         for row in rows:
             if row.get("TYPE") != "802-11-wireless":
                 continue
+            profile_name = row.get("NAME", "")
+            profile_ssid = (row.get("SSID") or "").strip() or profile_name
             saved.append(
                 {
-                    "name": row.get("NAME", ""),
+                    "name": profile_name,
+                    "ssid": profile_ssid,
                     "uuid": row.get("UUID", ""),
                     "autoconnect": (row.get("AUTOCONNECT", "").lower() == "yes"),
                     "device": row.get("DEVICE", ""),
@@ -200,6 +209,39 @@ class WifiConfigService:
             raise ValueError("connection_name is required")
         self._run_nmcli(["connection", "delete", "id", connection_name], timeout=20)
         return {"deleted": connection_name}
+
+    def activate_saved_connection(self, connection_name: str, *, timeout_seconds: int = 30) -> dict[str, object]:
+        name = connection_name.strip()
+        if not name:
+            raise ValueError("connection_name is required")
+
+        activated = self._activate_connection({"name": name, "uuid": "", "device": self.interface})
+        if not activated:
+            return {
+                "success": False,
+                "connection_name": name,
+                "active_connection": self.get_active_wifi_connection(),
+            }
+
+        deadline = self._monotonic() + max(5, int(timeout_seconds))
+        while self._monotonic() <= deadline:
+            active = self.get_active_wifi_connection()
+            general_state = self._get_general_state()
+            if active and active.get("name") == name and general_state.startswith("connected"):
+                return {
+                    "success": True,
+                    "connection_name": name,
+                    "active_connection": active,
+                    "current_ssid": self._get_current_ssid(),
+                }
+            self._sleep(1)
+
+        return {
+            "success": False,
+            "connection_name": name,
+            "active_connection": self.get_active_wifi_connection(),
+            "timeout": True,
+        }
 
     def start_ap_mode(self, *, ssid: Optional[str] = None, password: Optional[str] = None) -> dict[str, object]:
         ap_ssid = (ssid or "").strip() or self._default_ap_ssid()

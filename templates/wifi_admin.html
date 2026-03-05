@@ -83,6 +83,14 @@
         grid-column: 1 / -1;
       }
 
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
       h2 {
         margin: 0 0 10px;
         font-size: 1.05rem;
@@ -111,6 +119,12 @@
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
+      }
+
+      .connect-hint {
+        font-size: 0.85rem;
+        color: var(--muted);
+        align-self: center;
       }
 
       button {
@@ -190,6 +204,19 @@
         gap: 8px;
         align-items: center;
         background: #fff;
+      }
+
+      .ssid-line {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .wifi-icon {
+        width: 16px;
+        height: 16px;
+        color: #111;
+        flex: 0 0 auto;
       }
 
       .meta {
@@ -295,6 +322,18 @@
         animation: progressSweep 1.2s ease-in-out infinite;
       }
 
+      .modal-list-wrap {
+        max-height: 48vh;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .recovery-fields {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -337,7 +376,6 @@
       <section class="hero">
         <div>
           <h1>MatterHub Wi-Fi 설정 센터</h1>
-          <p>로컬 전용 설정 페이지 · 인터페이스: <strong id="iface">{{ interface }}</strong></p>
           <p><strong>WhatsMatter Inc.</strong></p>
         </div>
         <div class="btn-row">
@@ -359,7 +397,12 @@
 
       <section class="grid">
         <section class="card">
-          <h2>주변 Wi-Fi</h2>
+          <div class="card-head">
+            <h2>주변 Wi-Fi</h2>
+            <div class="btn-row">
+              <button id="btnSavedNetworks" class="secondary">알고 있는 네트워크</button>
+            </div>
+          </div>
           <div class="btn-row" style="margin-bottom: 10px">
             <button id="btnScan">스캔</button>
           </div>
@@ -367,17 +410,12 @@
         </section>
 
         <section class="card">
-          <h2>저장된 연결</h2>
-          <ul class="list" id="savedList"></ul>
-        </section>
-
-        <section class="card full">
           <h2>복구 모드 (AP)</h2>
           <p class="meta">
             현재 Wi-Fi 연결이 되지 않거나 설정을 처음부터 다시 해야 할 때 사용합니다.
             복구 모드를 시작하면 장비가 임시 Wi-Fi(AP)를 열고, 해당 AP에 접속해 다시 설정할 수 있습니다.
           </p>
-          <div class="field-grid">
+          <div class="recovery-fields">
             <div>
               <label for="apSsid">AP SSID (선택)</label>
               <input id="apSsid" type="text" placeholder="Matterhub-Setup-WhatsMatter" />
@@ -392,8 +430,6 @@
           </div>
         </section>
       </section>
-
-      <p id="statusNote" class="status-note"></p>
     </main>
 
     <div id="connectModalBackdrop" class="modal-backdrop" aria-hidden="true">
@@ -414,6 +450,7 @@
             </div>
             <div class="full btn-row">
               <button id="btnModalConnect" type="submit">연결</button>
+              <span class="connect-hint">연결까지 약 10초 소요됩니다.</span>
             </div>
           </div>
         </form>
@@ -428,6 +465,18 @@
           <div class="progress-bar"></div>
         </div>
         <p id="modalStatus" class="status-note"></p>
+      </section>
+    </div>
+
+    <div id="savedModalBackdrop" class="modal-backdrop" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="savedModalTitle">
+        <div class="modal-header">
+          <h3 id="savedModalTitle">알고 있는 네트워크</h3>
+          <button id="btnSavedModalClose" class="modal-close" type="button">닫기</button>
+        </div>
+        <div class="modal-list-wrap">
+          <ul class="list" id="savedList"></ul>
+        </div>
       </section>
     </div>
 
@@ -446,10 +495,10 @@
         stProfile: document.getElementById("stProfile"),
         stDevice: document.getElementById("stDevice"),
         scanList: document.getElementById("scanList"),
+        btnSavedNetworks: document.getElementById("btnSavedNetworks"),
         savedList: document.getElementById("savedList"),
         apSsid: document.getElementById("apSsid"),
         apPassword: document.getElementById("apPassword"),
-        statusNote: document.getElementById("statusNote"),
         connectModalBackdrop: document.getElementById("connectModalBackdrop"),
         btnModalClose: document.getElementById("btnModalClose"),
         modalConnectForm: document.getElementById("modalConnectForm"),
@@ -460,14 +509,20 @@
         modalProgress: document.getElementById("modalProgress"),
         modalStatus: document.getElementById("modalStatus"),
         modalLoadingMessage: document.getElementById("modalLoadingMessage"),
+        savedModalBackdrop: document.getElementById("savedModalBackdrop"),
+        btnSavedModalClose: document.getElementById("btnSavedModalClose"),
       };
 
       let modalBusy = false;
       let modalLoadingTicker = null;
 
       function setNote(message, isError = false) {
-        ui.statusNote.textContent = message || "";
-        ui.statusNote.classList.toggle("error", Boolean(isError));
+        if (!message) {
+          return;
+        }
+        if (isError) {
+          console.error(message);
+        }
       }
 
       function setModalStatus(message, isError = false) {
@@ -496,6 +551,16 @@
         ui.connectModalBackdrop.classList.remove("open");
         ui.connectModalBackdrop.setAttribute("aria-hidden", "true");
         setModalStatus("");
+      }
+
+      function openSavedModal() {
+        ui.savedModalBackdrop.classList.add("open");
+        ui.savedModalBackdrop.setAttribute("aria-hidden", "false");
+      }
+
+      function closeSavedModal() {
+        ui.savedModalBackdrop.classList.remove("open");
+        ui.savedModalBackdrop.setAttribute("aria-hidden", "true");
       }
 
       function setModalBusy(busy) {
@@ -532,10 +597,30 @@
       }
 
       async function requestJson(url, options = {}) {
-        const response = await fetch(url, {
-          headers: { "Content-Type": "application/json" },
-          ...options,
-        });
+        const { timeoutMs = 0, ...fetchOptions } = options;
+        const controller = timeoutMs > 0 ? new AbortController() : null;
+        const timeoutId = controller
+          ? setTimeout(() => controller.abort(), timeoutMs)
+          : null;
+
+        let response;
+        try {
+          response = await fetch(url, {
+            headers: { "Content-Type": "application/json" },
+            ...fetchOptions,
+            signal: controller ? controller.signal : undefined,
+          });
+        } catch (error) {
+          if (error && error.name === "AbortError") {
+            throw new Error("CONNECT_TIMEOUT");
+          }
+          throw error;
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+        }
+
         const payload = await response.json();
         if (!response.ok || payload.ok === false) {
           const msg =
@@ -572,7 +657,13 @@
             return `
               <li class="network-item">
                 <div>
-                  <div><strong>${network.ssid}</strong> ${marker ? `· ${marker}` : ""}</div>
+                  <div class="ssid-line">
+                    <svg class="wifi-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill="currentColor" d="M12 21c.83 0 1.5-.67 1.5-1.5S12.83 18 12 18s-1.5.67-1.5 1.5S11.17 21 12 21zm4.5-3.5a6.34 6.34 0 0 0-9 0l1.41 1.41a4.34 4.34 0 0 1 6.18 0L16.5 17.5zm3-3a10.57 10.57 0 0 0-15 0l1.41 1.41a8.57 8.57 0 0 1 12.18 0L19.5 14.5zm3-3a14.77 14.77 0 0 0-21 0l1.41 1.41a12.77 12.77 0 0 1 18.18 0L22.5 11.5z"/>
+                    </svg>
+                    <strong>${network.ssid}</strong>
+                    ${marker ? `· ${marker}` : ""}
+                  </div>
                   <div class="meta">신호: ${network.signal} · 보안: ${sec}</div>
                 </div>
                 ${action}
@@ -640,10 +731,8 @@
       }
 
       async function refreshAll() {
-        setNote("네트워크 정보를 새로고침하는 중입니다...");
         try {
           await Promise.all([refreshStatus(), refreshScan(), refreshSaved()]);
-          setNote("준비 완료");
         } catch (error) {
           setNote(error.message, true);
         }
@@ -671,6 +760,7 @@
           const result = await requestJson(API.connect, {
             method: "POST",
             body: JSON.stringify(payload),
+            timeoutMs: 10000,
           });
           const elapsed = Date.now() - connectStart;
           if (elapsed < 1800) {
@@ -697,6 +787,13 @@
             await refreshAll();
           }
         } catch (error) {
+          if (error && error.message === "CONNECT_TIMEOUT") {
+            setModalStatus(
+              "10초가 지나 연결 확인을 종료했습니다. 창을 닫고 새 네트워크에서 다시 접속해 상태를 확인해 주세요.",
+              true
+            );
+            return;
+          }
           setNote(error.message, true);
           setModalStatus(error.message, true);
           await refreshStatus();
@@ -711,6 +808,20 @@
       ui.connectModalBackdrop.addEventListener("click", (event) => {
         if (event.target === ui.connectModalBackdrop) {
           closeConnectModal();
+        }
+      });
+      ui.btnSavedNetworks.addEventListener("click", async () => {
+        openSavedModal();
+        try {
+          await refreshSaved();
+        } catch (error) {
+          setNote(error.message, true);
+        }
+      });
+      ui.btnSavedModalClose.addEventListener("click", closeSavedModal);
+      ui.savedModalBackdrop.addEventListener("click", (event) => {
+        if (event.target === ui.savedModalBackdrop) {
+          closeSavedModal();
         }
       });
 

@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
-from wifi_config.bootstrap import ensure_bootstrap_ap
+from wifi_config.bootstrap import ensure_bootstrap_ap, watch_disconnection_and_start_ap
 
 
 class WifiBootstrapTest(unittest.TestCase):
@@ -40,6 +40,95 @@ class WifiBootstrapTest(unittest.TestCase):
         self.assertTrue(result["started"])
         self.assertEqual("fallback_ap_started", result["reason"])
         service.start_ap_mode.assert_called_once()
+
+    def test_watchdog_disabled_by_env(self) -> None:
+        service = Mock()
+        with patch.dict(os.environ, {"WIFI_AUTO_AP_ON_DISCONNECT": "0"}, clear=False):
+            watch_disconnection_and_start_ap(
+                service,
+                logger=lambda _: None,
+                max_checks=1,
+                sleep_fn=lambda _: None,
+            )
+        service.get_status.assert_not_called()
+
+    def test_watchdog_starts_ap_after_grace_period(self) -> None:
+        service = Mock()
+        service.default_ap_ssid = "Matterhub-Setup-WhatsMatter"
+        service.get_status.return_value = {
+            "general_state": "disconnected",
+            "current_ssid": "",
+            "active_connection": {},
+        }
+        service.start_ap_mode.return_value = {
+            "ssid": "Matterhub-Setup-WhatsMatter",
+            "gateway_ip": "10.42.0.1",
+        }
+
+        ticks = iter([0.0, 11.0, 11.0])
+        with patch.dict(
+            os.environ,
+            {
+                "WIFI_AUTO_AP_ON_DISCONNECT": "1",
+                "WIFI_AP_WATCH_INTERVAL_SECONDS": "2",
+                "WIFI_AP_DISCONNECT_GRACE_SECONDS": "10",
+            },
+            clear=False,
+        ):
+            watch_disconnection_and_start_ap(
+                service,
+                logger=lambda _: None,
+                max_checks=2,
+                sleep_fn=lambda _: None,
+                monotonic_fn=lambda: next(ticks),
+            )
+
+        service.start_ap_mode.assert_called_once()
+
+    def test_watchdog_auto_reconnects_known_network_when_ap_active(self) -> None:
+        service = Mock()
+        service.default_ap_ssid = "Matterhub-Setup-WhatsMatter"
+        service.get_status.return_value = {
+            "general_state": "connected (site only)",
+            "current_ssid": "Matterhub-Setup-WhatsMatter",
+            "active_connection": {"name": "Matterhub-Setup-WhatsMatter"},
+        }
+        service.list_saved_connections.return_value = [
+            {
+                "name": "HomeNet",
+                "ssid": "HomeNet",
+                "autoconnect": True,
+            }
+        ]
+        service.scan_wifi.return_value = [{"ssid": "HomeNet", "signal": 80}]
+        service.activate_saved_connection.return_value = {
+            "success": True,
+            "connection_name": "HomeNet",
+            "current_ssid": "HomeNet",
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "WIFI_AUTO_AP_ON_DISCONNECT": "1",
+                "WIFI_AP_AUTO_RECONNECT_ENABLED": "1",
+                "WIFI_AP_AUTO_RECONNECT_INTERVAL_SECONDS": "5",
+                "WIFI_AP_AUTO_RECONNECT_TIMEOUT_SECONDS": "20",
+            },
+            clear=False,
+        ):
+            watch_disconnection_and_start_ap(
+                service,
+                logger=lambda _: None,
+                max_checks=1,
+                sleep_fn=lambda _: None,
+                monotonic_fn=lambda: 0.0,
+            )
+
+        service.activate_saved_connection.assert_called_once_with(
+            "HomeNet",
+            timeout_seconds=20,
+        )
 
 
 if __name__ == "__main__":

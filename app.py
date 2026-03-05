@@ -19,7 +19,7 @@ import os, sys
 
 from libs.edit import deleteItem, file_changed_request, putItem, update_env_file  # type: ignore
 from wifi_config.api import create_wifi_blueprint
-from wifi_config.bootstrap import ensure_bootstrap_ap
+from wifi_config.bootstrap import ensure_bootstrap_ap, watch_disconnection_and_start_ap
 
 env_file = find_dotenv()
 load_dotenv()
@@ -84,6 +84,17 @@ def _start_wifi_bootstrap_thread() -> None:
 
 
 _start_wifi_bootstrap_thread()
+
+
+def _start_wifi_watchdog_thread() -> None:
+    threading.Thread(
+        target=watch_disconnection_and_start_ap,
+        daemon=True,
+        name="wifi-ap-watchdog",
+    ).start()
+
+
+_start_wifi_watchdog_thread()
 
 @app.route('/test', methods=['POST'])
 def test():

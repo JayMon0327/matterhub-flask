@@ -184,6 +184,59 @@ class WifiConfigServiceTest(unittest.TestCase):
         )
         self.assertEqual("Matterhub-Setup-WhatsMatter", service._default_ap_ssid())
 
+    def test_activate_saved_connection_reports_success(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["nmcli", "connection", "up", "id", "HomeNet", "ifname", "wlan0"],
+                    completed(stdout="Connection activated"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="HomeNet:u1:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "STATE", "general", "status"],
+                    completed(stdout="connected\n"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "IN-USE,SSID", "device", "wifi", "list", "ifname", "wlan0"],
+                    completed(stdout="*:HomeNet\n"),
+                ),
+            ]
+        )
+        service = WifiConfigService(
+            runner=runner,
+            sleep_fn=lambda _: None,
+            monotonic_fn=lambda: 0.0,
+        )
+
+        result = service.activate_saved_connection("HomeNet", timeout_seconds=10)
+
+        self.assertTrue(result["success"])
+        self.assertEqual("HomeNet", result["connection_name"])
+        self.assertEqual("HomeNet", result["current_ssid"])
+
+    def test_activate_saved_connection_reports_failure_when_up_fails(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["nmcli", "connection", "up", "id", "BadNet", "ifname", "wlan0"],
+                    completed(return_code=10, stderr="activation failed"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Matterhub-Setup-WhatsMatter:ap-uuid:802-11-wireless:wlan0\n"),
+                ),
+            ]
+        )
+        service = WifiConfigService(runner=runner)
+
+        result = service.activate_saved_connection("BadNet", timeout_seconds=10)
+
+        self.assertFalse(result["success"])
+        self.assertEqual("BadNet", result["connection_name"])
+
 
 if __name__ == "__main__":
     unittest.main()
