@@ -70,21 +70,24 @@ class AWSIoTClient:
 
         def on_interrupted(connection, error, **kwargs):
             mark_connected(False)
-            print(f"MQTT 연결 끊김: {error}")
+            print(f"[MQTT][CONNECT][INTERRUPTED] error={error}")
             if SUBSCRIBED_TOPICS:
                 topics = ", ".join(sorted(SUBSCRIBED_TOPICS))
-                print(f"구독 중이던 토픽: {topics}")
-            print(f"재연결 시도 ({reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS})")
+                print(f"[MQTT][CONNECT][INTERRUPTED] subscribed_topics={topics}")
+            print(
+                f"[MQTT][CONNECT] reconnect_attempt={reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS}"
+            )
 
         def on_resumed(connection, return_code, session_present, **kwargs):
             mark_connected(return_code == 0)
             if return_code == 0:
                 reset_reconnect_attempts()
                 print(
-                    f"✅ MQTT 연결 재개됨 (return_code={return_code}, session_present={session_present})"
+                    "[MQTT][CONNECT][OK] resumed "
+                    f"return_code={return_code} session_present={session_present}"
                 )
             else:
-                print(f"❌ MQTT 재연결 실패 (return_code={return_code})")
+                print(f"[MQTT][CONNECT][FAIL] resumed return_code={return_code}")
 
         mtls_kw = dict(
             endpoint=self.endpoint,
@@ -108,25 +111,30 @@ class AWSIoTClient:
 
         for attempt in range(max_retries):
             try:
-                print(f"새 인증서로 MQTT 연결 시도 중... (시도 {attempt + 1}/{max_retries})")
+                print(
+                    f"[MQTT][CONNECT] attempting connection try={attempt + 1}/{max_retries}"
+                )
                 if attempt > 0:
                     random_delay = random.uniform(1, 3)
-                    print(f"연결 재시도 전 랜덤 대기: {random_delay:.1f}초")
+                    print(f"[MQTT][CONNECT] jitter_sleep={random_delay:.1f}s")
                     time.sleep(random_delay)
 
                 connect_future = mqtt_conn.connect()
                 connect_future.result(timeout=10)
-                print("새 인증서로 MQTT 연결 성공")
+                print("[MQTT][CONNECT][OK] connected to broker")
                 set_connection(mqtt_conn)
                 mark_connected(True)
                 reset_reconnect_attempts()
                 return mqtt_conn
 
             except Exception as connection_error:
-                print(f"❌ MQTT 연결 실패 (시도 {attempt + 1}/{max_retries}): {connection_error}")
+                print(
+                    "[MQTT][CONNECT][FAIL] "
+                    f"try={attempt + 1}/{max_retries} error={type(connection_error).__name__}"
+                )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
-                    print(f"재시도 전 대기: {delay}초")
+                    print(f"[MQTT][CONNECT] retry_after={delay}s")
                     time.sleep(delay)
                 else:
                     raise
@@ -180,32 +188,31 @@ def subscribe(topic: str, callback: Callable) -> None:
     )
     subscribe_future.result(timeout=10)
     SUBSCRIBED_TOPICS.add(topic)
-    print(f"✅ SUBSCRIBE 성공: {topic}")
 
 
 def resubscribe(topics: Sequence[str], callback: Callable) -> Dict[str, bool]:
     results: Dict[str, bool] = {}
     for topic in topics:
         try:
-            print(f"SUBSCRIBE 재요청: {topic}")
             subscribe(topic, callback)
             results[topic] = True
-        except Exception as exc:
-            print(f"❌ 토픽 재구독 실패: {topic} - {exc!r} ({type(exc).__name__})")
+        except Exception:
             results[topic] = False
     return results
 
 
 def log_resubscribe_results(results: Dict[str, bool]) -> None:
-    success_topics = [topic for topic, success in results.items() if success]
-    failed_topics = [topic for topic, success in results.items() if not success]
-    print(
-        f"[MQTT] resubscribe_summary success={len(success_topics)} failed={len(failed_topics)}"
-    )
-    for topic in success_topics:
-        print(f"[MQTT] resubscribe_result status=success topic={topic}")
-    for topic in failed_topics:
-        print(f"[MQTT] resubscribe_result status=failed topic={topic}")
+    for topic, success in results.items():
+        if success:
+            print(f"[MQTT][SUBSCRIBE][RETRY][OK] topic={topic}")
+        else:
+            print(f"[MQTT][SUBSCRIBE][RETRY][FAIL] topic={topic}")
+
+
+def summarize_resubscribe_results(results: Dict[str, bool]) -> tuple[int, int]:
+    success_count = sum(1 for success in results.values() if success)
+    failed_count = len(results) - success_count
+    return success_count, failed_count
 
 
 def check_mqtt_connection(
@@ -218,9 +225,9 @@ def check_mqtt_connection(
         reset_reconnect_attempts()
         return True
 
-    print(f"MQTT 재연결 시도: {reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS}")
+    print(f"[MQTT][RECONNECT] attempt={reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS}")
     if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-        print("MQTT 재연결 실패: 최대 시도 횟수 초과")
+        print("[MQTT][RECONNECT][FAIL] reason=max_attempts_exceeded")
         return False
 
     increase_reconnect_attempt()
@@ -236,11 +243,16 @@ def check_mqtt_connection(
     try:
         client.connect_mqtt()
     except Exception as exc:
-        print(f"❌ 재연결 실패: {exc}")
+        print(f"[MQTT][RECONNECT][FAIL] error={type(exc).__name__}")
         return False
 
     reset_reconnect_attempts()
     resubscribe_results = resubscribe(list(topics), callback)
     log_resubscribe_results(resubscribe_results)
-    print("MQTT 재연결 성공")
-    return all(resubscribe_results.values())
+    success_count, failed_count = summarize_resubscribe_results(resubscribe_results)
+    overall_status = "success" if failed_count == 0 else "partial_failed"
+    print(
+        "[MQTT][RECONNECT] result "
+        f"success={success_count} failed={failed_count} status={overall_status}"
+    )
+    return failed_count == 0

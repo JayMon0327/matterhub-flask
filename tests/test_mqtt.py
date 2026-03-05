@@ -20,6 +20,7 @@ def load_mqtt_module(
     test_response_topic: str = "",
     matterhub_id: str | None = None,
     subscribe_matterhub_topics: bool = False,
+    subscribe_konai_response_topic: bool = True,
 ):
     mqtt_pkg_module = types.ModuleType("mqtt_pkg")
     mqtt_pkg_module.__path__ = []
@@ -55,6 +56,7 @@ def load_mqtt_module(
     settings_module.KONAI_TEST_TOPIC_REQUEST = test_request_topic
     settings_module.KONAI_TEST_TOPIC_RESPONSE = test_response_topic
     settings_module.SUBSCRIBE_MATTERHUB_TOPICS = subscribe_matterhub_topics
+    settings_module.SUBSCRIBE_KONAI_RESPONSE_TOPIC = subscribe_konai_response_topic
     settings_module.MATTERHUB_ID = matterhub_id
 
     state_module = types.ModuleType("mqtt_pkg.state")
@@ -116,6 +118,7 @@ class MqttEntrypointTest(unittest.TestCase):
         self.assertEqual(
             [
                 "update/delta/dev/example",
+                "update/reported/dev/example",
                 "matterhub/hub-1/git/update",
                 "matterhub/update/specific/hub-1",
             ],
@@ -133,12 +136,14 @@ class MqttEntrypointTest(unittest.TestCase):
         topics = module.build_subscribe_topics()
         report = module.build_startup_report(module.AWSIoTClient(), topics)
 
-        self.assertIn("[MQTT] endpoint=example.iot", report)
-        self.assertIn("[MQTT] client_id=matterhub-client", report)
-        self.assertIn("[MQTT] request_topic=update/delta/dev/example", report)
-        self.assertIn("[MQTT] response_topic=update/reported/dev/example", report)
-        self.assertIn("[MQTT] subscribe_count=3", report)
-        self.assertIn("[MQTT] subscribe[1]=update/delta/dev/example", report)
+        self.assertIn("[MQTT][INIT] start initialization", report)
+        self.assertIn("[MQTT][INIT] endpoint=example.iot", report)
+        self.assertIn("[MQTT][INIT] client_id=matterhub-client", report)
+        self.assertIn("[MQTT][INIT] cert_path=konai_certificates cert=ok key=ok ca=missing", report)
+        self.assertIn("[MQTT][SUBSCRIBE] setup start", report)
+        self.assertIn("[MQTT][SUBSCRIBE] count=4", report)
+        self.assertIn("[MQTT][SUBSCRIBE] topic[1]=update/delta/dev/example", report)
+        self.assertIn("[MQTT][SUBSCRIBE] topic[2]=update/reported/dev/example", report)
 
     def test_log_subscribe_results_prints_topic_statuses(self) -> None:
         module = load_mqtt_module()
@@ -152,12 +157,11 @@ class MqttEntrypointTest(unittest.TestCase):
                 phase="startup",
             )
 
-        print_mock.assert_any_call("[MQTT] subscribe_summary phase=startup success=1 failed=1")
         print_mock.assert_any_call(
-            "[MQTT] subscribe_result phase=startup status=success topic=matterhub/hub-1/git/update"
+            "[MQTT][SUBSCRIBE][OK] topic[2]=matterhub/hub-1/git/update"
         )
         print_mock.assert_any_call(
-            "[MQTT] subscribe_result phase=startup status=failed topic=update/delta/dev/example"
+            "[MQTT][SUBSCRIBE][FAIL] topic[1]=update/delta/dev/example"
         )
 
 

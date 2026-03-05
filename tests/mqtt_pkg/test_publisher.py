@@ -49,7 +49,21 @@ class PublisherTest(unittest.TestCase):
         connection.publish.assert_called_once()
         future.result.assert_called_once_with(timeout=5)
         print_mock.assert_any_call(
-            "[MQTT] publish_result status=success topic=update/reported/dev/example type=bootstrap_all_states"
+            "[MQTT] publish_result topic=update/reported/dev/example status=success type=bootstrap_all_states"
+        )
+
+    def test_publish_logs_failed_status_when_publish_raises(self) -> None:
+        publisher = load_publisher_module()
+        connection = Mock()
+        connection.publish.side_effect = RuntimeError("boom")
+
+        with patch.object(publisher.runtime, "get_connection", return_value=connection):
+            with patch.object(publisher.settings, "KONAI_TOPIC_RESPONSE", "update/reported/dev/example"):
+                with patch("builtins.print") as print_mock:
+                    publisher.publish({"type": "bootstrap_all_states", "data": []})
+
+        print_mock.assert_any_call(
+            "[MQTT] publish_result topic=update/reported/dev/example status=failed type=bootstrap_all_states error=RuntimeError"
         )
 
 

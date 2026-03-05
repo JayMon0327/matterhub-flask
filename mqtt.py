@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, Iterable, List
+from typing import Callable, Dict, Iterable, List, Optional
 
 from mqtt_pkg import callbacks, runtime, settings, state, test_subscriber, update
 from mqtt_pkg.runtime import AWSIoTClient
@@ -22,14 +22,32 @@ def _append_unique_topic(topics: List[str], topic: str | None) -> None:
 def build_subscribe_topics() -> List[str]:
     topics: List[str] = []
     _append_unique_topic(topics, settings.KONAI_TOPIC_REQUEST)
+    _append_unique_topic(topics, settings.KONAI_TOPIC_RESPONSE)
     _append_unique_topic(topics, settings.KONAI_TEST_TOPIC_REQUEST)
+    _append_unique_topic(topics, settings.KONAI_TEST_TOPIC_RESPONSE)
     if settings.SUBSCRIBE_MATTERHUB_TOPICS and settings.MATTERHUB_ID:
         _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/git/update")
         _append_unique_topic(topics, f"matterhub/update/specific/{settings.MATTERHUB_ID}")
     return topics
 
 
-def subscribe_topics(topics: Iterable[str]) -> Dict[str, bool]:
+def _recover_connection_for_subscribe(client_factory: Optional[Callable[[], AWSIoTClient]]) -> None:
+    if not client_factory:
+        return
+    connection = runtime.get_connection()
+    if connection:
+        try:
+            connection.disconnect()
+        except Exception:
+            pass
+    new_connection = client_factory().connect_mqtt()
+    runtime.set_connection(new_connection)
+
+
+def subscribe_topics(
+    topics: Iterable[str],
+    client_factory: Optional[Callable[[], AWSIoTClient]] = None,
+) -> Dict[str, bool]:
     topics = list(topics)
     results: Dict[str, bool] = {}
     for topic in topics:
@@ -41,56 +59,53 @@ def subscribe_topics(topics: Iterable[str]) -> Dict[str, bool]:
                 runtime.subscribe(topic, callbacks.mqtt_callback)
                 results[topic] = True
                 break
-            except Exception as exc:
-                print(
-                    f"❌ 토픽 구독 실패 (시도 {attempt + 1}/{max_retries}): {topic} - {exc!r} ({type(exc).__name__})"
-                )
+            except Exception:
                 if attempt < max_retries - 1:
+                    try:
+                        _recover_connection_for_subscribe(client_factory)
+                    except Exception:
+                        pass
                     delay = base_delay * (2 ** attempt)
-                    print(f"구독 재시도 전 대기: {delay}초")
                     time.sleep(delay)
-                else:
-                    print(f"❌ 토픽 구독 최종 실패: {topic}")
     return results
 
 
+def summarize_subscribe_results(results: Dict[str, bool]) -> tuple[int, int]:
+    success_count = sum(1 for success in results.values() if success)
+    failed_count = len(results) - success_count
+    return success_count, failed_count
+
+
 def log_subscribe_results(results: Dict[str, bool], phase: str) -> None:
-    success_topics = [topic for topic, success in results.items() if success]
-    failed_topics = [topic for topic, success in results.items() if not success]
-    print(
-        f"[MQTT] subscribe_summary phase={phase} success={len(success_topics)} failed={len(failed_topics)}"
-    )
-    for topic in success_topics:
-        print(f"[MQTT] subscribe_result phase={phase} status=success topic={topic}")
-    for topic in failed_topics:
-        print(f"[MQTT] subscribe_result phase={phase} status=failed topic={topic}")
+    for index, (topic, success) in enumerate(results.items(), start=1):
+        if success:
+            print(f"[MQTT][SUBSCRIBE][OK] topic[{index}]={topic}")
+        else:
+            print(f"[MQTT][SUBSCRIBE][FAIL] topic[{index}]={topic}")
 
 
 def build_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> List[str]:
     connection_info = aws_client.describe_connection()
     subscribe_topics = list(topics)
+    cert_status = "ok" if connection_info["cert_exists"] else "missing"
+    key_status = "ok" if connection_info["key_exists"] else "missing"
+    ca_status = "ok" if connection_info["ca_exists"] else "missing"
     lines = [
-        "[MQTT] 시작 설정",
-        f"[MQTT] endpoint={connection_info['endpoint']}",
-        f"[MQTT] client_id={connection_info['client_id']}",
+        "[MQTT][INIT] start initialization",
+        f"[MQTT][INIT] endpoint={connection_info['endpoint']}",
+        f"[MQTT][INIT] client_id={connection_info['client_id']}",
         (
-            "[MQTT] cert_path="
+            "[MQTT][INIT] cert_path="
             f"{connection_info['cert_path']} "
-            f"(cert={'yes' if connection_info['cert_exists'] else 'no'}, "
-            f"key={'yes' if connection_info['key_exists'] else 'no'}, "
-            f"ca={'yes' if connection_info['ca_exists'] else 'no'})"
+            f"cert={cert_status} key={key_status} ca={ca_status}"
         ),
-        f"[MQTT] request_topic={settings.KONAI_TOPIC_REQUEST or '(미설정)'}",
-        f"[MQTT] response_topic={settings.KONAI_TOPIC_RESPONSE or '(미설정)'}",
-        f"[MQTT] test_request_topic={settings.KONAI_TEST_TOPIC_REQUEST or '(미설정)'}",
-        f"[MQTT] test_response_topic={settings.KONAI_TEST_TOPIC_RESPONSE or '(미설정)'}",
-        f"[MQTT] matterhub_id={settings.MATTERHUB_ID or '(미설정)'}",
-        f"[MQTT] subscribe_count={len(subscribe_topics)}",
+        "[MQTT][SUBSCRIBE] setup start",
     ]
     lines.extend(
-        f"[MQTT] subscribe[{index}]={topic}"
+        f"[MQTT][SUBSCRIBE] topic[{index}]={topic}"
         for index, topic in enumerate(subscribe_topics, start=1)
     )
+    lines.append(f"[MQTT][SUBSCRIBE] count={len(subscribe_topics)}")
     return lines
 
 
@@ -109,11 +124,16 @@ def main() -> None:
     connection = aws_client.connect_mqtt()
     runtime.set_connection(connection)
 
-    print(f"matterhub_id: {settings.MATTERHUB_ID or '(미설정)'}")
-    print(f"토픽 구독 시작 (총 {len(topics)}개)")
-    subscribe_results = subscribe_topics(topics)
+    print(f"[MQTT][INIT] matterhub_id={settings.MATTERHUB_ID or '(미설정)'}")
+    subscribe_results = subscribe_topics(topics, client_factory=lambda: aws_client)
     log_subscribe_results(subscribe_results, phase="startup")
-    print("모든 토픽 구독 완료")
+    success_count, failed_count = summarize_subscribe_results(subscribe_results)
+    overall_status = "success" if failed_count == 0 else "partial_failed"
+    print(
+        "[MQTT][SUBSCRIBE] complete "
+        f"total={len(subscribe_results)} "
+        f"success={success_count} failed={failed_count} status={overall_status}"
+    )
 
     state.publish_bootstrap_all_states()
     test_subscriber.start_konai_test_subscriber_if_enabled()

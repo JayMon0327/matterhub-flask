@@ -166,6 +166,9 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
         handle_konai_states_request(payload_bytes, response_topic=settings.KONAI_TOPIC_RESPONSE)
         return
 
+    if topic == settings.KONAI_TOPIC_RESPONSE and settings.KONAI_TOPIC_RESPONSE != settings.KONAI_TOPIC_REQUEST:
+        return
+
     if settings.KONAI_TEST_TOPIC_REQUEST and topic == settings.KONAI_TEST_TOPIC_REQUEST:
         test_response_topic = (
             settings.KONAI_TEST_TOPIC_RESPONSE or settings.KONAI_TEST_TOPIC_REQUEST
@@ -175,6 +178,13 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
             f"matterhub_id={settings.MATTERHUB_ID or '(미설정)'}"
         )
         handle_konai_states_request(payload_bytes, response_topic=test_response_topic)
+        return
+
+    if (
+        settings.KONAI_TEST_TOPIC_RESPONSE
+        and topic == settings.KONAI_TEST_TOPIC_RESPONSE
+        and settings.KONAI_TEST_TOPIC_RESPONSE != settings.KONAI_TEST_TOPIC_REQUEST
+    ):
         return
 
     matterhub_id = settings.MATTERHUB_ID
@@ -202,4 +212,3 @@ def _extract_correlation_id(message: Dict[str, Any]) -> Optional[str]:
     if request_id is not None and str(request_id).strip():
         return str(request_id).strip()
     return None
-

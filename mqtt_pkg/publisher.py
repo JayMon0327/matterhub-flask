@@ -26,18 +26,25 @@ def publish(payload: Dict[str, Any], response_topic: Optional[str] = None) -> No
         return
 
     payload_type = payload.get("type", "(미설정)")
-    publish_result = connection.publish(
-        topic=target_topic,
-        payload=json.dumps(payload, ensure_ascii=False),
-        qos=mqtt.QoS.AT_MOST_ONCE,
-    )
-    publish_future = publish_result[0] if isinstance(publish_result, tuple) else publish_result
-    if hasattr(publish_future, "result"):
-        try:
-            publish_future.result(timeout=5)
-        except TypeError:
-            publish_future.result()
-    print(f"[MQTT] publish_result status=success topic={target_topic} type={payload_type}")
+    try:
+        publish_result = connection.publish(
+            topic=target_topic,
+            payload=json.dumps(payload, ensure_ascii=False),
+            qos=mqtt.QoS.AT_MOST_ONCE,
+        )
+        publish_future = publish_result[0] if isinstance(publish_result, tuple) else publish_result
+        if hasattr(publish_future, "result"):
+            try:
+                publish_future.result(timeout=5)
+            except TypeError:
+                publish_future.result()
+        print(f"[MQTT] publish_result topic={target_topic} status=success type={payload_type}")
+    except Exception as exc:
+        print(
+            f"[MQTT] publish_result topic={target_topic} "
+            f"status=failed type={payload_type} error={type(exc).__name__}"
+        )
+        return
 
 
 def publish_error(
