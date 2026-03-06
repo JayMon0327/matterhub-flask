@@ -106,8 +106,29 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_AP_PASSWORD` (기본: `matterhub1234`)
 - `WIFI_AP_IPV4_CIDR` (기본: `10.42.0.1/24`)
 - `WIFI_AUTO_AP_ON_BOOT` (기본: `true`)
+- `WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS` (기본: `45`, 부팅 직후 AP 전환 전 대기시간)
 - `WIFI_BOOTSTRAP_AP_SSID` (선택)
 - `WIFI_BOOTSTRAP_AP_PASSWORD` (선택)
+
+## 8.1 재부팅 후 로그인해야만 Wi-Fi/터널이 붙는 경우
+
+원인 후보:
+- 저장된 Wi-Fi 프로필이 사용자 세션 의존(`connection.permissions` 설정)인 경우
+- 비밀번호가 사용자 keyring에만 저장되어 부팅 단계에서 자동연결이 실패하는 경우
+
+즉시 조치:
+
+```bash
+sudo nmcli connection modify "WM_WORK_5G" connection.permissions "" connection.autoconnect yes
+sudo nmcli connection modify "WM_WORK_5G" 802-11-wireless-security.psk-flags 0 802-11-wireless-security.psk "비밀번호"
+sudo nmcli connection up "WM_WORK_5G"
+```
+
+확인:
+
+```bash
+nmcli -f NAME,UUID,TYPE,AUTOCONNECT connection show
+```
 
 ## 9. 권장 운영 정책
 

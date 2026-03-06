@@ -36,7 +36,12 @@ class WifiBootstrapTest(unittest.TestCase):
             "ssid": "MatterHub-Setup-ab12cd",
             "interface": "wlan0",
         }
-        result = ensure_bootstrap_ap(service, logger=lambda _: None)
+        with patch.dict(
+            os.environ,
+            {"WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS": "0"},
+            clear=False,
+        ):
+            result = ensure_bootstrap_ap(service, logger=lambda _: None)
         self.assertTrue(result["started"])
         self.assertEqual("fallback_ap_started", result["reason"])
         service.start_ap_mode.assert_called_once()

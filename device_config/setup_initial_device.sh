@@ -29,6 +29,7 @@ WIFI_AP_SSID="${WIFI_AP_SSID:-Matterhub-Setup-WhatsMatter}"
 WIFI_AP_PASSWORD="${WIFI_AP_PASSWORD:-matterhub1234}"
 WIFI_AP_IPV4_CIDR="${WIFI_AP_IPV4_CIDR:-10.42.0.1/24}"
 WIFI_AUTO_AP_ON_BOOT="${WIFI_AUTO_AP_ON_BOOT:-1}"
+WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS="${WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS:-45}"
 WIFI_BOOTSTRAP_AP_SSID="${WIFI_BOOTSTRAP_AP_SSID:-}"
 WIFI_BOOTSTRAP_AP_PASSWORD="${WIFI_BOOTSTRAP_AP_PASSWORD:-}"
 
@@ -108,6 +109,8 @@ Options:
   --wifi-ap-password <password>      Default: matterhub1234
   --wifi-ap-ipv4-cidr <cidr>         Default: 10.42.0.1/24
   --wifi-auto-ap-on-boot <0|1>       Default: 1
+  --wifi-bootstrap-startup-grace-seconds <sec>
+                                     Default: 45 (AP 시작 전 대기)
   --wifi-bootstrap-ap-ssid <ssid>    Optional
   --wifi-bootstrap-ap-password <pw>  Optional
 
@@ -163,6 +166,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --wifi-auto-ap-on-boot)
       WIFI_AUTO_AP_ON_BOOT="$2"
+      shift 2
+      ;;
+    --wifi-bootstrap-startup-grace-seconds)
+      WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS="$2"
       shift 2
       ;;
     --wifi-bootstrap-ap-ssid)
@@ -247,6 +254,11 @@ case "$WIFI_AUTO_AP_ON_BOOT" in
     ;;
 esac
 
+if ! [[ "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "--wifi-bootstrap-startup-grace-seconds must be a non-negative integer" >&2
+  exit 1
+fi
+
 INSTALL_SCRIPT="$SCRIPT_DIR/install_ubuntu24.sh"
 if [ ! -f "$INSTALL_SCRIPT" ]; then
   echo "install_ubuntu24.sh not found: $INSTALL_SCRIPT" >&2
@@ -262,6 +274,7 @@ set_env_value "WIFI_AP_SSID" "$WIFI_AP_SSID"
 set_env_value "WIFI_AP_PASSWORD" "$WIFI_AP_PASSWORD"
 set_env_value "WIFI_AP_IPV4_CIDR" "$WIFI_AP_IPV4_CIDR"
 set_env_value "WIFI_AUTO_AP_ON_BOOT" "$WIFI_AUTO_AP_ON_BOOT"
+set_env_value "WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS"
 
 if [ -n "$WIFI_BOOTSTRAP_AP_SSID" ]; then
   set_env_value "WIFI_BOOTSTRAP_AP_SSID" "$WIFI_BOOTSTRAP_AP_SSID"

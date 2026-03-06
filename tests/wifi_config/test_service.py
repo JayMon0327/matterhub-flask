@@ -97,6 +97,38 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout=""),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="NewWifi:new-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        "uuid",
+                        "new-uuid",
+                        "connection.permissions",
+                        "",
+                        "connection.autoconnect",
+                        "yes",
+                    ],
+                    completed(stdout=""),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        "uuid",
+                        "new-uuid",
+                        "802-11-wireless-security.psk-flags",
+                        "0",
+                        "802-11-wireless-security.psk",
+                        "badpass",
+                    ],
+                    completed(stdout=""),
+                ),
+                (
                     ["nmcli", "connection", "up", "uuid", "home-uuid", "ifname", "wlan0"],
                     completed(return_code=10, stderr="activation failed"),
                 ),
@@ -190,6 +222,20 @@ class WifiConfigServiceTest(unittest.TestCase):
                 (
                     ["nmcli", "connection", "up", "id", "HomeNet", "ifname", "wlan0"],
                     completed(stdout="Connection activated"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        "id",
+                        "HomeNet",
+                        "connection.permissions",
+                        "",
+                        "connection.autoconnect",
+                        "yes",
+                    ],
+                    completed(stdout=""),
                 ),
                 (
                     ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],

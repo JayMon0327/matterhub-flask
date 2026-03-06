@@ -299,8 +299,21 @@ class WifiConfigService:
             command.extend(["hidden", "yes"])
 
         connect_error: Optional[NmcliCommandError] = None
+        profile_persistence_error: Optional[dict[str, object]] = None
         try:
             self._run_nmcli(command, timeout=30)
+            connected_profile = self.get_active_wifi_connection() or {
+                "name": target_ssid,
+                "uuid": "",
+                "device": self.interface,
+            }
+            try:
+                self._ensure_system_autoconnect_profile(
+                    profile=connected_profile,
+                    password=password,
+                )
+            except NmcliCommandError as exc:
+                profile_persistence_error = exc.to_dict()
         except NmcliCommandError as exc:
             connect_error = exc
 
@@ -338,6 +351,8 @@ class WifiConfigService:
         }
         if connect_error is not None:
             result["error"] = connect_error.to_dict()
+        if profile_persistence_error is not None:
+            result["profile_persistence_error"] = profile_persistence_error
         if ap_mode_result is not None:
             result["ap_mode"] = ap_mode_result
         return result
@@ -374,6 +389,15 @@ class WifiConfigService:
 
         try:
             self._run_nmcli(command, timeout=30)
+            try:
+                self._ensure_system_autoconnect_profile(
+                    profile=previous,
+                    password=None,
+                )
+            except NmcliCommandError:
+                # Activation success is more important than persistence tuning.
+                # Keep best-effort behavior here.
+                pass
             return True
         except NmcliCommandError:
             return False
@@ -459,3 +483,43 @@ class WifiConfigService:
 
     def _default_ap_ssid(self) -> str:
         return self.default_ap_ssid
+
+    def _ensure_system_autoconnect_profile(
+        self,
+        *,
+        profile: dict[str, str],
+        password: Optional[str],
+    ) -> None:
+        uuid = (profile.get("uuid") or "").strip()
+        name = (profile.get("name") or "").strip()
+        if not uuid and not name:
+            return
+
+        selector = ["uuid", uuid] if uuid else ["id", name]
+        self._run_nmcli(
+            [
+                "connection",
+                "modify",
+                *selector,
+                "connection.permissions",
+                "",
+                "connection.autoconnect",
+                "yes",
+            ],
+            timeout=20,
+        )
+
+        normalized_password = (password or "").strip()
+        if normalized_password:
+            self._run_nmcli(
+                [
+                    "connection",
+                    "modify",
+                    *selector,
+                    "802-11-wireless-security.psk-flags",
+                    "0",
+                    "802-11-wireless-security.psk",
+                    normalized_password,
+                ],
+                timeout=20,
+            )

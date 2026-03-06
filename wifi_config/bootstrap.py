@@ -50,6 +50,9 @@ def _pick_known_network_candidate(
     except Exception as exc:  # pragma: no cover - defensive logging
         logger(f"[WIFI][WATCHDOG] failed to read saved connections: {type(exc).__name__}: {exc}")
         return None
+    if not isinstance(saved_connections, list):
+        logger("[WIFI][WATCHDOG] invalid saved connections payload")
+        return None
 
     candidates: list[dict[str, str]] = []
     for item in saved_connections:
@@ -92,6 +95,8 @@ def ensure_bootstrap_ap(
     service: Optional[WifiConfigService] = None,
     *,
     logger: Logger = print,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    monotonic_fn: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Ensure local setup access by starting AP mode when Wi-Fi is not connected."""
     if not _as_bool(os.environ.get("WIFI_AUTO_AP_ON_BOOT"), True):
@@ -99,24 +104,84 @@ def ensure_bootstrap_ap(
 
     wifi_service = service or _create_wifi_service()
 
-    status: dict[str, Any] = {}
-    try:
-        status = wifi_service.get_status()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger(f"[WIFI][BOOTSTRAP] failed to read status: {type(exc).__name__}: {exc}")
+    startup_grace_seconds = _as_int(
+        os.environ.get("WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS"),
+        45,
+        min_value=0,
+        max_value=300,
+    )
+    startup_check_interval_seconds = _as_int(
+        os.environ.get("WIFI_BOOTSTRAP_STARTUP_CHECK_INTERVAL_SECONDS"),
+        2,
+        min_value=1,
+        max_value=30,
+    )
 
-    general_state = str(status.get("general_state") or "")
-    current_ssid = str(status.get("current_ssid") or "").strip()
-    if general_state.startswith("connected") and current_ssid:
+    status: dict[str, Any] = {}
+    if startup_grace_seconds > 0:
         logger(
-            f"[WIFI][BOOTSTRAP] skip AP mode: connected ssid={current_ssid} state={general_state}"
+            f"[WIFI][BOOTSTRAP] startup grace wait begin seconds={startup_grace_seconds}"
         )
-        return {
-            "enabled": True,
-            "started": False,
-            "reason": "already_connected",
-            "status": status,
-        }
+    deadline = monotonic_fn() + startup_grace_seconds
+    while True:
+        try:
+            status = wifi_service.get_status()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger(f"[WIFI][BOOTSTRAP] failed to read status: {type(exc).__name__}: {exc}")
+            status = {}
+
+        general_state = str(status.get("general_state") or "")
+        current_ssid = str(status.get("current_ssid") or "").strip()
+        if general_state.startswith("connected") and current_ssid:
+            logger(
+                f"[WIFI][BOOTSTRAP] skip AP mode: connected ssid={current_ssid} state={general_state}"
+            )
+            return {
+                "enabled": True,
+                "started": False,
+                "reason": "already_connected",
+                "status": status,
+            }
+
+        remaining = deadline - monotonic_fn()
+        if remaining <= 0:
+            break
+        sleep_fn(min(startup_check_interval_seconds, remaining))
+
+    candidate = _pick_known_network_candidate(
+        wifi_service,
+        configured_ap_ssid=(os.environ.get("WIFI_BOOTSTRAP_AP_SSID") or "").strip()
+        or wifi_service.default_ap_ssid,
+        logger=logger,
+    )
+    if candidate:
+        profile_name = candidate["profile_name"]
+        try:
+            reconnect_result = wifi_service.activate_saved_connection(
+                profile_name,
+                timeout_seconds=20,
+            )
+            if reconnect_result.get("success"):
+                logger(
+                    "[WIFI][BOOTSTRAP] known network reconnect success "
+                    f"profile={profile_name} ssid={reconnect_result.get('current_ssid')}"
+                )
+                return {
+                    "enabled": True,
+                    "started": False,
+                    "reason": "known_network_reconnected",
+                    "status": status,
+                    "reconnect": reconnect_result,
+                }
+            logger(
+                "[WIFI][BOOTSTRAP] known network reconnect failed "
+                f"profile={profile_name}"
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger(
+                "[WIFI][BOOTSTRAP] known network reconnect error "
+                f"profile={profile_name} {type(exc).__name__}: {exc}"
+            )
 
     ssid = (os.environ.get("WIFI_BOOTSTRAP_AP_SSID") or "").strip() or None
     password = (os.environ.get("WIFI_BOOTSTRAP_AP_PASSWORD") or "").strip() or None
