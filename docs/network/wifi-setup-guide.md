@@ -107,6 +107,11 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_AP_IPV4_CIDR` (기본: `10.42.0.1/24`)
 - `WIFI_AUTO_AP_ON_BOOT` (기본: `true`)
 - `WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS` (기본: `45`, 부팅 직후 AP 전환 전 대기시간)
+- `WIFI_AUTO_AP_ON_DISCONNECT` (기본: `true`)
+- `WIFI_AP_DISCONNECT_GRACE_SECONDS` (기본: `20`)
+- `WIFI_AP_AUTO_RECONNECT_ENABLED` (기본: `true`)
+- `WIFI_AP_AUTO_RECONNECT_INTERVAL_SECONDS` (기본: `15`)
+- `WIFI_AP_AUTO_RECONNECT_TIMEOUT_SECONDS` (기본: `20`)
 - `WIFI_BOOTSTRAP_AP_SSID` (선택)
 - `WIFI_BOOTSTRAP_AP_PASSWORD` (선택)
 
@@ -137,3 +142,19 @@ nmcli -f NAME,UUID,TYPE,AUTOCONNECT connection show
 - 출고 전 `WIFI_AP_PASSWORD`를 고객사 정책에 맞는 값으로 변경한다.
 - Wi-Fi 설정 페이지는 외부 인터넷으로 직접 노출하지 않는다.
 - 장비 인수 시 AP 모드 접속 테스트를 1회 수행한다.
+
+## 10. CS 검증 체크리스트
+
+현장 CS에서 반드시 확인할 항목:
+
+1. 중간에 Wi-Fi가 끊겼을 때
+- `WIFI_AP_DISCONNECT_GRACE_SECONDS` 동안 자동 복구 시도 후,
+- 복구 실패 시 AP 모드(`Matterhub-Setup-...`) 진입 여부 확인
+
+2. 끊겼다가 기존에 알고 있는 네트워크가 다시 살아났을 때
+- watchdog가 저장된 Wi-Fi 프로필(`autoconnect=yes`)로 자동 재연결 시도
+- AP가 이미 떠 있는 상태에서도 주기적으로 known network 재연결 시도
+
+3. 재부팅 후 로그인하지 않아도 동작하는지
+- Wi-Fi profile이 system-level(`connection.permissions=""`) + `autoconnect=yes`인지 확인
+- reverse tunnel이 자동으로 다시 올라오는지 확인
