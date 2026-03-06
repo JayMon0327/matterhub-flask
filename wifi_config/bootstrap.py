@@ -322,11 +322,49 @@ def watch_disconnection_and_start_ap(
                                 )
                         except Exception as exc:
                             logger(
-                                "[WIFI][WATCHDOG] auto reconnect error "
-                                f"profile={profile_name} {type(exc).__name__}: {exc}"
-                            )
+                                    "[WIFI][WATCHDOG] auto reconnect error "
+                                    f"profile={profile_name} {type(exc).__name__}: {exc}"
+                                )
             sleep_fn(check_interval)
             continue
+
+        if auto_reconnect_enabled:
+            now = monotonic_fn()
+            if now >= next_auto_reconnect_check_at:
+                next_auto_reconnect_check_at = now + auto_reconnect_interval
+                candidate = _pick_known_network_candidate(
+                    wifi_service,
+                    configured_ap_ssid=configured_ap_ssid,
+                    logger=logger,
+                )
+                if candidate:
+                    profile_name = candidate["profile_name"]
+                    logger(
+                        "[WIFI][WATCHDOG] disconnected; trying known network "
+                        f"profile={profile_name} ssid={candidate.get('ssid')}"
+                    )
+                    try:
+                        reconnect_result = wifi_service.activate_saved_connection(
+                            profile_name,
+                            timeout_seconds=auto_reconnect_timeout,
+                        )
+                        if reconnect_result.get("success"):
+                            logger(
+                                "[WIFI][WATCHDOG] reconnect success while disconnected "
+                                f"profile={profile_name} ssid={reconnect_result.get('current_ssid')}"
+                            )
+                            disconnected_since = None
+                            sleep_fn(check_interval)
+                            continue
+                        logger(
+                            "[WIFI][WATCHDOG] reconnect failed while disconnected "
+                            f"profile={profile_name}"
+                        )
+                    except Exception as exc:
+                        logger(
+                            "[WIFI][WATCHDOG] reconnect error while disconnected "
+                            f"profile={profile_name} {type(exc).__name__}: {exc}"
+                        )
 
         if disconnected_since is None:
             disconnected_since = monotonic_fn()

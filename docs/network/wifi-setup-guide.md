@@ -119,9 +119,11 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 즉시 조치:
 
 ```bash
-sudo nmcli connection modify "WM_WORK_5G" connection.permissions "" connection.autoconnect yes
-sudo nmcli connection modify "WM_WORK_5G" 802-11-wireless-security.psk-flags 0 802-11-wireless-security.psk "비밀번호"
-sudo nmcli connection up "WM_WORK_5G"
+PROFILE_NAME="현재 연결 프로필명"
+WIFI_PASSWORD="현재 Wi-Fi 비밀번호"
+sudo nmcli connection modify "$PROFILE_NAME" connection.permissions "" connection.autoconnect yes
+sudo nmcli connection modify "$PROFILE_NAME" 802-11-wireless-security.psk-flags 0 802-11-wireless-security.psk "$WIFI_PASSWORD"
+sudo nmcli connection up "$PROFILE_NAME"
 ```
 
 확인:
