@@ -249,20 +249,36 @@ class WifiConfigService:
         if len(ap_password) < 8:
             raise ValueError("AP password must be at least 8 characters")
 
-        self._run_nmcli(
-            [
-                "device",
-                "wifi",
-                "hotspot",
-                "ifname",
-                self.interface,
-                "ssid",
-                ap_ssid,
-                "password",
-                ap_password,
-            ],
-            timeout=40,
-        )
+        hotspot_command = [
+            "device",
+            "wifi",
+            "hotspot",
+            "ifname",
+            self.interface,
+            "ssid",
+            ap_ssid,
+            "password",
+            ap_password,
+        ]
+
+        start_error: Optional[NmcliCommandError] = None
+        for attempt in range(1, 4):
+            try:
+                self._run_nmcli(hotspot_command, timeout=40)
+                start_error = None
+                break
+            except NmcliCommandError as exc:
+                start_error = exc
+                if attempt == 1 and self._is_device_unavailable_error(exc):
+                    self._prepare_device_for_ap_retry()
+                    continue
+                if self._is_ip_config_reservation_error(exc):
+                    self._recover_hotspot_connection()
+                    continue
+                break
+        if start_error is not None:
+            raise start_error
+
         active = self.get_active_wifi_connection()
         connection_name = (active or {}).get("name") or ap_ssid
         self._configure_ap_ipv4(connection_name)
@@ -483,6 +499,33 @@ class WifiConfigService:
 
     def _default_ap_ssid(self) -> str:
         return self.default_ap_ssid
+
+    def _prepare_device_for_ap_retry(self) -> None:
+        self._run_nmcli_best_effort(["radio", "wifi", "on"], timeout=10)
+        self._run_nmcli_best_effort(
+            ["device", "set", self.interface, "managed", "yes"],
+            timeout=10,
+        )
+        self._run_nmcli_best_effort(["device", "disconnect", self.interface], timeout=15)
+
+    def _recover_hotspot_connection(self) -> None:
+        self._run_nmcli_best_effort(["connection", "down", "id", "Hotspot"], timeout=15)
+        self._run_nmcli_best_effort(["connection", "delete", "id", "Hotspot"], timeout=15)
+
+    def _is_device_unavailable_error(self, error: NmcliCommandError) -> bool:
+        text = f"{error.stderr}\n{error.stdout}".lower()
+        return "device is not available" in text or "device is unavailable" in text
+
+    def _is_ip_config_reservation_error(self, error: NmcliCommandError) -> bool:
+        text = f"{error.stderr}\n{error.stdout}".lower()
+        return "ip configuration could not be reserved" in text
+
+    def _run_nmcli_best_effort(self, args: list[str], *, timeout: int) -> bool:
+        try:
+            self._run_nmcli(args, timeout=timeout)
+            return True
+        except NmcliCommandError:
+            return False
 
     def _ensure_system_autoconnect_profile(
         self,
