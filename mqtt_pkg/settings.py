@@ -44,14 +44,26 @@ KONAI_TEST_TOPIC_RESPONSE = _strip_quotes(
     os.environ.get("KONAI_TEST_TOPIC_RESPONSE", KONAI_TEST_TOPIC or "")
 )
 
+def _build_default_konai_report_entity_ids() -> list[str]:
+    defaults = [
+        "sensor.smart_ht_sensor_ondo",
+        "sensor.smart_ht_sensor_seubdo",
+    ]
+    defaults.extend([f"sensor.smart_ht_sensor_ondo_{index}" for index in range(1, 21)])
+    defaults.extend([f"sensor.smart_ht_sensor_seubdo_{index}" for index in range(1, 21)])
+    return defaults
+
+
 KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get(
-    "KONAI_REPORT_ENTITY_IDS", "sensor.smart_ht_sensor_ondo,sensor.smart_ht_sensor_seubdo"
+    "KONAI_REPORT_ENTITY_IDS",
+    ",".join(_build_default_konai_report_entity_ids()),
 )
-KONAI_REPORT_ENTITY_IDS = [
+_konai_report_entity_ids = [
     entity_id.strip()
     for entity_id in KONAI_REPORT_ENTITY_IDS_RAW.split(",")
     if entity_id.strip()
 ]
+KONAI_REPORT_ENTITY_IDS = list(dict.fromkeys(_konai_report_entity_ids))
 
 KONAI_EVENT_THROTTLE_SEC = max(0.0, float(os.environ.get("KONAI_EVENT_THROTTLE_SEC", "2")))
 KONAI_EVENT_DEDUP_WINDOW_SEC = max(0.0, float(os.environ.get("KONAI_EVENT_DEDUP_WINDOW_SEC", "3")))

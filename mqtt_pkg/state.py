@@ -15,12 +15,6 @@ class StateChangeDetector:
         self.is_initialized = False
         self.change_threshold = 5
         self.excluded_sensors = {
-            "sensor.smart_ht_sensor_ondo_1",
-            "sensor.smart_ht_sensor_ondo_2",
-            "sensor.smart_ht_sensor_ondo_3",
-            "sensor.smart_ht_sensor_seubdo_1",
-            "sensor.smart_ht_sensor_seubdo_2",
-            "sensor.smart_ht_sensor_seubdo_3",
             "sensor.smart_presence_sensor_jodo",
             "sensor.smart_presence_sensor_jodo_1",
             "sensor.smart_presence_sensor_jodo_2",
@@ -49,8 +43,13 @@ class StateChangeDetector:
             entity_id = str(entity_id)
             current_state = "" if current_state is None else str(current_state)
 
+            lower_entity_id = entity_id.lower()
+            is_ondo_or_humidity_sensor = any(
+                keyword in lower_entity_id for keyword in ("ondo", "seubdo", "seoudo")
+            )
             if (
                 entity_id in self.excluded_sensors
+                and not is_ondo_or_humidity_sensor
                 and entity_id not in settings.KONAI_REPORT_ENTITY_IDS
             ):
                 continue
@@ -185,4 +184,3 @@ def publish_device_state() -> None:
 
     except Exception as exc:
         print(f"상태 발행(이벤트) 실패: {exc}")
-
