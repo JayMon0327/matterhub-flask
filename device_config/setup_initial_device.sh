@@ -95,7 +95,7 @@ Usage: ./device_config/setup_initial_device.sh [options]
 
 Initial setup wrapper:
   1) Writes Wi-Fi/AP defaults to .env
-  2) Executes install_ubuntu24.sh (venv, requirements, NetworkManager, polkit, systemd)
+  2) Executes install_ubuntu24.sh (venv, requirements, NetworkManager, openssh-server, polkit, systemd)
   3) Optionally chains support tunnel setup options
 
 Options:

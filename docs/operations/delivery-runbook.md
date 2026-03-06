@@ -46,6 +46,7 @@ bash device_config/setup_initial_device.sh
 `install_ubuntu24.sh` 는 다음 작업을 일괄 수행한다.
 
 - Ubuntu 필수 패키지 설치
+- `openssh-server` 설치 및 `ssh` 서비스 활성화
 - `venv` 생성 및 Python 의존성 설치
 - `NetworkManager` 제어 권한(polkit) 설치
 - systemd 유닛 렌더링 및 설치

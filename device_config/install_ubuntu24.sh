@@ -233,10 +233,13 @@ fi
 if [ "$SKIP_OS_PACKAGES" -eq 0 ]; then
   log "Ubuntu 필수 패키지 설치"
   sudo_cmd apt update
-  sudo_cmd apt install -y python3-venv python3-pip network-manager autossh
+  sudo_cmd apt install -y python3-venv python3-pip network-manager autossh openssh-server
 else
   log "OS 패키지 설치 단계 생략"
 fi
+
+log "SSH 서버 서비스 활성화"
+sudo_cmd systemctl enable --now ssh
 
 if [ ! -d "$VENV_DIR" ]; then
   log "가상환경 생성: $VENV_DIR"

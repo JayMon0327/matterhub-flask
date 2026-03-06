@@ -25,7 +25,8 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         )
 
         output = result.stdout
-        self.assertIn("python3-venv python3-pip network-manager autossh", output)
+        self.assertIn("python3-venv python3-pip network-manager autossh openssh-server", output)
+        self.assertIn("systemctl enable --now ssh", output)
         self.assertIn("matterhub-api.service matterhub-mqtt.service", output)
         self.assertIn("matterhub-support-tunnel.service", output)
         self.assertIn("systemctl daemon-reload", output)

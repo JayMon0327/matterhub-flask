@@ -44,6 +44,7 @@ bash device_config/setup_initial_device.sh
 - Wi-Fi/AP 기본값을 `.env`에 반영
 - `install_ubuntu24.sh` 호출
 - `network-manager`, `nmcli`, AP/polkit 권한 설정 포함
+- `openssh-server` 설치 및 `ssh` 서비스 `enable --now`
 - venv/requirements/systemd 서비스 설치 및 재시작
 
 ## 4. 고객사 사용 절차

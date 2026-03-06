@@ -684,7 +684,7 @@ o = threading.Thread(target=one_time_scheduler, args=[one_time])
 o.start()
 
 if __name__ == '__main__':
-    # PM2 아래에서 돌릴 때는 debug/reloader 가 프로세스를 계속 재시작시키므로
-    # 기본은 debug=False, 필요할 때만 WM_DEBUG=1 로 켜서 사용.
+    # 운영 환경(systemd)에서는 debug/reloader 비활성화가 기본이다.
+    # 필요할 때만 WM_DEBUG=1 로 켜서 사용.
     _debug = os.environ.get("WM_DEBUG", "0").strip().lower() in ("1", "true", "yes", "y")
     app.run('0.0.0.0', debug=_debug, use_reloader=_debug, port=8100)

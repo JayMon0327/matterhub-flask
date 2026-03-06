@@ -23,6 +23,7 @@
 13. [납품 및 운영 런북](./operations/delivery-runbook.md)
 14. [Reverse Tunnel Only 하드닝 가이드](./operations/reverse-tunnel-only-hardening.md)
 15. [MQTT 토픽 진단 로그 (2026-03-04)](./operations/mqtt-topic-diagnosis-2026-03-04.md)
+16. [라즈베리파이 반복 설치 가이드](./operations/repeatable-raspi-setup.md)
 
 ## 3. 문서 사용 규칙
 
