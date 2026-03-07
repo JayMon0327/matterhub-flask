@@ -114,6 +114,30 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         output = result.stdout
         self.assertIn("--harden-local-console-pam", output)
 
+    def test_dry_run_passes_local_console_autologin_options(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(SETUP_SCRIPT),
+                "--dry-run",
+                "--harden-local-console-pam",
+                "--local-console-lock-scope",
+                "tty-only",
+                "--enable-gdm-autologin",
+                "--gdm-autologin-user",
+                "matterhub-display",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output = result.stdout
+        self.assertIn("--local-console-lock-scope tty-only", output)
+        self.assertIn("--enable-gdm-autologin", output)
+        self.assertIn("--gdm-autologin-user matterhub-display", output)
+
 
 if __name__ == "__main__":
     unittest.main()

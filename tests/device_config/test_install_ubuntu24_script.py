@@ -122,6 +122,29 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         self.assertIn("--run-user", output)
         self.assertIn("--dry-run", output)
 
+    def test_dry_run_can_chain_local_console_autologin_mode(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(INSTALL_SCRIPT),
+                "--dry-run",
+                "--harden-local-console-pam",
+                "--local-console-lock-scope",
+                "tty-only",
+                "--enable-gdm-autologin",
+                "--gdm-autologin-user",
+                "matterhub-display",
+            ],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
+        self.assertIn("--lock-scope tty-only", output)
+        self.assertIn("--enable-gdm-autologin", output)
+        self.assertIn("--gdm-autologin-user matterhub-display", output)
+
 
 if __name__ == "__main__":
     unittest.main()

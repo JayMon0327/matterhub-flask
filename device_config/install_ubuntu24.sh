@@ -14,6 +14,9 @@ SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
 HARDEN_REVERSE_TUNNEL_ONLY=0
 HARDEN_LOCAL_CONSOLE_PAM=0
+LOCAL_CONSOLE_LOCK_SCOPE="${LOCAL_CONSOLE_LOCK_SCOPE:-all}"
+LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="${LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE:-disable}"
+LOCAL_CONSOLE_GDM_AUTOLOGIN_USER="${LOCAL_CONSOLE_GDM_AUTOLOGIN_USER:-$RUN_USER}"
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -82,6 +85,16 @@ Options:
                       Keep inbound TCP port open under UFW policy (repeatable).
   --harden-local-console-pam
                       Apply PAM policy to block local-console login for runtime account.
+  --local-console-lock-scope
+                      PAM lock scope: all|tty-only (default: all)
+  --enable-gdm-autologin
+                      Enable GDM automatic login through PAM hardening step.
+  --disable-gdm-autologin
+                      Disable GDM automatic login (default).
+  --keep-gdm-autologin
+                      Keep current GDM automatic login settings.
+  --gdm-autologin-user
+                      GDM autologin user when --enable-gdm-autologin is set.
 
 Environment variables:
   RUN_USER     systemd service user (default: current shell user)
@@ -146,6 +159,23 @@ while [ "$#" -gt 0 ]; do
     --harden-local-console-pam)
       HARDEN_LOCAL_CONSOLE_PAM=1
       ;;
+    --local-console-lock-scope)
+      LOCAL_CONSOLE_LOCK_SCOPE="$2"
+      shift
+      ;;
+    --enable-gdm-autologin)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="enable"
+      ;;
+    --disable-gdm-autologin)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="disable"
+      ;;
+    --keep-gdm-autologin)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="keep"
+      ;;
+    --gdm-autologin-user)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_USER="$2"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -158,6 +188,21 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+case "$LOCAL_CONSOLE_LOCK_SCOPE" in
+  all|tty-only) ;;
+  *)
+    echo "--local-console-lock-scope must be one of: all, tty-only" >&2
+    exit 1
+    ;;
+esac
+case "$LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE" in
+  disable|enable|keep) ;;
+  *)
+    echo "GDM autologin mode must be one of: disable, enable, keep" >&2
+    exit 1
+    ;;
+esac
 
 if [ "$DRY_RUN" -ne 1 ] && [ "$(uname -s)" != "Linux" ]; then
   echo "This installer must be executed on Ubuntu/Linux. Use --dry-run for planning on macOS." >&2
@@ -228,6 +273,11 @@ fi
 
 if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
   log "로컬 콘솔 로그인 제한(PAM): 적용 예정"
+  log "로컬 콘솔 lock scope: $LOCAL_CONSOLE_LOCK_SCOPE"
+  log "GDM autologin mode: $LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE"
+  if [ "$LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE" = "enable" ]; then
+    log "GDM autologin user: $LOCAL_CONSOLE_GDM_AUTOLOGIN_USER"
+  fi
 fi
 
 if [ "$SKIP_OS_PACKAGES" -eq 0 ]; then
@@ -382,7 +432,19 @@ if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
   pam_harden_cmd=(
     bash "$PAM_HARDEN_SCRIPT"
     --run-user "$RUN_USER"
+    --lock-scope "$LOCAL_CONSOLE_LOCK_SCOPE"
   )
+  case "$LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE" in
+    enable)
+      pam_harden_cmd+=(--enable-gdm-autologin --gdm-autologin-user "$LOCAL_CONSOLE_GDM_AUTOLOGIN_USER")
+      ;;
+    keep)
+      pam_harden_cmd+=(--keep-gdm-autologin)
+      ;;
+    disable)
+      pam_harden_cmd+=(--disable-gdm-autologin)
+      ;;
+  esac
   if [ "$DRY_RUN" -eq 1 ]; then
     pam_harden_cmd+=(--dry-run)
   fi

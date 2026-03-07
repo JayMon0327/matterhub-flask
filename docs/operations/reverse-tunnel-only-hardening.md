@@ -90,11 +90,26 @@ bash device_config/harden_local_console_pam.sh --run-user whatsmatter
 적용 내용:
 
 - `/etc/pam.d/login` 에 `pam_access.so` 활성화
-- `/etc/pam.d/gdm-password`, `/etc/pam.d/gdm-autologin` 에 `pam_access.so` 활성화 (파일 존재 시)
+- `lock-scope=all` 인 경우 `/etc/pam.d/gdm-password`, `/etc/pam.d/gdm-autologin` 에 `pam_access.so` 활성화
 - `/etc/security/access.conf` 에 아래 정책 추가
   - `+:root:LOCAL`
   - `-:whatsmatter:LOCAL`
-- `/etc/gdm3/custom.conf` 에서 자동로그인 비활성화 (`AutomaticLoginEnable=false`)
+- GDM 자동로그인 정책(`disable|enable|keep`) 적용
+
+기본 모드(권장, 보안 우선):
+
+- `--lock-scope all`
+- `--disable-gdm-autologin`
+
+가용성 우선 모드(로그인창 미노출, 콘솔 TTY만 차단):
+
+- `--lock-scope tty-only`
+- `--enable-gdm-autologin --gdm-autologin-user <user>`
+
+주의:
+
+- `--lock-scope all` + `--enable-gdm-autologin` + 동일 사용자 조합은 모순이므로 스크립트가 실패한다.
+- 자동로그인을 켜면 해당 GUI 세션은 인증 없이 열리므로, 코드 접근 제한은 "동일 사용자 금지/권한 분리"를 별도로 설계해야 한다.
 
 통합 설치에서 같이 적용:
 
@@ -102,5 +117,19 @@ bash device_config/harden_local_console_pam.sh --run-user whatsmatter
 bash device_config/setup_initial_device.sh \
   --setup-support-tunnel \
   --harden-reverse-tunnel-only \
-  --harden-local-console-pam
+  --harden-local-console-pam \
+  --local-console-lock-scope all \
+  --disable-gdm-autologin
+
+가용성 우선(로그인창 미노출) 샘플:
+
+```bash
+bash device_config/setup_initial_device.sh \
+  --setup-support-tunnel \
+  --harden-reverse-tunnel-only \
+  --harden-local-console-pam \
+  --local-console-lock-scope tty-only \
+  --enable-gdm-autologin \
+  --gdm-autologin-user whatsmatter
+```
 ```

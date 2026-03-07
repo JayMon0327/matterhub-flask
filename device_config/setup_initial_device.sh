@@ -14,6 +14,9 @@ SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
 HARDEN_REVERSE_TUNNEL_ONLY=0
 HARDEN_LOCAL_CONSOLE_PAM=0
+LOCAL_CONSOLE_LOCK_SCOPE="${LOCAL_CONSOLE_LOCK_SCOPE:-all}"
+LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="${LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE:-disable}"
+LOCAL_CONSOLE_GDM_AUTOLOGIN_USER="${LOCAL_CONSOLE_GDM_AUTOLOGIN_USER:-$RUN_USER}"
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -126,6 +129,11 @@ Options:
   --harden-reverse-tunnel-only       Pass through
   --harden-allow-inbound-port <p>    Pass through (repeatable)
   --harden-local-console-pam         Pass through
+  --local-console-lock-scope <v>     Pass through (all|tty-only)
+  --enable-gdm-autologin             Pass through
+  --disable-gdm-autologin            Pass through
+  --keep-gdm-autologin               Pass through
+  --gdm-autologin-user <user>        Pass through
   -h, --help                         Show help
 EOF
 }
@@ -228,6 +236,26 @@ while [ "$#" -gt 0 ]; do
       HARDEN_LOCAL_CONSOLE_PAM=1
       shift
       ;;
+    --local-console-lock-scope)
+      LOCAL_CONSOLE_LOCK_SCOPE="$2"
+      shift 2
+      ;;
+    --enable-gdm-autologin)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="enable"
+      shift
+      ;;
+    --disable-gdm-autologin)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="disable"
+      shift
+      ;;
+    --keep-gdm-autologin)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE="keep"
+      shift
+      ;;
+    --gdm-autologin-user)
+      LOCAL_CONSOLE_GDM_AUTOLOGIN_USER="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -258,6 +286,22 @@ if ! [[ "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "--wifi-bootstrap-startup-grace-seconds must be a non-negative integer" >&2
   exit 1
 fi
+case "$LOCAL_CONSOLE_LOCK_SCOPE" in
+  all|tty-only)
+    ;;
+  *)
+    echo "--local-console-lock-scope must be one of: all,tty-only" >&2
+    exit 1
+    ;;
+esac
+case "$LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE" in
+  disable|enable|keep)
+    ;;
+  *)
+    echo "local console GDM mode must be one of: disable,enable,keep" >&2
+    exit 1
+    ;;
+esac
 
 INSTALL_SCRIPT="$SCRIPT_DIR/install_ubuntu24.sh"
 if [ ! -f "$INSTALL_SCRIPT" ]; then
@@ -328,6 +372,18 @@ for port in "${HARDEN_ALLOW_INBOUND_PORTS[@]-}"; do
 done
 if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
   install_cmd+=(--harden-local-console-pam)
+  install_cmd+=(--local-console-lock-scope "$LOCAL_CONSOLE_LOCK_SCOPE")
+  case "$LOCAL_CONSOLE_GDM_AUTOLOGIN_MODE" in
+    enable)
+      install_cmd+=(--enable-gdm-autologin --gdm-autologin-user "$LOCAL_CONSOLE_GDM_AUTOLOGIN_USER")
+      ;;
+    keep)
+      install_cmd+=(--keep-gdm-autologin)
+      ;;
+    disable)
+      install_cmd+=(--disable-gdm-autologin)
+      ;;
+  esac
 fi
 
 log "install_ubuntu24.sh 실행"

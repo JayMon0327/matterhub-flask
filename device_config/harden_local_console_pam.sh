@@ -8,7 +8,9 @@ GDM_PASSWORD_PAM_PATH="${GDM_PASSWORD_PAM_PATH:-/etc/pam.d/gdm-password}"
 GDM_AUTOLOGIN_PAM_PATH="${GDM_AUTOLOGIN_PAM_PATH:-/etc/pam.d/gdm-autologin}"
 ACCESS_CONF_PATH="${ACCESS_CONF_PATH:-/etc/security/access.conf}"
 GDM_CUSTOM_CONF_PATH="${GDM_CUSTOM_CONF_PATH:-/etc/gdm3/custom.conf}"
-DISABLE_GDM_AUTOLOGIN=1
+LOCK_SCOPE="${LOCK_SCOPE:-all}"                  # all | tty-only
+GDM_AUTOLOGIN_MODE="${GDM_AUTOLOGIN_MODE:-disable}"  # disable | enable | keep
+GDM_AUTOLOGIN_USER="${GDM_AUTOLOGIN_USER:-}"
 DRY_RUN=0
 
 MARKER_BEGIN="# MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN"
@@ -40,7 +42,7 @@ usage() {
   cat <<'EOF'
 Usage: ./device_config/harden_local_console_pam.sh [options]
 
-Apply PAM rule to deny local-console login for the runtime account while keeping SSH relay workflow.
+Apply local-console access policy for runtime account.
 
 Options:
   --run-user <user>       Runtime user denied on local console (default: current user)
@@ -52,8 +54,15 @@ Options:
   --access-conf <path>    access.conf path (default: /etc/security/access.conf)
   --gdm-custom-conf <path>
                          GDM custom.conf path (default: /etc/gdm3/custom.conf)
+  --lock-scope <all|tty-only>
+                         all=login+gdm PAM, tty-only=login PAM only (default: all)
+  --enable-gdm-autologin  Set GDM autologin enabled
+  --disable-gdm-autologin Set GDM autologin disabled (default)
+  --keep-gdm-autologin    Keep current GDM autologin settings
+  --gdm-autologin-user <user>
+                         Target user when --enable-gdm-autologin is used (default: run-user)
   --skip-disable-gdm-autologin
-                         Keep current GDM autologin settings.
+                         Backward-compatible alias for --keep-gdm-autologin
   --dry-run               Show planned actions only
   -h, --help              Show help
 EOF
@@ -85,9 +94,25 @@ while [ "$#" -gt 0 ]; do
       GDM_CUSTOM_CONF_PATH="$2"
       shift 2
       ;;
-    --skip-disable-gdm-autologin)
-      DISABLE_GDM_AUTOLOGIN=0
+    --lock-scope)
+      LOCK_SCOPE="$2"
+      shift 2
+      ;;
+    --enable-gdm-autologin)
+      GDM_AUTOLOGIN_MODE="enable"
       shift
+      ;;
+    --disable-gdm-autologin)
+      GDM_AUTOLOGIN_MODE="disable"
+      shift
+      ;;
+    --keep-gdm-autologin|--skip-disable-gdm-autologin)
+      GDM_AUTOLOGIN_MODE="keep"
+      shift
+      ;;
+    --gdm-autologin-user)
+      GDM_AUTOLOGIN_USER="$2"
+      shift 2
       ;;
     --dry-run)
       DRY_RUN=1
@@ -107,6 +132,28 @@ done
 
 if [ -z "$RUN_USER" ]; then
   echo "RUN_USER cannot be empty." >&2
+  exit 1
+fi
+if [ -z "$GDM_AUTOLOGIN_USER" ]; then
+  GDM_AUTOLOGIN_USER="$RUN_USER"
+fi
+case "$LOCK_SCOPE" in
+  all|tty-only) ;;
+  *)
+    echo "LOCK_SCOPE must be one of: all, tty-only" >&2
+    exit 1
+    ;;
+esac
+case "$GDM_AUTOLOGIN_MODE" in
+  disable|enable|keep) ;;
+  *)
+    echo "GDM_AUTOLOGIN_MODE must be one of: disable, enable, keep" >&2
+    exit 1
+    ;;
+esac
+if [ "$GDM_AUTOLOGIN_MODE" = "enable" ] && [ "$LOCK_SCOPE" = "all" ] && [ "$GDM_AUTOLOGIN_USER" = "$RUN_USER" ]; then
+  echo "Invalid combination: autologin user equals run-user while lock-scope=all; login will be denied by PAM." >&2
+  echo "Use --lock-scope tty-only or choose a different --gdm-autologin-user." >&2
   exit 1
 fi
 
@@ -151,12 +198,115 @@ ensure_pam_access_line() {
   fi
 }
 
+render_gdm_custom_conf() {
+  local source_path="$1"
+  local output_path="$2"
+  local mode="$3"
+  local user="$4"
+
+  if [ -f "$source_path" ]; then
+    cp "$source_path" "$output_path"
+  else
+    : > "$output_path"
+  fi
+
+  awk -v mode="$mode" -v user="$user" '
+    function emit_gdm_auth_lines() {
+      if (!seen_autologin_enable) {
+        if (mode == "enable") {
+          print "AutomaticLoginEnable=true"
+        } else {
+          print "AutomaticLoginEnable=false"
+        }
+      }
+      if (mode == "enable") {
+        if (!seen_autologin_user) {
+          print "AutomaticLogin=" user
+        }
+      } else {
+        if (!seen_autologin_user) {
+          print "#AutomaticLogin=disabled"
+        }
+      }
+    }
+    BEGIN {
+      in_daemon = 0
+      saw_daemon = 0
+      seen_autologin_enable = 0
+      seen_autologin_user = 0
+    }
+    /^\[.*\][[:space:]]*$/ {
+      if (in_daemon) {
+        emit_gdm_auth_lines()
+      }
+      in_daemon = 0
+      section = $0
+      if (section == "[daemon]") {
+        saw_daemon = 1
+        in_daemon = 1
+        seen_autologin_enable = 0
+        seen_autologin_user = 0
+        print "[daemon]"
+        next
+      }
+      print $0
+      next
+    }
+    {
+      if (!in_daemon) {
+        print $0
+        next
+      }
+      if ($0 ~ /^[[:space:]]*AutomaticLoginEnable=/) {
+        if (mode == "enable") {
+          print "AutomaticLoginEnable=true"
+        } else {
+          print "AutomaticLoginEnable=false"
+        }
+        seen_autologin_enable = 1
+        next
+      }
+      if ($0 ~ /^[[:space:]]*AutomaticLogin=/ || $0 ~ /^[[:space:]]*#AutomaticLogin=disabled/) {
+        if (mode == "enable") {
+          print "AutomaticLogin=" user
+        } else {
+          print "#AutomaticLogin=disabled"
+        }
+        seen_autologin_user = 1
+        next
+      }
+      print $0
+    }
+    END {
+      if (in_daemon) {
+        emit_gdm_auth_lines()
+      }
+      if (!saw_daemon) {
+        print ""
+        print "[daemon]"
+        if (mode == "enable") {
+          print "AutomaticLoginEnable=true"
+          print "AutomaticLogin=" user
+        } else {
+          print "AutomaticLoginEnable=false"
+          print "#AutomaticLogin=disabled"
+        }
+      }
+    }
+  ' "$output_path" > "$output_path.new"
+  mv "$output_path.new" "$output_path"
+}
+
 ensure_pam_access_line "$PAM_LOGIN_PATH" "$LOGIN_TMP"
-if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
-  ensure_pam_access_line "$GDM_PASSWORD_PAM_PATH" "$GDM_PASSWORD_TMP"
-fi
-if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
-  ensure_pam_access_line "$GDM_AUTOLOGIN_PAM_PATH" "$GDM_AUTOLOGIN_TMP"
+if [ "$LOCK_SCOPE" = "all" ]; then
+  if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
+    ensure_pam_access_line "$GDM_PASSWORD_PAM_PATH" "$GDM_PASSWORD_TMP"
+  fi
+  if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
+    ensure_pam_access_line "$GDM_AUTOLOGIN_PAM_PATH" "$GDM_AUTOLOGIN_TMP"
+  fi
+else
+  log "lock-scope=tty-only, skipping GDM PAM lock files"
 fi
 
 if [ -f "$ACCESS_CONF_PATH" ]; then
@@ -177,37 +327,24 @@ fi
   echo "$MARKER_END"
 } >> "$ACCESS_TMP"
 
+if [ "$GDM_AUTOLOGIN_MODE" != "keep" ]; then
+  render_gdm_custom_conf "$GDM_CUSTOM_CONF_PATH" "$GDM_CUSTOM_TMP" "$GDM_AUTOLOGIN_MODE" "$GDM_AUTOLOGIN_USER"
+fi
+
 log "installing PAM login policy: ${PAM_LOGIN_PATH}"
 sudo_cmd install -m 0644 "$LOGIN_TMP" "$PAM_LOGIN_PATH"
-if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
+if [ "$LOCK_SCOPE" = "all" ] && [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
   log "installing GDM password PAM policy: ${GDM_PASSWORD_PAM_PATH}"
   sudo_cmd install -m 0644 "$GDM_PASSWORD_TMP" "$GDM_PASSWORD_PAM_PATH"
 fi
-if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
+if [ "$LOCK_SCOPE" = "all" ] && [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
   log "installing GDM autologin PAM policy: ${GDM_AUTOLOGIN_PAM_PATH}"
   sudo_cmd install -m 0644 "$GDM_AUTOLOGIN_TMP" "$GDM_AUTOLOGIN_PAM_PATH"
 fi
 log "installing access policy: ${ACCESS_CONF_PATH}"
 sudo_cmd install -m 0644 "$ACCESS_TMP" "$ACCESS_CONF_PATH"
 
-if [ "$DISABLE_GDM_AUTOLOGIN" -eq 1 ] && [ -f "$GDM_CUSTOM_CONF_PATH" ]; then
-  cp "$GDM_CUSTOM_CONF_PATH" "$GDM_CUSTOM_TMP"
-  if grep -Eq '^AutomaticLoginEnable=' "$GDM_CUSTOM_TMP"; then
-    awk '
-      {
-        if ($0 ~ /^AutomaticLoginEnable=/) {
-          print "AutomaticLoginEnable=false"
-        } else if ($0 ~ /^AutomaticLogin=/) {
-          print "#AutomaticLogin=disabled"
-        } else {
-          print
-        }
-      }
-    ' "$GDM_CUSTOM_TMP" > "$GDM_CUSTOM_TMP.new"
-    mv "$GDM_CUSTOM_TMP.new" "$GDM_CUSTOM_TMP"
-  else
-    printf '\n[daemon]\nAutomaticLoginEnable=false\n#AutomaticLogin=disabled\n' >> "$GDM_CUSTOM_TMP"
-  fi
+if [ "$GDM_AUTOLOGIN_MODE" != "keep" ]; then
   log "installing GDM custom policy: ${GDM_CUSTOM_CONF_PATH}"
   sudo_cmd install -m 0644 "$GDM_CUSTOM_TMP" "$GDM_CUSTOM_CONF_PATH"
 fi
@@ -217,7 +354,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   tail -n 12 "$LOGIN_TMP" | sed 's/^/[dry-run]   /'
   log "access.conf preview:"
   tail -n 12 "$ACCESS_TMP" | sed 's/^/[dry-run]   /'
-  if [ "$DISABLE_GDM_AUTOLOGIN" -eq 1 ] && [ -f "$GDM_CUSTOM_CONF_PATH" ]; then
+  if [ "$GDM_AUTOLOGIN_MODE" != "keep" ]; then
     log "gdm custom.conf preview:"
     tail -n 12 "$GDM_CUSTOM_TMP" | sed 's/^/[dry-run]   /'
   fi
