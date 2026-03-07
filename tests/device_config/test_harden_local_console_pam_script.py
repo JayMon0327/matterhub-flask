@@ -66,82 +66,8 @@ class HardenLocalConsolePamScriptTest(unittest.TestCase):
             self.assertIn("uncommented pam_access", output)
             self.assertIn("MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN", output)
             self.assertIn("-:whatsmatter:LOCAL", output)
-            self.assertIn("AutomaticLoginEnable=false", output)
-
-    def test_dry_run_tty_only_with_gdm_autologin_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            pam_login = Path(temp_dir) / "login"
-            access_conf = Path(temp_dir) / "access.conf"
-            gdm_custom = Path(temp_dir) / "custom.conf"
-            pam_login.write_text("auth requisite pam_securetty.so\n", encoding="utf-8")
-            access_conf.write_text("+:root:ALL\n", encoding="utf-8")
-            gdm_custom.write_text("[daemon]\nAutomaticLoginEnable=false\n", encoding="utf-8")
-
-            result = subprocess.run(
-                [
-                    "bash",
-                    str(SCRIPT),
-                    "--dry-run",
-                    "--run-user",
-                    "whatsmatter",
-                    "--pam-login-path",
-                    str(pam_login),
-                    "--access-conf",
-                    str(access_conf),
-                    "--gdm-custom-conf",
-                    str(gdm_custom),
-                    "--lock-scope",
-                    "tty-only",
-                    "--enable-gdm-autologin",
-                    "--gdm-autologin-user",
-                    "matterhub-display",
-                ],
-                cwd=PROJECT_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            output = result.stdout
             self.assertIn("lock-scope=tty-only", output)
             self.assertIn("AutomaticLoginEnable=true", output)
-            self.assertIn("AutomaticLogin=matterhub-display", output)
-
-    def test_rejects_conflicting_all_scope_autologin_for_same_user(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            pam_login = Path(temp_dir) / "login"
-            access_conf = Path(temp_dir) / "access.conf"
-            gdm_custom = Path(temp_dir) / "custom.conf"
-            pam_login.write_text("auth requisite pam_securetty.so\n", encoding="utf-8")
-            access_conf.write_text("+:root:ALL\n", encoding="utf-8")
-            gdm_custom.write_text("[daemon]\n", encoding="utf-8")
-
-            result = subprocess.run(
-                [
-                    "bash",
-                    str(SCRIPT),
-                    "--dry-run",
-                    "--run-user",
-                    "whatsmatter",
-                    "--pam-login-path",
-                    str(pam_login),
-                    "--access-conf",
-                    str(access_conf),
-                    "--gdm-custom-conf",
-                    str(gdm_custom),
-                    "--lock-scope",
-                    "all",
-                    "--enable-gdm-autologin",
-                    "--gdm-autologin-user",
-                    "whatsmatter",
-                ],
-                cwd=PROJECT_ROOT,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertNotEqual(0, result.returncode)
-            self.assertIn("Invalid combination", result.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

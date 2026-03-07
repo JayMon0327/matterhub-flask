@@ -8,9 +8,9 @@ GDM_PASSWORD_PAM_PATH="${GDM_PASSWORD_PAM_PATH:-/etc/pam.d/gdm-password}"
 GDM_AUTOLOGIN_PAM_PATH="${GDM_AUTOLOGIN_PAM_PATH:-/etc/pam.d/gdm-autologin}"
 ACCESS_CONF_PATH="${ACCESS_CONF_PATH:-/etc/security/access.conf}"
 GDM_CUSTOM_CONF_PATH="${GDM_CUSTOM_CONF_PATH:-/etc/gdm3/custom.conf}"
-LOCK_SCOPE="${LOCK_SCOPE:-all}"                  # all | tty-only
-GDM_AUTOLOGIN_MODE="${GDM_AUTOLOGIN_MODE:-disable}"  # disable | enable | keep
-GDM_AUTOLOGIN_USER="${GDM_AUTOLOGIN_USER:-}"
+LOCK_SCOPE="tty-only"
+GDM_AUTOLOGIN_MODE="enable"
+GDM_AUTOLOGIN_USER="${RUN_USER}"
 DRY_RUN=0
 
 MARKER_BEGIN="# MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN"
@@ -54,15 +54,6 @@ Options:
   --access-conf <path>    access.conf path (default: /etc/security/access.conf)
   --gdm-custom-conf <path>
                          GDM custom.conf path (default: /etc/gdm3/custom.conf)
-  --lock-scope <all|tty-only>
-                         all=login+gdm PAM, tty-only=login PAM only (default: all)
-  --enable-gdm-autologin  Set GDM autologin enabled
-  --disable-gdm-autologin Set GDM autologin disabled (default)
-  --keep-gdm-autologin    Keep current GDM autologin settings
-  --gdm-autologin-user <user>
-                         Target user when --enable-gdm-autologin is used (default: run-user)
-  --skip-disable-gdm-autologin
-                         Backward-compatible alias for --keep-gdm-autologin
   --dry-run               Show planned actions only
   -h, --help              Show help
 EOF
@@ -94,26 +85,6 @@ while [ "$#" -gt 0 ]; do
       GDM_CUSTOM_CONF_PATH="$2"
       shift 2
       ;;
-    --lock-scope)
-      LOCK_SCOPE="$2"
-      shift 2
-      ;;
-    --enable-gdm-autologin)
-      GDM_AUTOLOGIN_MODE="enable"
-      shift
-      ;;
-    --disable-gdm-autologin)
-      GDM_AUTOLOGIN_MODE="disable"
-      shift
-      ;;
-    --keep-gdm-autologin|--skip-disable-gdm-autologin)
-      GDM_AUTOLOGIN_MODE="keep"
-      shift
-      ;;
-    --gdm-autologin-user)
-      GDM_AUTOLOGIN_USER="$2"
-      shift 2
-      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -134,28 +105,7 @@ if [ -z "$RUN_USER" ]; then
   echo "RUN_USER cannot be empty." >&2
   exit 1
 fi
-if [ -z "$GDM_AUTOLOGIN_USER" ]; then
-  GDM_AUTOLOGIN_USER="$RUN_USER"
-fi
-case "$LOCK_SCOPE" in
-  all|tty-only) ;;
-  *)
-    echo "LOCK_SCOPE must be one of: all, tty-only" >&2
-    exit 1
-    ;;
-esac
-case "$GDM_AUTOLOGIN_MODE" in
-  disable|enable|keep) ;;
-  *)
-    echo "GDM_AUTOLOGIN_MODE must be one of: disable, enable, keep" >&2
-    exit 1
-    ;;
-esac
-if [ "$GDM_AUTOLOGIN_MODE" = "enable" ] && [ "$LOCK_SCOPE" = "all" ] && [ "$GDM_AUTOLOGIN_USER" = "$RUN_USER" ]; then
-  echo "Invalid combination: autologin user equals run-user while lock-scope=all; login will be denied by PAM." >&2
-  echo "Use --lock-scope tty-only or choose a different --gdm-autologin-user." >&2
-  exit 1
-fi
+GDM_AUTOLOGIN_USER="$RUN_USER"
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
