@@ -27,6 +27,9 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         output = result.stdout
         self.assertIn("env update: WIFI_AP_SSID=Matterhub-Setup-WhatsMatter", output)
         self.assertIn("env update: WIFI_AP_IPV4_CIDR=10.42.0.1/24", output)
+        self.assertIn("env update: UPDATE_AGENT_ENABLED=1", output)
+        self.assertIn("env update: UPDATE_AGENT_REQUIRE_MANIFEST=1", output)
+        self.assertIn("env update: UPDATE_AGENT_REQUIRE_SHA256=0", output)
         self.assertIn("install_ubuntu24.sh 실행", output)
         self.assertIn("install_ubuntu24.sh --dry-run", output)
 
@@ -113,6 +116,23 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
 
         output = result.stdout
         self.assertIn("--harden-local-console-pam", output)
+
+    def test_rejects_non_numeric_update_agent_poll_seconds(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(SETUP_SCRIPT),
+                "--dry-run",
+                "--update-agent-poll-seconds",
+                "abc",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("update-agent-poll-seconds", result.stderr)
 
 
 if __name__ == "__main__":

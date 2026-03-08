@@ -27,6 +27,7 @@ class RenderSystemdUnitsTest(unittest.TestCase):
                 "matterhub-rule-engine.service",
                 "matterhub-notifier.service",
                 "matterhub-support-tunnel.service",
+                "matterhub-update-agent.service",
             ],
             result.stdout.strip().splitlines(),
         )
@@ -51,14 +52,17 @@ class RenderSystemdUnitsTest(unittest.TestCase):
             api_unit = Path(temp_dir) / "matterhub-api.service"
             mqtt_unit = Path(temp_dir) / "matterhub-mqtt.service"
             support_tunnel_unit = Path(temp_dir) / "matterhub-support-tunnel.service"
+            update_agent_unit = Path(temp_dir) / "matterhub-update-agent.service"
 
             self.assertTrue(api_unit.exists())
             self.assertTrue(mqtt_unit.exists())
             self.assertTrue(support_tunnel_unit.exists())
+            self.assertTrue(update_agent_unit.exists())
 
             api_text = api_unit.read_text(encoding="utf-8")
             mqtt_text = mqtt_unit.read_text(encoding="utf-8")
             support_tunnel_text = support_tunnel_unit.read_text(encoding="utf-8")
+            update_agent_text = update_agent_unit.read_text(encoding="utf-8")
 
             self.assertIn("User=whatsmatter", api_text)
             self.assertIn("WorkingDirectory=/srv/matterhub", api_text)
@@ -79,6 +83,11 @@ class RenderSystemdUnitsTest(unittest.TestCase):
             )
             self.assertIn("StartLimitIntervalSec=0", support_tunnel_text)
             self.assertIn("StartLimitBurst=0", support_tunnel_text)
+            self.assertIn("User=root", update_agent_text)
+            self.assertIn(
+                "ExecStart=/srv/matterhub/venv/bin/python /srv/matterhub/update_agent.py",
+                update_agent_text,
+            )
 
     def test_list_enabled_unit_names_excludes_support_tunnel(self) -> None:
         result = subprocess.run(
@@ -91,7 +100,41 @@ class RenderSystemdUnitsTest(unittest.TestCase):
         enabled_units = result.stdout.strip().splitlines()
         self.assertIn("matterhub-api.service", enabled_units)
         self.assertIn("matterhub-mqtt.service", enabled_units)
+        self.assertIn("matterhub-update-agent.service", enabled_units)
         self.assertNotIn("matterhub-support-tunnel.service", enabled_units)
+
+    def test_render_binary_mode_uses_runtime_executable_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(RENDER_SCRIPT),
+                    "--project-root",
+                    "/opt/matterhub",
+                    "--run-user",
+                    "whatsmatter",
+                    "--runtime-mode",
+                    "binary",
+                    "--output-dir",
+                    temp_dir,
+                ],
+                cwd=PROJECT_ROOT,
+                check=True,
+            )
+
+            api_unit = Path(temp_dir) / "matterhub-api.service"
+            update_agent_unit = Path(temp_dir) / "matterhub-update-agent.service"
+            api_text = api_unit.read_text(encoding="utf-8")
+            update_agent_text = update_agent_unit.read_text(encoding="utf-8")
+
+            self.assertIn(
+                "ExecStart=/opt/matterhub/bin/matterhub-api/matterhub-api",
+                api_text,
+            )
+            self.assertIn(
+                "ExecStart=/opt/matterhub/bin/matterhub-update-agent/matterhub-update-agent",
+                update_agent_text,
+            )
 
 
 if __name__ == "__main__":

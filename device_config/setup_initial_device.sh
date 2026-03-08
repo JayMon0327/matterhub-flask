@@ -32,6 +32,11 @@ WIFI_AUTO_AP_ON_BOOT="${WIFI_AUTO_AP_ON_BOOT:-1}"
 WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS="${WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS:-45}"
 WIFI_BOOTSTRAP_AP_SSID="${WIFI_BOOTSTRAP_AP_SSID:-}"
 WIFI_BOOTSTRAP_AP_PASSWORD="${WIFI_BOOTSTRAP_AP_PASSWORD:-}"
+UPDATE_AGENT_ENABLED="${UPDATE_AGENT_ENABLED:-1}"
+UPDATE_AGENT_POLL_SECONDS="${UPDATE_AGENT_POLL_SECONDS:-15}"
+UPDATE_AGENT_REQUIRE_MANIFEST="${UPDATE_AGENT_REQUIRE_MANIFEST:-1}"
+UPDATE_AGENT_REQUIRE_SHA256="${UPDATE_AGENT_REQUIRE_SHA256:-0}"
+UPDATE_AGENT_ALLOWED_BUNDLE_TYPES="${UPDATE_AGENT_ALLOWED_BUNDLE_TYPES:-matterhub-runtime,matterhub-update}"
 
 log() {
   printf '[matterhub-initial-setup] %s\n' "$*"
@@ -113,6 +118,14 @@ Options:
                                      Default: 45 (AP 시작 전 대기)
   --wifi-bootstrap-ap-ssid <ssid>    Optional
   --wifi-bootstrap-ap-password <pw>  Optional
+  --update-agent-enabled <0|1>       Default: 1
+  --update-agent-poll-seconds <sec>  Default: 15
+  --update-agent-require-manifest <0|1>
+                                     Default: 1
+  --update-agent-require-sha256 <0|1>
+                                     Default: 0
+  --update-agent-allowed-bundle-types <csv>
+                                     Default: matterhub-runtime,matterhub-update
 
   --setup-support-tunnel             Pass through to install_ubuntu24.sh
   --enable-support-tunnel-now        Pass through to install_ubuntu24.sh
@@ -178,6 +191,26 @@ while [ "$#" -gt 0 ]; do
       ;;
     --wifi-bootstrap-ap-password)
       WIFI_BOOTSTRAP_AP_PASSWORD="$2"
+      shift 2
+      ;;
+    --update-agent-enabled)
+      UPDATE_AGENT_ENABLED="$2"
+      shift 2
+      ;;
+    --update-agent-poll-seconds)
+      UPDATE_AGENT_POLL_SECONDS="$2"
+      shift 2
+      ;;
+    --update-agent-require-manifest)
+      UPDATE_AGENT_REQUIRE_MANIFEST="$2"
+      shift 2
+      ;;
+    --update-agent-require-sha256)
+      UPDATE_AGENT_REQUIRE_SHA256="$2"
+      shift 2
+      ;;
+    --update-agent-allowed-bundle-types)
+      UPDATE_AGENT_ALLOWED_BUNDLE_TYPES="$2"
       shift 2
       ;;
     --setup-support-tunnel)
@@ -259,6 +292,22 @@ if ! [[ "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+if ! [[ "$UPDATE_AGENT_POLL_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "--update-agent-poll-seconds must be a non-negative integer" >&2
+  exit 1
+fi
+
+for flag in "$UPDATE_AGENT_ENABLED" "$UPDATE_AGENT_REQUIRE_MANIFEST" "$UPDATE_AGENT_REQUIRE_SHA256"; do
+  case "$flag" in
+    0|1|true|false|yes|no)
+      ;;
+    *)
+      echo "update-agent boolean options must be one of: 0,1,true,false,yes,no" >&2
+      exit 1
+      ;;
+  esac
+done
+
 INSTALL_SCRIPT="$SCRIPT_DIR/install_ubuntu24.sh"
 if [ ! -f "$INSTALL_SCRIPT" ]; then
   echo "install_ubuntu24.sh not found: $INSTALL_SCRIPT" >&2
@@ -275,6 +324,11 @@ set_env_value "WIFI_AP_PASSWORD" "$WIFI_AP_PASSWORD"
 set_env_value "WIFI_AP_IPV4_CIDR" "$WIFI_AP_IPV4_CIDR"
 set_env_value "WIFI_AUTO_AP_ON_BOOT" "$WIFI_AUTO_AP_ON_BOOT"
 set_env_value "WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS"
+set_env_value "UPDATE_AGENT_ENABLED" "$UPDATE_AGENT_ENABLED"
+set_env_value "UPDATE_AGENT_POLL_SECONDS" "$UPDATE_AGENT_POLL_SECONDS"
+set_env_value "UPDATE_AGENT_REQUIRE_MANIFEST" "$UPDATE_AGENT_REQUIRE_MANIFEST"
+set_env_value "UPDATE_AGENT_REQUIRE_SHA256" "$UPDATE_AGENT_REQUIRE_SHA256"
+set_env_value "UPDATE_AGENT_ALLOWED_BUNDLE_TYPES" "$UPDATE_AGENT_ALLOWED_BUNDLE_TYPES"
 
 if [ -n "$WIFI_BOOTSTRAP_AP_SSID" ]; then
   set_env_value "WIFI_BOOTSTRAP_AP_SSID" "$WIFI_BOOTSTRAP_AP_SSID"

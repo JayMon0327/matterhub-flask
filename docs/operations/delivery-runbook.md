@@ -51,6 +51,7 @@ bash device_config/setup_initial_device.sh
 - `NetworkManager` 제어 권한(polkit) 설치
 - systemd 유닛 렌더링 및 설치
 - 서비스 enable/restart
+- `matterhub-update-agent.service` 자동기동 포함
 
 reverse tunnel 설정까지 동시에 진행하려면 아래 옵션을 사용한다.
 
@@ -123,6 +124,36 @@ bash device_config/install_ubuntu24.sh \
 - 설정 파일과 운영 데이터는 복구 전 백업
 - 네트워크 변경 전 이전 프로파일 정보 보존
 
+## 6.1 업데이트 번들 적용 표준
+
+수동 적용:
+
+```bash
+cd /home/whatsmatter/Desktop/matterhub
+bash device_config/apply_update_bundle.sh \
+  --bundle /tmp/matterhub-update-1.2.3.tar.gz \
+  --project-root /home/whatsmatter/Desktop/matterhub \
+  --healthcheck-cmd "systemctl is-active matterhub-api.service matterhub-mqtt.service matterhub-rule-engine.service matterhub-notifier.service"
+```
+
+자동 적용(update-agent):
+
+```bash
+cd /home/whatsmatter/Desktop/matterhub
+mkdir -p update/inbox
+cp /tmp/matterhub-update-1.2.3.tar.gz update/inbox/
+systemctl status matterhub-update-agent.service --no-pager
+journalctl -u matterhub-update-agent.service -n 50 --no-pager
+```
+
+검증/정책 환경변수(`.env`):
+
+- `UPDATE_AGENT_REQUIRE_MANIFEST=1`
+- `UPDATE_AGENT_ALLOWED_BUNDLE_TYPES=matterhub-runtime,matterhub-update`
+- `UPDATE_AGENT_REQUIRE_SHA256=0|1`
+
+`UPDATE_AGENT_REQUIRE_SHA256=1`일 때는 `bundle.tar.gz.sha256` 파일이 필수다.
+
 ## 7. 최종 인수 기준
 
 - 부팅 후 자동 기동
@@ -138,6 +169,9 @@ bash device_config/install_ubuntu24.sh \
 현 단계 `.deb` 빌드 스크립트:
 
 - `device_config/build_matterhub_deb.sh`
+- `device_config/build_runtime_binaries.sh`
+- `device_config/build_runtime_bundle.sh`
+- `device_config/install_runtime_bundle.sh`
 
 예시:
 
@@ -156,3 +190,9 @@ bash device_config/setup_initial_device.sh \
   --harden-reverse-tunnel-only \
   --harden-local-console-pam
 ```
+
+적용 후 기대 상태:
+
+- 로컬 GUI 로그인 화면 미노출
+- 로컬 TTY 로그인 프롬프트 미노출
+- 원격 유지보수는 reverse tunnel 경로만 사용

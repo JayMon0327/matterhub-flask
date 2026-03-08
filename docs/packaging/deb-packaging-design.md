@@ -92,6 +92,9 @@
 패키지 빌드 자동화 스크립트:
 
 - `device_config/build_matterhub_deb.sh`
+- `device_config/build_runtime_binaries.sh` (`PyInstaller --onedir` 기반 서비스별 실행파일 빌드)
+- `device_config/build_runtime_bundle.sh` (실행파일 전용 runtime bundle 생성)
+- `device_config/install_runtime_bundle.sh` (라즈베리파이에 runtime bundle 설치)
 
 기본 예시:
 

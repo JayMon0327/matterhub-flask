@@ -22,6 +22,7 @@ class ServiceDefinitionsTest(unittest.TestCase):
                 "matterhub-rule-engine",
                 "matterhub-notifier",
                 "matterhub-support-tunnel",
+                "matterhub-update-agent",
             ],
             [service.service_name for service in get_service_definitions()],
         )
@@ -34,14 +35,29 @@ class ServiceDefinitionsTest(unittest.TestCase):
         enabled = [service.service_name for service in get_enabled_service_definitions()]
         self.assertIn("matterhub-api", enabled)
         self.assertIn("matterhub-mqtt", enabled)
+        self.assertIn("matterhub-update-agent", enabled)
         self.assertNotIn("matterhub-support-tunnel", enabled)
 
     def test_exec_start_uses_repo_venv_and_script(self) -> None:
-        command = build_exec_start("/srv/matterhub", "mqtt.py")
+        command = build_exec_start(
+            "/srv/matterhub",
+            "mqtt.py",
+            service_name="matterhub-mqtt",
+            runtime_mode="python",
+        )
         self.assertEqual(
             "/srv/matterhub/venv/bin/python /srv/matterhub/mqtt.py",
             command,
         )
+
+    def test_exec_start_binary_mode_points_to_runtime_executable(self) -> None:
+        command = build_exec_start(
+            "/opt/matterhub",
+            "mqtt.py",
+            service_name="matterhub-mqtt",
+            runtime_mode="binary",
+        )
+        self.assertEqual("/opt/matterhub/bin/matterhub-mqtt/matterhub-mqtt", command)
 
     def test_service_context_contains_render_placeholders(self) -> None:
         service = get_service_definitions()[0]
@@ -59,6 +75,10 @@ class ServiceDefinitionsTest(unittest.TestCase):
         support_tunnel = [s for s in get_service_definitions() if s.service_name == "matterhub-support-tunnel"][0]
         self.assertIn("StartLimitIntervalSec=0", support_tunnel.unit_directives)
         self.assertIn("StartLimitBurst=0", support_tunnel.unit_directives)
+
+    def test_update_agent_runs_as_root(self) -> None:
+        update_agent = [s for s in get_service_definitions() if s.service_name == "matterhub-update-agent"][0]
+        self.assertEqual("root", update_agent.run_user_override)
 
 
 if __name__ == "__main__":

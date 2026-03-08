@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to the systemd template file.",
     )
     parser.add_argument(
+        "--runtime-mode",
+        choices=["python", "binary"],
+        default="python",
+        help="ExecStart mode for rendered units.",
+    )
+    parser.add_argument(
         "--list-unit-names",
         action="store_true",
         help="Print the unit filenames and exit.",
@@ -55,12 +61,23 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def render_units(project_root: str, run_user: str, output_dir: Path, template_path: Path) -> None:
+def render_units(
+    project_root: str,
+    run_user: str,
+    output_dir: Path,
+    template_path: Path,
+    runtime_mode: str,
+) -> None:
     template_text = template_path.read_text(encoding="utf-8")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for service in get_service_definitions():
-        context = build_service_context(service, project_root, run_user)
+        context = build_service_context(
+            service,
+            project_root,
+            run_user,
+            runtime_mode=runtime_mode,
+        )
         rendered = render_systemd_unit(template_text, context)
         unit_path = output_dir / get_unit_name(service)
         unit_path.write_text(rendered, encoding="utf-8")
@@ -89,6 +106,7 @@ def main() -> int:
         run_user=args.run_user,
         output_dir=Path(args.output_dir),
         template_path=Path(args.template),
+        runtime_mode=args.runtime_mode,
     )
     return 0
 

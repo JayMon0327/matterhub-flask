@@ -13,6 +13,7 @@ class ServiceDefinition:
     description: str
     script_path: Path
     enabled_by_default: bool = True
+    run_user_override: str | None = None
     unit_directives: tuple[str, ...] = ()
     hardening_directives: tuple[str, ...] = ()
 
@@ -69,6 +70,13 @@ SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
         ),
         hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
     ),
+    ServiceDefinition(
+        service_name="matterhub-update-agent",
+        description="MatterHub Update Agent",
+        script_path=Path("update_agent.py"),
+        run_user_override="root",
+        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
+    ),
 )
 
 
@@ -84,26 +92,45 @@ def get_unit_name(service: ServiceDefinition) -> str:
     return f"{service.service_name}.service"
 
 
-def build_exec_start(project_root: Path | str, script_path: Path | str) -> str:
+def build_exec_start(
+    project_root: Path | str,
+    script_path: Path | str,
+    *,
+    service_name: str,
+    runtime_mode: str = "python",
+) -> str:
     project_root = Path(project_root)
-    script_path = Path(script_path)
-    python_path = project_root / DEFAULT_VENV_PYTHON
-    target_script = project_root / script_path
-    return f"{python_path} {target_script}"
+    if runtime_mode == "python":
+        script_path = Path(script_path)
+        python_path = project_root / DEFAULT_VENV_PYTHON
+        target_script = project_root / script_path
+        return f"{python_path} {target_script}"
+    if runtime_mode == "binary":
+        executable = project_root / "bin" / service_name / service_name
+        return str(executable)
+    raise ValueError(f"unsupported runtime_mode: {runtime_mode}")
 
 
 def build_service_context(
     service: ServiceDefinition,
     project_root: Path | str,
     run_user: str,
+    *,
+    runtime_mode: str = "python",
 ) -> dict[str, str]:
     project_root = Path(project_root)
+    resolved_user = service.run_user_override or run_user
     return {
         "@DESCRIPTION@": service.description,
         "@UNIT_DIRECTIVES@": "\n".join(service.unit_directives),
-        "@RUN_USER@": run_user,
+        "@RUN_USER@": resolved_user,
         "@WORKING_DIRECTORY@": str(project_root),
-        "@EXEC_START@": build_exec_start(project_root, service.script_path),
+        "@EXEC_START@": build_exec_start(
+            project_root,
+            service.script_path,
+            service_name=service.service_name,
+            runtime_mode=runtime_mode,
+        ),
         "@HARDENING_DIRECTIVES@": "\n".join(service.hardening_directives),
     }
 
