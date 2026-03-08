@@ -5,6 +5,7 @@ import json
 import requests
 import os
 from dotenv import load_dotenv
+from libs.device_binding import enforce_mac_binding
 
 # wm-app가 먼저 리소스/파일을 생성할 시간을 주기 위해 약간 지연
 time.sleep(5)
@@ -184,6 +185,9 @@ async def subscribe(r):
         print(f"Error details: {e}")
         time.sleep(5)
 if __name__ == "__main__":
+    if not enforce_mac_binding():
+        raise SystemExit(1)
+
     r = notifier()
 
     asyncio.run(subscribe(r))

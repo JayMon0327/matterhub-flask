@@ -17,12 +17,16 @@ from sub.ruleEngine import *
 from dotenv import load_dotenv, find_dotenv
 import os, sys
 
+from libs.device_binding import enforce_mac_binding
 from libs.edit import deleteItem, file_changed_request, putItem, update_env_file  # type: ignore
 from wifi_config.api import create_wifi_blueprint
 from wifi_config.bootstrap import ensure_bootstrap_ap, watch_disconnection_and_start_ap
 
 env_file = find_dotenv()
 load_dotenv()
+
+if not enforce_mac_binding():
+    raise SystemExit(1)
 
 res_file_path= os.environ.get('res_file_path')
 cert_file_path= os.environ.get('cert_file_path')

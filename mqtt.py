@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Dict, Iterable, List, Optional
 
+from libs.device_binding import enforce_mac_binding
 from mqtt_pkg import callbacks, runtime, settings, state, test_subscriber, update
 from mqtt_pkg.runtime import AWSIoTClient
 
@@ -115,6 +116,9 @@ def log_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> None:
 
 
 def main() -> None:
+    if not enforce_mac_binding():
+        raise SystemExit(1)
+
     log_matterhub_status()
     update.start_queue_worker()
 
