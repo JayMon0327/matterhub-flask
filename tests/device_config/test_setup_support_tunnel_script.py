@@ -56,6 +56,10 @@ class SetupSupportTunnelScriptTest(unittest.TestCase):
                 output,
             )
             self.assertIn(
+                "[dry-run] ssh-keyscan -p 443 support.whatsmatter.local",
+                output,
+            )
+            self.assertIn(
                 "j whatsmatter-nipa_SN-1770784749",
                 output,
             )

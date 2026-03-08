@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
@@ -62,6 +63,9 @@ class TunnelConfig:
     operator_key_path_hint: str
     reconnect_delay_seconds: int
     max_reconnect_delay_seconds: int
+    connect_timeout_seconds: int
+    preflight_tcp_check: bool
+    preflight_tcp_timeout_seconds: int
 
 
 def load_config(env: Mapping[str, str] | None = None) -> TunnelConfig:
@@ -102,6 +106,21 @@ def load_config(env: Mapping[str, str] | None = None) -> TunnelConfig:
             default=60,
             env=source,
         ),
+        connect_timeout_seconds=_env_int(
+            "SUPPORT_TUNNEL_CONNECT_TIMEOUT_SECONDS",
+            default=10,
+            env=source,
+        ),
+        preflight_tcp_check=_env_bool(
+            "SUPPORT_TUNNEL_PREFLIGHT_TCP_CHECK",
+            default=True,
+            env=source,
+        ),
+        preflight_tcp_timeout_seconds=_env_int(
+            "SUPPORT_TUNNEL_PREFLIGHT_TCP_TIMEOUT_SECONDS",
+            default=5,
+            env=source,
+        ),
     )
 
 
@@ -136,6 +155,10 @@ def validate_config(config: TunnelConfig) -> list[str]:
         errors.append(
             "SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS must be greater than or equal to SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS."
         )
+    if config.connect_timeout_seconds <= 0:
+        errors.append("SUPPORT_TUNNEL_CONNECT_TIMEOUT_SECONDS must be greater than 0.")
+    if config.preflight_tcp_timeout_seconds <= 0:
+        errors.append("SUPPORT_TUNNEL_PREFLIGHT_TCP_TIMEOUT_SECONDS must be greater than 0.")
 
     return errors
 
@@ -160,6 +183,8 @@ def build_ssh_command(config: TunnelConfig) -> list[str]:
         str(config.port),
         "-o",
         "ExitOnForwardFailure=yes",
+        "-o",
+        f"ConnectTimeout={config.connect_timeout_seconds}",
         "-o",
         f"ServerAliveInterval={config.server_alive_interval}",
         "-o",
@@ -221,11 +246,38 @@ def _default_runner(command: Sequence[str], env: Mapping[str, str] | None = None
     return int(completed.returncode)
 
 
+def _probe_tcp_connectivity(host: str, port: int, timeout_seconds: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True
+    except OSError:
+        return False
+
+
+def _validate_local_runtime_files(config: TunnelConfig) -> list[str]:
+    errors: list[str] = []
+    if config.private_key_path and not os.path.isfile(config.private_key_path):
+        errors.append(
+            f"SUPPORT_TUNNEL_PRIVATE_KEY_PATH does not exist: {config.private_key_path}"
+        )
+    if (
+        config.strict_host_key_checking
+        and config.known_hosts_path
+        and not os.path.isfile(config.known_hosts_path)
+    ):
+        errors.append(
+            "SUPPORT_TUNNEL_KNOWN_HOSTS_PATH is missing while strict host key checking is enabled: "
+            f"{config.known_hosts_path}"
+        )
+    return errors
+
+
 def execute(
     config: TunnelConfig,
     *,
     dry_run: bool = False,
     runner: Callable[[Sequence[str], Mapping[str, str] | None], int] = _default_runner,
+    tcp_probe: Callable[[str, int, int], bool] = _probe_tcp_connectivity,
     retry_forever: bool = True,
     max_attempts: int | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -235,6 +287,7 @@ def execute(
         return 0
 
     errors = validate_config(config)
+    errors.extend(_validate_local_runtime_files(config))
     if errors:
         for error in errors:
             print(f"[SUPPORT_TUNNEL][CONFIG][FAIL] {error}")
@@ -251,6 +304,16 @@ def execute(
         run_env.setdefault("AUTOSSH_GATETIME", config.autossh_gatetime)
 
     if not retry_forever:
+        if config.preflight_tcp_check and not tcp_probe(
+            config.host or "",
+            config.port,
+            config.preflight_tcp_timeout_seconds,
+        ):
+            print(
+                "[SUPPORT_TUNNEL][PREFLIGHT][FAIL] "
+                f"tcp_connect host={config.host} port={config.port} timeout={config.preflight_tcp_timeout_seconds}s"
+            )
+            return 3
         print("[SUPPORT_TUNNEL] starting reverse SSH tunnel")
         return_code = runner(command, run_env)
         if return_code == 0:
@@ -263,6 +326,21 @@ def execute(
     delay_seconds = config.reconnect_delay_seconds
     while True:
         attempt += 1
+        if config.preflight_tcp_check and not tcp_probe(
+            config.host or "",
+            config.port,
+            config.preflight_tcp_timeout_seconds,
+        ):
+            print(
+                "[SUPPORT_TUNNEL][PREFLIGHT][WARN] "
+                f"tcp_connect failed host={config.host} port={config.port} timeout={config.preflight_tcp_timeout_seconds}s"
+            )
+            if max_attempts is not None and attempt >= max_attempts:
+                return 3
+            print(f"[SUPPORT_TUNNEL] reconnecting in {delay_seconds}s")
+            sleep_fn(delay_seconds)
+            delay_seconds = min(delay_seconds * 2, config.max_reconnect_delay_seconds)
+            continue
         print(f"[SUPPORT_TUNNEL] starting reverse SSH tunnel (attempt={attempt})")
         return_code = runner(command, run_env)
         if return_code == 0:

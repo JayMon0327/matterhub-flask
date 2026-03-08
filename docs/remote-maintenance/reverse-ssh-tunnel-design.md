@@ -141,8 +141,16 @@ reverse tunnel 실행기는 `.env` 또는 systemd `EnvironmentFile` 기준으로
 - `SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX=3`
 - `SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS=5` (인터넷 복구 대기 기본)
 - `SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS=60` (재시도 백오프 상한)
+- `SUPPORT_TUNNEL_CONNECT_TIMEOUT_SECONDS=10` (SSH ConnectTimeout)
+- `SUPPORT_TUNNEL_PREFLIGHT_TCP_CHECK=1` (실행 전 relay TCP 도달성 확인)
+- `SUPPORT_TUNNEL_PREFLIGHT_TCP_TIMEOUT_SECONDS=5` (TCP preflight 타임아웃)
 - `SUPPORT_TUNNEL_SSH_EXTRA_OPTS="<추가 SSH 옵션>"`
 - `SUPPORT_TUNNEL_AUTOSSH_GATETIME=0`
+
+추가 동작:
+
+- 실행 전에 `SUPPORT_TUNNEL_PRIVATE_KEY_PATH`, `SUPPORT_TUNNEL_KNOWN_HOSTS_PATH`(strict mode 시) 존재 여부를 검사한다.
+- preflight TCP 검사 실패 시 즉시 SSH를 실행하지 않고 재시도 루프로 대기한다.
 
 ## 13. 운영 명령
 

@@ -8,9 +8,9 @@ GDM_PASSWORD_PAM_PATH="${GDM_PASSWORD_PAM_PATH:-/etc/pam.d/gdm-password}"
 GDM_AUTOLOGIN_PAM_PATH="${GDM_AUTOLOGIN_PAM_PATH:-/etc/pam.d/gdm-autologin}"
 ACCESS_CONF_PATH="${ACCESS_CONF_PATH:-/etc/security/access.conf}"
 GDM_CUSTOM_CONF_PATH="${GDM_CUSTOM_CONF_PATH:-/etc/gdm3/custom.conf}"
-LOCK_SCOPE="tty-only"
-GDM_AUTOLOGIN_MODE="enable"
+GDM_AUTOLOGIN_MODE="disable"
 GDM_AUTOLOGIN_USER="${RUN_USER}"
+APPLY_SYSTEMD_UI_LOCKDOWN=1
 DRY_RUN=0
 
 MARKER_BEGIN="# MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN"
@@ -42,10 +42,10 @@ usage() {
   cat <<'EOF'
 Usage: ./device_config/harden_local_console_pam.sh [options]
 
-Apply local-console access policy for runtime account.
+Apply local-console access policy for runtime account with physical UI lockdown.
 
 Options:
-  --run-user <user>       Runtime user denied on local console (default: current user)
+  --run-user <user>       Runtime user name for logs/config rendering (default: current user)
   --pam-login-path <path> PAM login file (default: /etc/pam.d/login)
   --gdm-password-pam <path>
                          GDM password PAM file (default: /etc/pam.d/gdm-password)
@@ -54,6 +54,8 @@ Options:
   --access-conf <path>    access.conf path (default: /etc/security/access.conf)
   --gdm-custom-conf <path>
                          GDM custom.conf path (default: /etc/gdm3/custom.conf)
+  --skip-systemd-ui-lockdown
+                         Keep display manager/getty units unchanged (not recommended).
   --dry-run               Show planned actions only
   -h, --help              Show help
 EOF
@@ -84,6 +86,10 @@ while [ "$#" -gt 0 ]; do
     --gdm-custom-conf)
       GDM_CUSTOM_CONF_PATH="$2"
       shift 2
+      ;;
+    --skip-systemd-ui-lockdown)
+      APPLY_SYSTEMD_UI_LOCKDOWN=0
+      shift
       ;;
     --dry-run)
       DRY_RUN=1
@@ -248,15 +254,11 @@ render_gdm_custom_conf() {
 }
 
 ensure_pam_access_line "$PAM_LOGIN_PATH" "$LOGIN_TMP"
-if [ "$LOCK_SCOPE" = "all" ]; then
-  if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
-    ensure_pam_access_line "$GDM_PASSWORD_PAM_PATH" "$GDM_PASSWORD_TMP"
-  fi
-  if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
-    ensure_pam_access_line "$GDM_AUTOLOGIN_PAM_PATH" "$GDM_AUTOLOGIN_TMP"
-  fi
-else
-  log "lock-scope=tty-only, skipping GDM PAM lock files"
+if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
+  ensure_pam_access_line "$GDM_PASSWORD_PAM_PATH" "$GDM_PASSWORD_TMP"
+fi
+if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
+  ensure_pam_access_line "$GDM_AUTOLOGIN_PAM_PATH" "$GDM_AUTOLOGIN_TMP"
 fi
 
 if [ -f "$ACCESS_CONF_PATH" ]; then
@@ -273,7 +275,7 @@ fi
   echo ""
   echo "$MARKER_BEGIN"
   echo "+:root:LOCAL"
-  echo "-:${RUN_USER}:LOCAL"
+  echo "-:ALL EXCEPT root:LOCAL"
   echo "$MARKER_END"
 } >> "$ACCESS_TMP"
 
@@ -283,11 +285,11 @@ fi
 
 log "installing PAM login policy: ${PAM_LOGIN_PATH}"
 sudo_cmd install -m 0644 "$LOGIN_TMP" "$PAM_LOGIN_PATH"
-if [ "$LOCK_SCOPE" = "all" ] && [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
+if [ -f "$GDM_PASSWORD_PAM_PATH" ]; then
   log "installing GDM password PAM policy: ${GDM_PASSWORD_PAM_PATH}"
   sudo_cmd install -m 0644 "$GDM_PASSWORD_TMP" "$GDM_PASSWORD_PAM_PATH"
 fi
-if [ "$LOCK_SCOPE" = "all" ] && [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
+if [ -f "$GDM_AUTOLOGIN_PAM_PATH" ]; then
   log "installing GDM autologin PAM policy: ${GDM_AUTOLOGIN_PAM_PATH}"
   sudo_cmd install -m 0644 "$GDM_AUTOLOGIN_TMP" "$GDM_AUTOLOGIN_PAM_PATH"
 fi
@@ -297,6 +299,24 @@ sudo_cmd install -m 0644 "$ACCESS_TMP" "$ACCESS_CONF_PATH"
 if [ "$GDM_AUTOLOGIN_MODE" != "keep" ]; then
   log "installing GDM custom policy: ${GDM_CUSTOM_CONF_PATH}"
   sudo_cmd install -m 0644 "$GDM_CUSTOM_TMP" "$GDM_CUSTOM_CONF_PATH"
+fi
+
+run_soft_fail() {
+  if ! sudo_cmd "$@"; then
+    log "command failed (ignored): $*"
+  fi
+}
+
+if [ "$APPLY_SYSTEMD_UI_LOCKDOWN" -eq 1 ]; then
+  for dm_unit in gdm3.service gdm.service lightdm.service sddm.service; do
+    run_soft_fail systemctl disable --now "$dm_unit"
+    run_soft_fail systemctl mask "$dm_unit"
+  done
+  for tty in 1 2 3 4 5 6; do
+    run_soft_fail systemctl mask "getty@tty${tty}.service"
+  done
+  run_soft_fail systemctl mask serial-getty@ttyAMA0.service
+  run_soft_fail systemctl set-default multi-user.target
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then

@@ -90,16 +90,23 @@ bash device_config/harden_local_console_pam.sh --run-user whatsmatter
 적용 내용:
 
 - `/etc/pam.d/login` 에 `pam_access.so` 활성화
-- `/etc/pam.d/gdm-password`, `/etc/pam.d/gdm-autologin` 은 수정하지 않음 (`tty-only` 고정)
+- `/etc/pam.d/gdm-password`, `/etc/pam.d/gdm-autologin` 에도 `pam_access.so` 활성화
 - `/etc/security/access.conf` 에 아래 정책 추가
   - `+:root:LOCAL`
-  - `-:whatsmatter:LOCAL`
-- GDM 자동로그인 활성화 (`AutomaticLoginEnable=true`, `AutomaticLogin=<run-user>`)
+  - `-:ALL EXCEPT root:LOCAL`
+- GDM 자동로그인 비활성화 (`AutomaticLoginEnable=false`)
+- 로컬 UI/콘솔 노출 차단(systemd):
+  - display manager(`gdm3/gdm/lightdm/sddm`) disable+mask
+  - `getty@tty1..6`, `serial-getty@ttyAMA0` mask
+  - 기본 target `multi-user.target`
 
 주의:
 
-- 이 정책은 가용성 우선이다. 모니터/키보드 물리 접근자가 GUI 세션을 바로 사용할 수 있다.
-- 대신 직접 SSH는 이미 차단되어 있으므로, 네트워크 원격 접근면은 reverse tunnel 경로로 제한된다.
+- 이 정책 적용 후 모니터/키보드/마우스를 연결해도 로컬 로그인 UI/TTY가 노출되지 않는다.
+- 장비 유지보수는 reverse tunnel 경로를 먼저 확보한 뒤 적용해야 한다.
+- 로그인 전 터널 미동작 이슈 점검은 상위 기획서의
+  `16.4 로그인 전 tunnel 실패 대응 표준` 절을 따른다.
+  - [라즈베리파이 납품용 패키징 및 운영 기획서](../raspberry-pi-delivery-plan.md)
 
 통합 설치에서 같이 적용:
 

@@ -24,8 +24,8 @@ def _valid_config(**overrides: object) -> TunnelConfig:
         "remote_port": 2222,
         "local_port": 22,
         "remote_bind_address": "127.0.0.1",
-        "private_key_path": "/etc/matterhub/support_tunnel_ed25519",
-        "known_hosts_path": "/etc/matterhub/support_known_hosts",
+        "private_key_path": None,
+        "known_hosts_path": None,
         "strict_host_key_checking": True,
         "server_alive_interval": 30,
         "server_alive_count_max": 3,
@@ -35,6 +35,9 @@ def _valid_config(**overrides: object) -> TunnelConfig:
         "operator_key_path_hint": "<relay-operator-key.pem>",
         "reconnect_delay_seconds": 5,
         "max_reconnect_delay_seconds": 60,
+        "connect_timeout_seconds": 10,
+        "preflight_tcp_check": True,
+        "preflight_tcp_timeout_seconds": 5,
     }
     data.update(overrides)
     return TunnelConfig(**data)
@@ -81,6 +84,9 @@ class SupportTunnelConfigTest(unittest.TestCase):
         self.assertEqual("/keys/relay.pem", config.operator_key_path_hint)
         self.assertEqual(7, config.reconnect_delay_seconds)
         self.assertEqual(30, config.max_reconnect_delay_seconds)
+        self.assertEqual(10, config.connect_timeout_seconds)
+        self.assertTrue(config.preflight_tcp_check)
+        self.assertEqual(5, config.preflight_tcp_timeout_seconds)
 
     def test_validate_config_reports_missing_required_fields(self) -> None:
         config = _valid_config(user=None, host=None, remote_port=None)
@@ -100,6 +106,7 @@ class SupportTunnelConfigTest(unittest.TestCase):
         self.assertIn("-R", command)
         self.assertIn("127.0.0.1:2222:localhost:22", command)
         self.assertIn("maint@support.example.com", command)
+        self.assertIn("ConnectTimeout=10", command)
 
     def test_build_operator_connect_command_uses_proxycommand(self) -> None:
         config = _valid_config()
@@ -149,7 +156,12 @@ class SupportTunnelExecuteTest(unittest.TestCase):
 
         config = _valid_config(command="autossh", autossh_gatetime="10")
 
-        return_code = execute(config, runner=fake_runner, retry_forever=False)
+        return_code = execute(
+            config,
+            runner=fake_runner,
+            retry_forever=False,
+            tcp_probe=lambda _host, _port, _timeout: True,
+        )
 
         self.assertEqual(0, return_code)
         self.assertEqual("10", captured_env.get("AUTOSSH_GATETIME"))
@@ -175,11 +187,35 @@ class SupportTunnelExecuteTest(unittest.TestCase):
             retry_forever=True,
             max_attempts=3,
             sleep_fn=fake_sleep,
+            tcp_probe=lambda _host, _port, _timeout: True,
         )
 
         self.assertEqual(255, return_code)
         self.assertEqual(3, call_count)
         self.assertEqual([2, 4], sleep_calls)
+
+    def test_execute_fails_when_private_key_path_missing(self) -> None:
+        config = _valid_config(private_key_path="/no/such/key")
+        runner = Mock()
+
+        return_code = execute(config, runner=runner, retry_forever=False)
+
+        self.assertEqual(2, return_code)
+        runner.assert_not_called()
+
+    def test_execute_returns_three_when_tcp_preflight_fails(self) -> None:
+        config = _valid_config()
+        runner = Mock()
+
+        return_code = execute(
+            config,
+            runner=runner,
+            retry_forever=False,
+            tcp_probe=lambda _host, _port, _timeout: False,
+        )
+
+        self.assertEqual(3, return_code)
+        runner.assert_not_called()
 
 
 if __name__ == "__main__":

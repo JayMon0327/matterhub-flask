@@ -250,6 +250,7 @@ log "project_root=$PROJECT_ROOT"
 log "env_file=$ENV_FILE"
 log "support_host=$SUPPORT_TUNNEL_HOST support_user=$SUPPORT_TUNNEL_USER remote_port=$SUPPORT_TUNNEL_REMOTE_PORT"
 log "key_path=$SUPPORT_TUNNEL_PRIVATE_KEY_PATH"
+log "known_hosts_path=$SUPPORT_TUNNEL_KNOWN_HOSTS_PATH"
 
 run_cmd mkdir -p "$KEY_DIR"
 if [ ! -f "$SUPPORT_TUNNEL_PRIVATE_KEY_PATH" ]; then
@@ -263,6 +264,39 @@ if [ "$DRY_RUN" -eq 0 ]; then
   chmod 600 "$SUPPORT_TUNNEL_PRIVATE_KEY_PATH"
   if [ -f "$PUB_KEY_PATH" ]; then
     chmod 644 "$PUB_KEY_PATH"
+  fi
+fi
+
+KNOWN_HOSTS_DIR="$(dirname "$SUPPORT_TUNNEL_KNOWN_HOSTS_PATH")"
+run_cmd mkdir -p "$KNOWN_HOSTS_DIR"
+if [ "$DRY_RUN" -eq 0 ]; then
+  touch "$SUPPORT_TUNNEL_KNOWN_HOSTS_PATH"
+  chmod 600 "$SUPPORT_TUNNEL_KNOWN_HOSTS_PATH"
+fi
+
+if [ "$SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING" = "1" ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    print_command "[dry-run]" ssh-keyscan -p "$SUPPORT_TUNNEL_PORT" "$SUPPORT_TUNNEL_HOST"
+    log "known_hosts entry will be ensured when not in dry-run mode"
+  else
+    if command -v ssh-keyscan >/dev/null 2>&1; then
+      SCAN_OUTPUT="$(ssh-keyscan -p "$SUPPORT_TUNNEL_PORT" "$SUPPORT_TUNNEL_HOST" 2>/dev/null || true)"
+      if [ -n "$SCAN_OUTPUT" ]; then
+        while IFS= read -r host_key_line; do
+          [ -z "$host_key_line" ] && continue
+          if ! grep -Fqx "$host_key_line" "$SUPPORT_TUNNEL_KNOWN_HOSTS_PATH"; then
+            printf '%s\n' "$host_key_line" >> "$SUPPORT_TUNNEL_KNOWN_HOSTS_PATH"
+          fi
+        done <<EOF
+$SCAN_OUTPUT
+EOF
+        log "known_hosts entry ensured for ${SUPPORT_TUNNEL_HOST}:${SUPPORT_TUNNEL_PORT}"
+      else
+        log "warning: ssh-keyscan returned no host key for ${SUPPORT_TUNNEL_HOST}:${SUPPORT_TUNNEL_PORT}"
+      fi
+    else
+      log "warning: ssh-keyscan not found; strict host key checking may fail until known_hosts is populated"
+    fi
   fi
 fi
 

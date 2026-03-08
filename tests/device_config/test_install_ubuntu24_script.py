@@ -120,8 +120,8 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         self.assertIn("로컬 콘솔 로그인 제한(PAM) 실행", output)
         self.assertIn("harden_local_console_pam.sh", output)
         self.assertIn("--run-user", output)
-        self.assertIn("--lock-scope tty-only", output)
-        self.assertIn("--enable-gdm-autologin", output)
+        self.assertNotIn("--lock-scope", output)
+        self.assertNotIn("--enable-gdm-autologin", output)
         self.assertIn("--dry-run", output)
 
 

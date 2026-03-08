@@ -65,9 +65,10 @@ class HardenLocalConsolePamScriptTest(unittest.TestCase):
             output = result.stdout
             self.assertIn("uncommented pam_access", output)
             self.assertIn("MATTERHUB_LOCAL_CONSOLE_LOCK_BEGIN", output)
-            self.assertIn("-:whatsmatter:LOCAL", output)
-            self.assertIn("lock-scope=tty-only", output)
-            self.assertIn("AutomaticLoginEnable=true", output)
+            self.assertIn("-:ALL EXCEPT root:LOCAL", output)
+            self.assertIn("AutomaticLoginEnable=false", output)
+            self.assertIn("systemctl mask getty@tty1.service", output)
+            self.assertIn("systemctl set-default multi-user.target", output)
 
 if __name__ == "__main__":
     unittest.main()

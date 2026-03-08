@@ -81,7 +81,7 @@ Options:
   --harden-allow-inbound-port
                       Keep inbound TCP port open under UFW policy (repeatable).
   --harden-local-console-pam
-                      Apply PAM policy to block local-console login for runtime account.
+                      Apply local-console hardening (PAM + disable local UI/TTY exposure).
 
 Environment variables:
   RUN_USER     systemd service user (default: current shell user)
@@ -227,8 +227,8 @@ if [ "$HARDEN_REVERSE_TUNNEL_ONLY" -eq 1 ]; then
 fi
 
 if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
-  log "로컬 콘솔 로그인 제한(PAM): 적용 예정"
-  log "고정 정책: lock-scope=tty-only + gdm autologin enabled(user=$RUN_USER)"
+  log "로컬 콘솔 접근 제한(PAM/systemd): 적용 예정"
+  log "고정 정책: local UI/TTY 비노출 + root 제외 LOCAL 로그인 차단"
 fi
 
 if [ "$SKIP_OS_PACKAGES" -eq 0 ]; then
@@ -383,9 +383,6 @@ if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
   pam_harden_cmd=(
     bash "$PAM_HARDEN_SCRIPT"
     --run-user "$RUN_USER"
-    --lock-scope tty-only
-    --enable-gdm-autologin
-    --gdm-autologin-user "$RUN_USER"
   )
   if [ "$DRY_RUN" -eq 1 ]; then
     pam_harden_cmd+=(--dry-run)
