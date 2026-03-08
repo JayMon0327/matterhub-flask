@@ -10,6 +10,8 @@ except ModuleNotFoundError:  # pragma: no cover - local env optional dependency
     Flask = None
     create_wifi_blueprint = None
 
+from wifi_config.state import ProvisionStateStore
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,8 +64,9 @@ class StubWifiService:
 class WifiApiBlueprintTest(unittest.TestCase):
     def setUp(self) -> None:
         self.service = StubWifiService()
+        self.state_store = ProvisionStateStore()
         app = Flask(__name__, template_folder=str(PROJECT_ROOT / "templates"))
-        app.register_blueprint(create_wifi_blueprint(self.service))
+        app.register_blueprint(create_wifi_blueprint(self.service, state_store=self.state_store))
         self.client = app.test_client()
 
     def test_status_endpoint_returns_ok_payload(self) -> None:
@@ -73,6 +76,7 @@ class WifiApiBlueprintTest(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertTrue(body["ok"])
         self.assertEqual("connected", body["data"]["general_state"])
+        self.assertEqual("BOOTING", body["data"]["provision_state"]["state"])
 
     def test_connect_endpoint_requires_ssid(self) -> None:
         response = self.client.post("/local/admin/network/wifi/connect", json={})
@@ -93,6 +97,37 @@ class WifiApiBlueprintTest(unittest.TestCase):
         self.assertEqual(502, response.status_code)
         self.assertFalse(body["ok"])
         self.assertEqual("BadWifi", body["data"]["target_ssid"])
+        snapshot = self.state_store.snapshot()
+        self.assertEqual("STA_FAILED", snapshot["state"])
+        self.assertEqual("user_submit_wifi_failed", snapshot["reason"])
+
+    def test_connect_endpoint_sets_sta_connected_on_success(self) -> None:
+        response = self.client.post(
+            "/local/admin/network/wifi/connect",
+            json={"ssid": "OfficeWifi", "password": "goodpass"},
+        )
+        body = response.get_json()
+
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(body["ok"])
+        snapshot = self.state_store.snapshot()
+        self.assertEqual("STA_CONNECTED", snapshot["state"])
+        self.assertEqual("user_submit_wifi_success", snapshot["reason"])
+
+    def test_connect_endpoint_sets_ap_mode_when_fallback_started(self) -> None:
+        self.service.connect_result["success"] = False
+        self.service.connect_result["ap_mode_started"] = True
+        response = self.client.post(
+            "/local/admin/network/wifi/connect",
+            json={"ssid": "NoSignalWifi", "password": "badpass"},
+        )
+        body = response.get_json()
+
+        self.assertEqual(502, response.status_code)
+        self.assertFalse(body["ok"])
+        snapshot = self.state_store.snapshot()
+        self.assertEqual("AP_MODE", snapshot["state"])
+        self.assertEqual("ap_fallback_started_after_connect_failure", snapshot["reason"])
 
     def test_delete_saved_connection_invokes_service(self) -> None:
         response = self.client.delete("/local/admin/network/wifi/saved/OfficeWifi")

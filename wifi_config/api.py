@@ -6,6 +6,7 @@ from typing import Any, Optional
 from flask import Blueprint, jsonify, render_template, request
 
 from .service import NmcliCommandError, WifiConfigService
+from .state import ProvisionStateStore, get_provision_state_store
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -32,7 +33,10 @@ def _parse_timeout(value: Any, default: int = 60) -> int:
     return max(10, min(timeout, 180))
 
 
-def create_wifi_blueprint(service: Optional[WifiConfigService] = None) -> Blueprint:
+def create_wifi_blueprint(
+    service: Optional[WifiConfigService] = None,
+    state_store: Optional[ProvisionStateStore] = None,
+) -> Blueprint:
     wifi_service = service or WifiConfigService(
         interface=os.environ.get("WIFI_INTERFACE", "wlan0"),
         default_health_host=os.environ.get("WIFI_HEALTH_HOST", "8.8.8.8"),
@@ -40,6 +44,7 @@ def create_wifi_blueprint(service: Optional[WifiConfigService] = None) -> Bluepr
         ap_password=os.environ.get("WIFI_AP_PASSWORD", "matterhub1234"),
         ap_ipv4_cidr=os.environ.get("WIFI_AP_IPV4_CIDR", "10.42.0.1/24"),
     )
+    provision_state = state_store or get_provision_state_store()
     wifi_bp = Blueprint("wifi_admin", __name__)
 
     @wifi_bp.get("/local/admin/network")
@@ -49,7 +54,9 @@ def create_wifi_blueprint(service: Optional[WifiConfigService] = None) -> Bluepr
     @wifi_bp.get("/local/admin/network/status")
     def network_status():
         try:
-            return jsonify({"ok": True, "data": wifi_service.get_status()})
+            data = wifi_service.get_status()
+            data["provision_state"] = provision_state.snapshot()
+            return jsonify({"ok": True, "data": data})
         except NmcliCommandError as exc:
             return jsonify({"ok": False, "error": exc.to_dict()}), 500
         except Exception as exc:
@@ -77,6 +84,11 @@ def create_wifi_blueprint(service: Optional[WifiConfigService] = None) -> Bluepr
             password = str(password).strip() or None
 
         try:
+            provision_state.set_state(
+                "STA_CONNECTING",
+                reason="user_submit_wifi",
+                details={"target_ssid": ssid},
+            )
             result = wifi_service.connect_wifi(
                 ssid=ssid,
                 password=password,
@@ -86,13 +98,41 @@ def create_wifi_blueprint(service: Optional[WifiConfigService] = None) -> Bluepr
                 rollback_on_failure=_as_bool(payload.get("rollback_on_failure"), True),
                 ap_mode_on_failure=_as_bool(payload.get("ap_mode_on_failure"), True),
             )
+            if result.get("success"):
+                provision_state.set_state(
+                    "STA_CONNECTED",
+                    reason="user_submit_wifi_success",
+                    details={"target_ssid": ssid},
+                )
+            else:
+                provision_state.set_state(
+                    "STA_FAILED",
+                    reason="user_submit_wifi_failed",
+                    details={"target_ssid": ssid},
+                )
+                if result.get("ap_mode_started"):
+                    provision_state.set_state(
+                        "AP_MODE",
+                        reason="ap_fallback_started_after_connect_failure",
+                        details={"target_ssid": ssid},
+                    )
             status_code = 200 if result.get("success") else 502
             return jsonify({"ok": bool(result.get("success")), "data": result}), status_code
         except ValueError as exc:
             return jsonify({"ok": False, "error": {"message": str(exc)}}), 400
         except NmcliCommandError as exc:
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="nmcli_error_during_connect",
+                details={"target_ssid": ssid, "return_code": exc.return_code},
+            )
             return jsonify({"ok": False, "error": exc.to_dict()}), 500
         except Exception as exc:
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="unexpected_error_during_connect",
+                details={"target_ssid": ssid},
+            )
             return jsonify({"ok": False, "error": {"message": str(exc)}}), 500
 
     @wifi_bp.get("/local/admin/network/wifi/saved")
@@ -123,13 +163,32 @@ def create_wifi_blueprint(service: Optional[WifiConfigService] = None) -> Bluepr
         ssid = str(payload.get("ssid", "")).strip() or None
         password = str(payload.get("password", "")).strip() or None
         try:
+            provision_state.set_state(
+                "AP_STARTING",
+                reason="manual_recovery_request",
+                details={"requested_ssid": ssid or ""},
+            )
             result = wifi_service.start_ap_mode(ssid=ssid, password=password)
+            provision_state.set_state(
+                "AP_MODE",
+                reason="manual_recovery_started",
+                details={"ssid": str(result.get("ssid") or "")},
+            )
             return jsonify({"ok": True, "data": result})
         except ValueError as exc:
             return jsonify({"ok": False, "error": {"message": str(exc)}}), 400
         except NmcliCommandError as exc:
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="nmcli_error_during_ap_recovery",
+                details={"return_code": exc.return_code},
+            )
             return jsonify({"ok": False, "error": exc.to_dict()}), 500
         except Exception as exc:
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="unexpected_error_during_ap_recovery",
+            )
             return jsonify({"ok": False, "error": {"message": str(exc)}}), 500
 
     return wifi_bp

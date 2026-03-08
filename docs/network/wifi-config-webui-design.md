@@ -42,6 +42,19 @@
 
 실제 path는 구현 시 기존 API 네이밍과 함께 재검토할 수 있다. 단, 변경 시에는 먼저 사용자에게 제안한다.
 
+`GET /local/admin/network/status`는 Wi-Fi 상태와 함께 provisioning 상태머신 정보를 포함한다.
+
+- `provision_state.state`
+  - `BOOTING`
+  - `STA_CONNECTING`
+  - `STA_CONNECTED`
+  - `STA_FAILED`
+  - `AP_STARTING`
+  - `AP_MODE`
+- `provision_state.reason`
+- `provision_state.details`
+- `provision_state.updated_at` (epoch seconds)
+
 ## 6. 내부 서비스 분리 방향
 
 향후 도메인 구조 예시:

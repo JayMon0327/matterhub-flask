@@ -5,6 +5,7 @@ import time
 from typing import Any, Callable, Optional
 
 from .service import WifiConfigService
+from .state import ProvisionStateStore, get_provision_state_store
 
 
 Logger = Callable[[str], None]
@@ -93,6 +94,7 @@ def _pick_known_network_candidate(
 
 def ensure_bootstrap_ap(
     service: Optional[WifiConfigService] = None,
+    state_store: Optional[ProvisionStateStore] = None,
     *,
     logger: Logger = print,
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -103,6 +105,8 @@ def ensure_bootstrap_ap(
         return {"enabled": False, "started": False, "reason": "disabled"}
 
     wifi_service = service or _create_wifi_service()
+    provision_state = state_store or get_provision_state_store()
+    provision_state.set_state("BOOTING", reason="bootstrap_begin")
 
     startup_grace_seconds = _as_int(
         os.environ.get("WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS"),
@@ -136,6 +140,11 @@ def ensure_bootstrap_ap(
             logger(
                 f"[WIFI][BOOTSTRAP] skip AP mode: connected ssid={current_ssid} state={general_state}"
             )
+            provision_state.set_state(
+                "STA_CONNECTED",
+                reason="bootstrap_detected_connected",
+                details={"current_ssid": current_ssid},
+            )
             return {
                 "enabled": True,
                 "started": False,
@@ -157,11 +166,21 @@ def ensure_bootstrap_ap(
     if candidate:
         profile_name = candidate["profile_name"]
         try:
+            provision_state.set_state(
+                "STA_CONNECTING",
+                reason="bootstrap_known_network_reconnect",
+                details={"profile_name": profile_name},
+            )
             reconnect_result = wifi_service.activate_saved_connection(
                 profile_name,
                 timeout_seconds=20,
             )
             if reconnect_result.get("success"):
+                provision_state.set_state(
+                    "STA_CONNECTED",
+                    reason="bootstrap_known_network_reconnect_success",
+                    details={"profile_name": profile_name},
+                )
                 logger(
                     "[WIFI][BOOTSTRAP] known network reconnect success "
                     f"profile={profile_name} ssid={reconnect_result.get('current_ssid')}"
@@ -177,17 +196,37 @@ def ensure_bootstrap_ap(
                 "[WIFI][BOOTSTRAP] known network reconnect failed "
                 f"profile={profile_name}"
             )
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="bootstrap_known_network_reconnect_failed",
+                details={"profile_name": profile_name},
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger(
                 "[WIFI][BOOTSTRAP] known network reconnect error "
                 f"profile={profile_name} {type(exc).__name__}: {exc}"
+            )
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="bootstrap_known_network_reconnect_error",
+                details={"profile_name": profile_name},
             )
 
     ssid = (os.environ.get("WIFI_BOOTSTRAP_AP_SSID") or "").strip() or None
     password = (os.environ.get("WIFI_BOOTSTRAP_AP_PASSWORD") or "").strip() or None
 
     try:
+        provision_state.set_state(
+            "AP_STARTING",
+            reason="bootstrap_start_ap",
+            details={"requested_ssid": ssid or ""},
+        )
         ap_result = wifi_service.start_ap_mode(ssid=ssid, password=password)
+        provision_state.set_state(
+            "AP_MODE",
+            reason="bootstrap_ap_started",
+            details={"ssid": str(ap_result.get("ssid") or "")},
+        )
         logger(
             f"[WIFI][BOOTSTRAP] AP mode started ssid={ap_result.get('ssid')} interface={ap_result.get('interface')}"
         )
@@ -200,6 +239,11 @@ def ensure_bootstrap_ap(
         }
     except Exception as exc:
         logger(f"[WIFI][BOOTSTRAP] failed to start AP mode: {type(exc).__name__}: {exc}")
+        provision_state.set_state(
+            "STA_FAILED",
+            reason="bootstrap_ap_start_failed",
+            details={"error": type(exc).__name__},
+        )
         return {
             "enabled": True,
             "started": False,
@@ -211,6 +255,7 @@ def ensure_bootstrap_ap(
 
 def watch_disconnection_and_start_ap(
     service: Optional[WifiConfigService] = None,
+    state_store: Optional[ProvisionStateStore] = None,
     *,
     logger: Logger = print,
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -252,6 +297,7 @@ def watch_disconnection_and_start_ap(
     )
 
     wifi_service = service or _create_wifi_service()
+    provision_state = state_store or get_provision_state_store()
     bootstrap_ap_ssid = (os.environ.get("WIFI_BOOTSTRAP_AP_SSID") or "").strip() or None
     bootstrap_ap_password = (os.environ.get("WIFI_BOOTSTRAP_AP_PASSWORD") or "").strip() or None
     configured_ap_ssid = bootstrap_ap_ssid or wifi_service.default_ap_ssid
@@ -290,6 +336,18 @@ def watch_disconnection_and_start_ap(
 
         if is_connected or is_ap_active:
             disconnected_since = None
+            if is_ap_active:
+                provision_state.set_state(
+                    "AP_MODE",
+                    reason="watchdog_ap_active",
+                    details={"ssid": current_ssid or active_name},
+                )
+            else:
+                provision_state.set_state(
+                    "STA_CONNECTED",
+                    reason="watchdog_sta_connected",
+                    details={"ssid": current_ssid or active_name},
+                )
             if is_ap_active and auto_reconnect_enabled:
                 now = monotonic_fn()
                 if now >= next_auto_reconnect_check_at:
@@ -306,25 +364,45 @@ def watch_disconnection_and_start_ap(
                             f"profile={profile_name} ssid={candidate.get('ssid')}"
                         )
                         try:
+                            provision_state.set_state(
+                                "STA_CONNECTING",
+                                reason="watchdog_ap_active_known_network_reconnect",
+                                details={"profile_name": profile_name},
+                            )
                             reconnect_result = wifi_service.activate_saved_connection(
                                 profile_name,
                                 timeout_seconds=auto_reconnect_timeout,
                             )
                             if reconnect_result.get("success"):
+                                provision_state.set_state(
+                                    "STA_CONNECTED",
+                                    reason="watchdog_ap_active_reconnect_success",
+                                    details={"profile_name": profile_name},
+                                )
                                 logger(
                                     "[WIFI][WATCHDOG] auto reconnect success "
                                     f"profile={profile_name} ssid={reconnect_result.get('current_ssid')}"
                                 )
                             else:
+                                provision_state.set_state(
+                                    "STA_FAILED",
+                                    reason="watchdog_ap_active_reconnect_failed",
+                                    details={"profile_name": profile_name},
+                                )
                                 logger(
                                     "[WIFI][WATCHDOG] auto reconnect failed "
                                     f"profile={profile_name}"
                                 )
                         except Exception as exc:
+                            provision_state.set_state(
+                                "STA_FAILED",
+                                reason="watchdog_ap_active_reconnect_error",
+                                details={"profile_name": profile_name},
+                            )
                             logger(
-                                    "[WIFI][WATCHDOG] auto reconnect error "
-                                    f"profile={profile_name} {type(exc).__name__}: {exc}"
-                                )
+                                "[WIFI][WATCHDOG] auto reconnect error "
+                                f"profile={profile_name} {type(exc).__name__}: {exc}"
+                            )
             sleep_fn(check_interval)
             continue
 
@@ -344,11 +422,21 @@ def watch_disconnection_and_start_ap(
                         f"profile={profile_name} ssid={candidate.get('ssid')}"
                     )
                     try:
+                        provision_state.set_state(
+                            "STA_CONNECTING",
+                            reason="watchdog_disconnected_known_network_reconnect",
+                            details={"profile_name": profile_name},
+                        )
                         reconnect_result = wifi_service.activate_saved_connection(
                             profile_name,
                             timeout_seconds=auto_reconnect_timeout,
                         )
                         if reconnect_result.get("success"):
+                            provision_state.set_state(
+                                "STA_CONNECTED",
+                                reason="watchdog_disconnected_reconnect_success",
+                                details={"profile_name": profile_name},
+                            )
                             logger(
                                 "[WIFI][WATCHDOG] reconnect success while disconnected "
                                 f"profile={profile_name} ssid={reconnect_result.get('current_ssid')}"
@@ -360,7 +448,17 @@ def watch_disconnection_and_start_ap(
                             "[WIFI][WATCHDOG] reconnect failed while disconnected "
                             f"profile={profile_name}"
                         )
+                        provision_state.set_state(
+                            "STA_FAILED",
+                            reason="watchdog_disconnected_reconnect_failed",
+                            details={"profile_name": profile_name},
+                        )
                     except Exception as exc:
+                        provision_state.set_state(
+                            "STA_FAILED",
+                            reason="watchdog_disconnected_reconnect_error",
+                            details={"profile_name": profile_name},
+                        )
                         logger(
                             "[WIFI][WATCHDOG] reconnect error while disconnected "
                             f"profile={profile_name} {type(exc).__name__}: {exc}"
@@ -368,6 +466,11 @@ def watch_disconnection_and_start_ap(
 
         if disconnected_since is None:
             disconnected_since = monotonic_fn()
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="watchdog_disconnected_detected",
+                details={"state": general_state},
+            )
             logger(
                 "[WIFI][WATCHDOG] disconnected detected "
                 f"state={general_state or '(empty)'}; waiting {disconnect_grace}s"
@@ -381,12 +484,27 @@ def watch_disconnection_and_start_ap(
             continue
 
         try:
+            provision_state.set_state(
+                "AP_STARTING",
+                reason="watchdog_start_ap_after_grace",
+                details={"grace_seconds": disconnect_grace},
+            )
             result = wifi_service.start_ap_mode(ssid=bootstrap_ap_ssid, password=bootstrap_ap_password)
+            provision_state.set_state(
+                "AP_MODE",
+                reason="watchdog_ap_started",
+                details={"ssid": str(result.get("ssid") or "")},
+            )
             logger(
                 "[WIFI][WATCHDOG] AP mode started "
                 f"ssid={result.get('ssid')} gateway={result.get('gateway_ip')}"
             )
         except Exception as exc:
+            provision_state.set_state(
+                "STA_FAILED",
+                reason="watchdog_ap_start_failed",
+                details={"error": type(exc).__name__},
+            )
             logger(f"[WIFI][WATCHDOG] failed to start AP mode: {type(exc).__name__}: {exc}")
         finally:
             disconnected_since = monotonic_fn()
