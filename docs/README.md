@@ -45,3 +45,8 @@ Git 기반 개발 배포 단계에서 라즈베리파이에 적용할 통합 스
 
 - `device_config/setup_initial_device.sh`
 - `device_config/install_ubuntu24.sh`
+
+## 6. 기능 추가 파트
+
+- 실행파일 배포정책, `matterhub-provision` 정의, 로그인 전 tunnel 실패 대응,
+  MAC 바인딩 정책은 [라즈베리파이 납품용 패키징 및 운영 기획서](./raspberry-pi-delivery-plan.md)에 통합 관리한다.
