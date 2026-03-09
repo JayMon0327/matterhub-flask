@@ -80,8 +80,9 @@ class WifiConfigService:
         interface: str = "wlan0",
         default_health_host: str = "8.8.8.8",
         default_ap_ssid: str = "Matterhub-Setup-WhatsMatter",
-        ap_password: str = "matterhub1234",
+        ap_password: str = "00000000",
         ap_ipv4_cidr: str = "10.42.0.1/24",
+        ap_band: str = "bg",
         runner: Optional[Runner] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         monotonic_fn: Callable[[], float] = time.monotonic,
@@ -91,6 +92,7 @@ class WifiConfigService:
         self.default_ap_ssid = default_ap_ssid
         self.ap_password = ap_password
         self.ap_ipv4_cidr = ap_ipv4_cidr
+        self.ap_band = ap_band.strip()
         self._runner: Runner = runner or _default_runner
         self._sleep = sleep_fn
         self._monotonic = monotonic_fn
@@ -177,13 +179,13 @@ class WifiConfigService:
                 [
                     "-t",
                     "-f",
-                    "NAME,UUID,TYPE,AUTOCONNECT,DEVICE,802-11-wireless.ssid",
+                    "NAME,UUID,TYPE,AUTOCONNECT,DEVICE",
                     "connection",
                     "show",
                 ],
                 timeout=15,
             ),
-            ["NAME", "UUID", "TYPE", "AUTOCONNECT", "DEVICE", "SSID"],
+            ["NAME", "UUID", "TYPE", "AUTOCONNECT", "DEVICE"],
         )
 
         saved: list[dict[str, object]] = []
@@ -191,7 +193,7 @@ class WifiConfigService:
             if row.get("TYPE") != "802-11-wireless":
                 continue
             profile_name = row.get("NAME", "")
-            profile_ssid = (row.get("SSID") or "").strip() or profile_name
+            profile_ssid = self._get_connection_ssid(profile_name) or profile_name
             saved.append(
                 {
                     "name": profile_name,
@@ -255,11 +257,15 @@ class WifiConfigService:
             "hotspot",
             "ifname",
             self.interface,
+        ]
+        if self.ap_band:
+            hotspot_command.extend(["band", self.ap_band])
+        hotspot_command.extend([
             "ssid",
             ap_ssid,
             "password",
             ap_password,
-        ]
+        ])
 
         start_error: Optional[NmcliCommandError] = None
         for attempt in range(1, 4):
@@ -279,9 +285,8 @@ class WifiConfigService:
         if start_error is not None:
             raise start_error
 
-        active = self.get_active_wifi_connection()
-        connection_name = (active or {}).get("name") or ap_ssid
-        self._configure_ap_ipv4(connection_name)
+        connection_name = self._resolve_ap_connection_name(ap_ssid)
+        self._configure_ap_ipv4_for_ap(connection_name, ap_ssid)
         gateway_ip = self._ap_gateway_ip()
         return {
             "ssid": ap_ssid,
@@ -491,6 +496,34 @@ class WifiConfigService:
             timeout=30,
         )
 
+    def _configure_ap_ipv4_for_ap(self, connection_name: str, ap_ssid: str) -> None:
+        candidates: list[str] = []
+        for candidate in [connection_name, "Hotspot", ap_ssid]:
+            normalized = candidate.strip()
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        last_error: Optional[NmcliCommandError] = None
+        for candidate in candidates:
+            try:
+                self._configure_ap_ipv4(candidate)
+                return
+            except NmcliCommandError as exc:
+                last_error = exc
+                if self._is_unknown_connection_error(exc):
+                    continue
+                raise
+
+        if last_error is not None:
+            raise last_error
+
+    def _resolve_ap_connection_name(self, ap_ssid: str) -> str:
+        active = self.get_active_wifi_connection()
+        active_name = str((active or {}).get("name") or "").strip()
+        if active_name in {"Hotspot", ap_ssid}:
+            return active_name
+        return "Hotspot"
+
     def _ap_gateway_ip(self) -> str:
         cidr = self.ap_ipv4_cidr.strip()
         if "/" in cidr:
@@ -499,6 +532,24 @@ class WifiConfigService:
 
     def _default_ap_ssid(self) -> str:
         return self.default_ap_ssid
+
+    def _get_connection_ssid(self, connection_name: str) -> Optional[str]:
+        normalized_name = connection_name.strip()
+        if not normalized_name:
+            return None
+        try:
+            output = self._run_nmcli(
+                ["-g", "802-11-wireless.ssid", "connection", "show", "id", normalized_name],
+                timeout=10,
+            )
+        except NmcliCommandError:
+            return None
+
+        for line in output.splitlines():
+            ssid = line.strip()
+            if ssid:
+                return ssid
+        return None
 
     def _prepare_device_for_ap_retry(self) -> None:
         self._run_nmcli_best_effort(["radio", "wifi", "on"], timeout=10)
@@ -519,6 +570,10 @@ class WifiConfigService:
     def _is_ip_config_reservation_error(self, error: NmcliCommandError) -> bool:
         text = f"{error.stderr}\n{error.stdout}".lower()
         return "ip configuration could not be reserved" in text
+
+    def _is_unknown_connection_error(self, error: NmcliCommandError) -> bool:
+        text = f"{error.stderr}\n{error.stdout}".lower()
+        return "unknown connection" in text
 
     def _run_nmcli_best_effort(self, args: list[str], *, timeout: int) -> bool:
         try:

@@ -42,7 +42,7 @@ def create_wifi_blueprint(
         interface=os.environ.get("WIFI_INTERFACE", "wlan0"),
         default_health_host=os.environ.get("WIFI_HEALTH_HOST", "8.8.8.8"),
         default_ap_ssid=os.environ.get("WIFI_AP_SSID", "Matterhub-Setup-WhatsMatter"),
-        ap_password=os.environ.get("WIFI_AP_PASSWORD", "matterhub1234"),
+        ap_password=os.environ.get("WIFI_AP_PASSWORD", "00000000"),
         ap_ipv4_cidr=os.environ.get("WIFI_AP_IPV4_CIDR", "10.42.0.1/24"),
     )
     provision_state = state_store or get_provision_state_store()

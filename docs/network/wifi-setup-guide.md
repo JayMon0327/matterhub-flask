@@ -113,7 +113,7 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_INTERFACE` (기본: `wlan0`)
 - `WIFI_HEALTH_HOST` (기본: `8.8.8.8`)
 - `WIFI_AP_SSID` (기본: `Matterhub-Setup-WhatsMatter`)
-- `WIFI_AP_PASSWORD` (기본: `matterhub1234`)
+- `WIFI_AP_PASSWORD` (기본: `00000000`)
 - `WIFI_AP_IPV4_CIDR` (기본: `10.42.0.1/24`)
 - `WIFI_AUTO_AP_ON_BOOT` (기본: `true`)
 - `WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS` (기본: `45`, 부팅 직후 AP 전환 전 대기시간)

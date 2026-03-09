@@ -26,7 +26,7 @@ HARDEN_ALLOW_INBOUND_PORTS=()
 WIFI_INTERFACE="${WIFI_INTERFACE:-wlan0}"
 WIFI_HEALTH_HOST="${WIFI_HEALTH_HOST:-8.8.8.8}"
 WIFI_AP_SSID="${WIFI_AP_SSID:-Matterhub-Setup-WhatsMatter}"
-WIFI_AP_PASSWORD="${WIFI_AP_PASSWORD:-matterhub1234}"
+WIFI_AP_PASSWORD="${WIFI_AP_PASSWORD:-00000000}"
 WIFI_AP_IPV4_CIDR="${WIFI_AP_IPV4_CIDR:-10.42.0.1/24}"
 WIFI_AUTO_AP_ON_BOOT="${WIFI_AUTO_AP_ON_BOOT:-1}"
 WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS="${WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS:-45}"
@@ -114,7 +114,7 @@ Options:
   --wifi-interface <name>            Default: wlan0
   --wifi-health-host <host>          Default: 8.8.8.8
   --wifi-ap-ssid <ssid>              Default: Matterhub-Setup-WhatsMatter
-  --wifi-ap-password <password>      Default: matterhub1234
+  --wifi-ap-password <password>      Default: 00000000
   --wifi-ap-ipv4-cidr <cidr>         Default: 10.42.0.1/24
   --wifi-auto-ap-on-boot <0|1>       Default: 1
   --wifi-bootstrap-startup-grace-seconds <sec>

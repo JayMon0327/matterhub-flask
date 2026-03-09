@@ -85,6 +85,67 @@ class WifiConfigServiceTest(unittest.TestCase):
         self.assertTrue(result[0]["in_use"])
         self.assertEqual("Guest", result[1]["ssid"])
 
+    def test_list_saved_connections_reads_ssid_per_profile(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="HomeNet:home-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,AUTOCONNECT,DEVICE", "connection", "show"],
+                    completed(
+                        stdout=(
+                            "Home profile:home-uuid:802-11-wireless:yes:wlan0\n"
+                            "Matterhub-Setup-WhatsMatter:ap-uuid:802-11-wireless:no:\n"
+                            "Wired connection 1:wired-uuid:802-3-ethernet:yes:\n"
+                        )
+                    ),
+                ),
+                (
+                    ["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", "id", "Home profile"],
+                    completed(stdout="HomeNet\n"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "-g",
+                        "802-11-wireless.ssid",
+                        "connection",
+                        "show",
+                        "id",
+                        "Matterhub-Setup-WhatsMatter",
+                    ],
+                    completed(stdout="\n"),
+                ),
+            ]
+        )
+        service = WifiConfigService(runner=runner)
+
+        result = service.list_saved_connections()
+
+        self.assertEqual(
+            [
+                {
+                    "name": "Home profile",
+                    "ssid": "HomeNet",
+                    "uuid": "home-uuid",
+                    "autoconnect": True,
+                    "device": "wlan0",
+                    "active": True,
+                },
+                {
+                    "name": "Matterhub-Setup-WhatsMatter",
+                    "ssid": "Matterhub-Setup-WhatsMatter",
+                    "uuid": "ap-uuid",
+                    "autoconnect": False,
+                    "device": "",
+                    "active": False,
+                },
+            ],
+            result,
+        )
+
     def test_connect_failure_rolls_back_and_starts_ap_mode(self) -> None:
         runner = OrderedRunner(
             [
@@ -140,10 +201,12 @@ class WifiConfigServiceTest(unittest.TestCase):
                         "hotspot",
                         "ifname",
                         "wlan0",
+                        "band",
+                        "bg",
                         "ssid",
                         "Matterhub-Setup-test01",
                         "password",
-                        "matterhub1234",
+                        "00000000",
                     ],
                     completed(stdout="Hotspot created"),
                 ),
@@ -179,7 +242,7 @@ class WifiConfigServiceTest(unittest.TestCase):
         )
         service = WifiConfigService(
             runner=runner,
-            ap_password="matterhub1234",
+            ap_password="00000000",
             default_ap_ssid="Matterhub-Setup-test01",
             ap_ipv4_cidr="10.42.0.1/24",
         )
@@ -220,10 +283,12 @@ class WifiConfigServiceTest(unittest.TestCase):
                         "hotspot",
                         "ifname",
                         "wlan0",
+                        "band",
+                        "bg",
                         "ssid",
                         "Matterhub-Setup-test01",
                         "password",
-                        "matterhub1234",
+                        "00000000",
                     ],
                     completed(
                         return_code=4,
@@ -250,10 +315,12 @@ class WifiConfigServiceTest(unittest.TestCase):
                         "hotspot",
                         "ifname",
                         "wlan0",
+                        "band",
+                        "bg",
                         "ssid",
                         "Matterhub-Setup-test01",
                         "password",
-                        "matterhub1234",
+                        "00000000",
                     ],
                     completed(stdout="Hotspot created"),
                 ),
@@ -285,7 +352,65 @@ class WifiConfigServiceTest(unittest.TestCase):
         )
         service = WifiConfigService(
             runner=runner,
-            ap_password="matterhub1234",
+            ap_password="00000000",
+            default_ap_ssid="Matterhub-Setup-test01",
+            ap_ipv4_cidr="10.42.0.1/24",
+        )
+
+        result = service.start_ap_mode()
+
+        self.assertEqual("Matterhub-Setup-test01", result["ssid"])
+        self.assertEqual("10.42.0.1", result["gateway_ip"])
+
+    def test_start_ap_mode_falls_back_to_hotspot_profile_name(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    [
+                        "nmcli",
+                        "device",
+                        "wifi",
+                        "hotspot",
+                        "ifname",
+                        "wlan0",
+                        "band",
+                        "bg",
+                        "ssid",
+                        "Matterhub-Setup-test01",
+                        "password",
+                        "00000000",
+                    ],
+                    completed(stdout="Hotspot created"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="HomeNet:home-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        "id",
+                        "Hotspot",
+                        "ipv4.method",
+                        "shared",
+                        "ipv4.addresses",
+                        "10.42.0.1/24",
+                        "ipv6.method",
+                        "ignore",
+                    ],
+                    completed(stdout=""),
+                ),
+                (
+                    ["nmcli", "connection", "up", "id", "Hotspot", "ifname", "wlan0"],
+                    completed(stdout="Connection up"),
+                ),
+            ]
+        )
+        service = WifiConfigService(
+            runner=runner,
+            ap_password="00000000",
             default_ap_ssid="Matterhub-Setup-test01",
             ap_ipv4_cidr="10.42.0.1/24",
         )

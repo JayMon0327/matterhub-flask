@@ -247,7 +247,7 @@ AP 기본값을 변경하고 싶다면 설치 명령에 옵션을 추가한다.
 
 ```bash
 --wifi-ap-ssid "Matterhub-Setup-WhatsMatter"
---wifi-ap-password "matterhub1234"
+--wifi-ap-password "00000000"
 --wifi-ap-ipv4-cidr "10.42.0.1/24"
 --local-hostname "matterhub-setup-whatsmatter"
 --local-service-name "MatterHub Wi-Fi Setup"
