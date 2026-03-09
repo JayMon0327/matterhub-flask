@@ -33,13 +33,19 @@ DEFAULT_HARDENING_DIRECTIVES: tuple[str, ...] = (
     "UMask=0077",
 )
 
+API_HARDENING_DIRECTIVES: tuple[str, ...] = tuple(
+    directive
+    for directive in DEFAULT_HARDENING_DIRECTIVES
+    if directive not in {"NoNewPrivileges=true", "RestrictSUIDSGID=true"}
+)
+
 
 SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
     ServiceDefinition(
         service_name="matterhub-api",
         description="MatterHub Flask API",
         script_path=Path("app.py"),
-        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
+        hardening_directives=API_HARDENING_DIRECTIVES,
     ),
     ServiceDefinition(
         service_name="matterhub-mqtt",

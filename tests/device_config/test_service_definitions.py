@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from device_config.service_definitions import (
+    API_HARDENING_DIRECTIVES,
     build_exec_start,
     build_service_context,
     DEFAULT_HARDENING_DIRECTIVES,
@@ -65,11 +66,19 @@ class ServiceDefinitionsTest(unittest.TestCase):
         self.assertEqual("MatterHub Flask API", context["@DESCRIPTION@"])
         self.assertEqual("whatsmatter", context["@RUN_USER@"])
         self.assertEqual("/srv/matterhub", context["@WORKING_DIRECTORY@"])
-        self.assertIn("NoNewPrivileges=true", context["@HARDENING_DIRECTIVES@"])
+        self.assertNotIn("NoNewPrivileges=true", context["@HARDENING_DIRECTIVES@"])
+        self.assertNotIn("RestrictSUIDSGID=true", context["@HARDENING_DIRECTIVES@"])
+
+    def test_api_hardening_drops_privilege_blocking_directives(self) -> None:
+        self.assertNotIn("NoNewPrivileges=true", API_HARDENING_DIRECTIVES)
+        self.assertNotIn("RestrictSUIDSGID=true", API_HARDENING_DIRECTIVES)
+        self.assertIn("ProtectSystem=full", API_HARDENING_DIRECTIVES)
 
     def test_default_hardening_directives_attached(self) -> None:
-        for service in get_service_definitions():
-            self.assertEqual(DEFAULT_HARDENING_DIRECTIVES, service.hardening_directives)
+        api_service = [s for s in get_service_definitions() if s.service_name == "matterhub-api"][0]
+        mqtt_service = [s for s in get_service_definitions() if s.service_name == "matterhub-mqtt"][0]
+        self.assertEqual(API_HARDENING_DIRECTIVES, api_service.hardening_directives)
+        self.assertEqual(DEFAULT_HARDENING_DIRECTIVES, mqtt_service.hardening_directives)
 
     def test_support_tunnel_has_unit_start_limit_override(self) -> None:
         support_tunnel = [s for s in get_service_definitions() if s.service_name == "matterhub-support-tunnel"][0]

@@ -190,6 +190,12 @@ create_unit() {
   local unit_name="$1"
   local description="$2"
   local exec_path="$3"
+  local no_new_privileges="NoNewPrivileges=true"
+  local restrict_suidsgid="RestrictSUIDSGID=true"
+  if [ "$unit_name" = "matterhub-api" ]; then
+    no_new_privileges=""
+    restrict_suidsgid=""
+  fi
   cat > "${SYSTEMD_DIR}/${unit_name}.service" <<EOF
 [Unit]
 Description=${description}
@@ -206,13 +212,13 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=${exec_path}
 Restart=always
 RestartSec=5
-NoNewPrivileges=true
+${no_new_privileges}
 PrivateTmp=true
 ProtectSystem=full
 ProtectControlGroups=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
-RestrictSUIDSGID=true
+${restrict_suidsgid}
 LockPersonality=true
 RestrictRealtime=true
 CapabilityBoundingSet=
