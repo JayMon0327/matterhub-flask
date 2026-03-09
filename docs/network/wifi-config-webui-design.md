@@ -8,6 +8,7 @@
 
 - [라즈베리파이 납품용 패키징 및 운영 기획서](../raspberry-pi-delivery-plan.md)
 - [리팩터링 로드맵](../refactoring-roadmap.md)
+- [MatterHub Wi-Fi 설정 UI 디자인 키트](./wifi-config-ui-design-kit.md)
 
 ## 2. 설계 목표
 
@@ -15,12 +16,14 @@
 - Ubuntu 24.04 LTS 환경에 맞게 `NetworkManager` 기반으로 동작해야 한다.
 - 잘못된 설정 시 복구 경로가 있어야 한다.
 - 로컬 관리 기능이 외부에 과도하게 노출되면 안 된다.
+- 가능하면 IP 대신 고정 로컬 호스트명(`.local`)으로 접속할 수 있어야 한다.
 
 ## 3. 기술 방향
 
 - 네트워크 제어는 `wpa_supplicant.conf` 직접 편집 대신 `nmcli` 사용
 - Web UI는 로컬 전용 페이지로 운영
 - 백엔드는 `nmcli` 호출을 직접 노출하지 않고 제한된 서비스 계층을 둠
+- UI 시각 기준은 Toss 분석 기반 디자인 키트를 따르되, AP 오프라인 환경 때문에 외부 폰트/CDN 의존은 금지
 
 ## 4. 주요 기능
 
@@ -43,6 +46,7 @@
 실제 path는 구현 시 기존 API 네이밍과 함께 재검토할 수 있다. 단, 변경 시에는 먼저 사용자에게 제안한다.
 
 `GET /local/admin/network/status`는 Wi-Fi 상태와 함께 provisioning 상태머신 정보를 포함한다.
+또한 로컬 접속용 `local_access` 정보(`fqdn`, `setup_url`)를 함께 포함한다.
 
 - `provision_state.state`
   - `BOOTING`
@@ -80,6 +84,7 @@ tests/domains/wifi_config/
 - 기본적으로 로컬망 또는 장비 AP 모드에서만 접근 허용한다.
 - 관리 UI는 최소한의 인증 또는 물리적 접근 전제를 검토한다.
 - 입력 검증 없이 셸 명령으로 연결 문자열을 조합하지 않는다.
+- 스캔한 SSID와 저장된 연결 이름은 escape 후 렌더링한다.
 
 ## 8. 장애 복구 시나리오
 

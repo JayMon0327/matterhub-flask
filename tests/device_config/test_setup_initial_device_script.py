@@ -27,11 +27,14 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         output = result.stdout
         self.assertIn("env update: WIFI_AP_SSID=Matterhub-Setup-WhatsMatter", output)
         self.assertIn("env update: WIFI_AP_IPV4_CIDR=10.42.0.1/24", output)
+        self.assertIn("env update: LOCAL_MDNS_ENABLED=1", output)
+        self.assertIn("env update: MATTERHUB_LOCAL_HOSTNAME=matterhub-setup-whatsmatter", output)
         self.assertIn("env update: UPDATE_AGENT_ENABLED=1", output)
         self.assertIn("env update: UPDATE_AGENT_REQUIRE_MANIFEST=1", output)
         self.assertIn("env update: UPDATE_AGENT_REQUIRE_SHA256=0", output)
         self.assertIn("install_ubuntu24.sh 실행", output)
         self.assertIn("install_ubuntu24.sh --dry-run", output)
+        self.assertIn("--local-hostname matterhub-setup-whatsmatter", output)
 
     def test_rejects_short_ap_password(self) -> None:
         result = subprocess.run(
@@ -116,6 +119,25 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
 
         output = result.stdout
         self.assertIn("--harden-local-console-pam", output)
+
+    def test_dry_run_can_disable_local_mdns(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(SETUP_SCRIPT),
+                "--dry-run",
+                "--local-mdns-enabled",
+                "0",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output = result.stdout
+        self.assertIn("env update: LOCAL_MDNS_ENABLED=0", output)
+        self.assertIn("--disable-local-mdns", output)
 
     def test_rejects_non_numeric_update_agent_poll_seconds(self) -> None:
         result = subprocess.run(

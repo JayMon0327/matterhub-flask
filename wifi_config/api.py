@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from flask import Blueprint, jsonify, render_template, request
 
+from .local_access import build_local_access_summary
 from .service import NmcliCommandError, WifiConfigService
 from .state import ProvisionStateStore, get_provision_state_store
 
@@ -49,13 +50,18 @@ def create_wifi_blueprint(
 
     @wifi_bp.get("/local/admin/network")
     def wifi_admin_page():
-        return render_template("wifi_admin.html", interface=wifi_service.interface)
+        return render_template(
+            "wifi_admin.html",
+            interface=wifi_service.interface,
+            local_access=build_local_access_summary(),
+        )
 
     @wifi_bp.get("/local/admin/network/status")
     def network_status():
         try:
             data = wifi_service.get_status()
             data["provision_state"] = provision_state.snapshot()
+            data["local_access"] = build_local_access_summary()
             return jsonify({"ok": True, "data": data})
         except NmcliCommandError as exc:
             return jsonify({"ok": False, "error": exc.to_dict()}), 500

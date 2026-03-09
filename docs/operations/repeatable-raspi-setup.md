@@ -8,6 +8,7 @@
 
 - systemd 기반 서비스 실행 (`matterhub-api`, `matterhub-mqtt`, `matterhub-update-agent`, `matterhub-support-tunnel` 등)
 - Wi-Fi 설정 Web UI + AP 복구 모드 + 롤백 로직
+- 로컬 mDNS 호스트명(`matterhub-setup-whatsmatter.local`) 접속 경로
 - reverse SSH tunnel 연동
 - reverse tunnel only 하드닝 + 로컬 콘솔 비노출 하드닝(PAM + UI/TTY 마스킹)
 - `openssh-server` 설치 및 `ssh` 서비스 자동 시작
@@ -93,8 +94,11 @@ journalctl -u matterhub-support-tunnel.service -n 50 --no-pager
 
 Wi-Fi 설정 페이지:
 
+- 권장: `http://matterhub-setup-whatsmatter.local:8100/local/admin/network`
 - 일반 모드: `http://<라즈베리파이_IP>:8100/local/admin/network`
 - AP 모드: `http://10.42.0.1:8100/local/admin/network`
+
+`.local` 접속이 안 되는 단말/망에서는 기존 IP 또는 AP 주소를 사용한다.
 
 ## 6. 업데이트 번들 적용 (운영 중 버전 교체)
 
@@ -167,6 +171,8 @@ AP 기본값을 변경하고 싶다면 설치 명령에 옵션을 추가한다.
 --wifi-ap-ssid "Matterhub-Setup-WhatsMatter"
 --wifi-ap-password "matterhub1234"
 --wifi-ap-ipv4-cidr "10.42.0.1/24"
+--local-hostname "matterhub-setup-whatsmatter"
+--local-service-name "MatterHub Wi-Fi Setup"
 ```
 
 ## 9. 참고

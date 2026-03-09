@@ -18,12 +18,14 @@
 8. [EC2 Relay Server Setup](./remote-maintenance/ec2-relay-setup.md)
 9. [리버스 터널 접속방법](./remote-maintenance/reverse-tunnel-access-method.md)
 10. [Wi-Fi 설정 Web UI 설계](./network/wifi-config-webui-design.md)
-11. [Wi-Fi 설정 방법 (운영 가이드)](./network/wifi-setup-guide.md)
-12. [.deb 패키징 설계](./packaging/deb-packaging-design.md)
-13. [납품 및 운영 런북](./operations/delivery-runbook.md)
-14. [Reverse Tunnel Only 하드닝 가이드](./operations/reverse-tunnel-only-hardening.md)
-15. [MQTT 토픽 진단 로그 (2026-03-04)](./operations/mqtt-topic-diagnosis-2026-03-04.md)
-16. [라즈베리파이 반복 설치 가이드](./operations/repeatable-raspi-setup.md)
+11. [Wi-Fi 설정 UI 디자인 키트](./network/wifi-config-ui-design-kit.md)
+12. [Wi-Fi 설정 방법 (운영 가이드)](./network/wifi-setup-guide.md)
+13. [.deb 패키징 설계](./packaging/deb-packaging-design.md)
+14. [납품 및 운영 런북](./operations/delivery-runbook.md)
+15. [납품 준비 점검표](./operations/delivery-readiness-checklist.md)
+16. [Reverse Tunnel Only 하드닝 가이드](./operations/reverse-tunnel-only-hardening.md)
+17. [MQTT 토픽 진단 로그 (2026-03-04)](./operations/mqtt-topic-diagnosis-2026-03-04.md)
+18. [라즈베리파이 반복 설치 가이드](./operations/repeatable-raspi-setup.md)
 
 ## 3. 문서 사용 규칙
 

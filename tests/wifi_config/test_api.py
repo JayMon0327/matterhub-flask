@@ -77,6 +77,10 @@ class WifiApiBlueprintTest(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual("connected", body["data"]["general_state"])
         self.assertEqual("BOOTING", body["data"]["provision_state"]["state"])
+        self.assertEqual(
+            "matterhub-setup-whatsmatter.local",
+            body["data"]["local_access"]["fqdn"],
+        )
 
     def test_connect_endpoint_requires_ssid(self) -> None:
         response = self.client.post("/local/admin/network/wifi/connect", json={})
@@ -142,8 +146,11 @@ class WifiApiBlueprintTest(unittest.TestCase):
         text = response.get_data(as_text=True)
 
         self.assertEqual(200, response.status_code)
-        self.assertIn("MatterHub Wi-Fi 설정 센터", text)
+        self.assertIn("MatterHub Wi-Fi 설정", text)
         self.assertIn("WhatsMatter Inc.", text)
+        self.assertIn("알고 있는 네트워크", text)
+        self.assertNotIn("fonts.googleapis.com", text)
+        self.assertIn("matterhub-setup-whatsmatter.local", text)
 
 
 if __name__ == "__main__":

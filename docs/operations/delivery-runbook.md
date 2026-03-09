@@ -8,6 +8,7 @@
 
 - [라즈베리파이 납품용 패키징 및 운영 기획서](../raspberry-pi-delivery-plan.md)
 - [리팩터링 로드맵](../refactoring-roadmap.md)
+- [납품 준비 점검표](./delivery-readiness-checklist.md)
 
 ## 2. 납품 전 체크리스트
 
@@ -47,6 +48,7 @@ bash device_config/setup_initial_device.sh
 
 - Ubuntu 필수 패키지 설치
 - `openssh-server` 설치 및 `ssh` 서비스 활성화
+- `avahi-daemon` 기반 로컬 mDNS 호스트명 설정
 - `venv` 생성 및 Python 의존성 설치
 - `NetworkManager` 제어 권한(polkit) 설치
 - systemd 유닛 렌더링 및 설치
@@ -91,11 +93,12 @@ bash device_config/install_ubuntu24.sh \
 
 ### Wi-Fi 변경 지원
 
-1. 로컬 설정 페이지 접속
-2. SSID 스캔
-3. 새 네트워크 연결 시도
-4. 연결 상태 확인
-5. 실패 시 롤백 또는 AP 복구 모드 사용
+1. `http://matterhub-setup-whatsmatter.local:8100/local/admin/network` 접속 시도
+2. `.local` 접속이 안 되면 라즈베리파이 IP 또는 AP 주소(`10.42.0.1`) 사용
+3. SSID 스캔
+4. 새 네트워크 연결 시도
+5. 연결 상태 확인
+6. 실패 시 롤백 또는 AP 복구 모드 사용
 
 ## 5. 장애 대응 초안
 

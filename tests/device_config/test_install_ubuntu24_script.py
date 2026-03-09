@@ -25,13 +25,19 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         )
 
         output = result.stdout
-        self.assertIn("python3-venv python3-pip network-manager autossh openssh-server", output)
+        self.assertIn(
+            "python3-venv python3-pip network-manager autossh openssh-server avahi-daemon avahi-utils libnss-mdns",
+            output,
+        )
         self.assertIn("systemctl enable --now ssh", output)
         self.assertIn("matterhub-api.service matterhub-mqtt.service", output)
         self.assertIn("matterhub-support-tunnel.service", output)
         self.assertIn("systemctl daemon-reload", output)
         self.assertIn("systemctl enable", output)
         self.assertIn("render_systemd_units.py", output)
+        self.assertIn("로컬 mDNS/HTTP 서비스 광고 설정 실행", output)
+        self.assertIn("setup_local_hostname_mdns.sh", output)
+        self.assertIn("--hostname matterhub-setup-whatsmatter", output)
         enable_lines = [line for line in output.splitlines() if "systemctl enable" in line]
         self.assertTrue(enable_lines)
         self.assertTrue(all("matterhub-support-tunnel.service" not in line for line in enable_lines))
@@ -45,6 +51,23 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
             text=True,
         )
         self.assertIn("OS 패키지 설치 단계 생략", result.stdout)
+
+    def test_dry_run_can_disable_local_mdns(self) -> None:
+        result = subprocess.run(
+            [
+                "bash",
+                str(INSTALL_SCRIPT),
+                "--dry-run",
+                "--disable-local-mdns",
+            ],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
+        self.assertIn("로컬 mDNS 접속: 비활성화", output)
+        self.assertNotIn("setup_local_hostname_mdns.sh", output)
 
     def test_dry_run_can_chain_support_tunnel_setup(self) -> None:
         result = subprocess.run(

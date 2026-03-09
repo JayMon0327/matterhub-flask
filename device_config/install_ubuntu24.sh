@@ -14,6 +14,9 @@ SETUP_SUPPORT_TUNNEL=0
 ENABLE_SUPPORT_TUNNEL_NOW=0
 HARDEN_REVERSE_TUNNEL_ONLY=0
 HARDEN_LOCAL_CONSOLE_PAM=0
+LOCAL_MDNS_ENABLED="${LOCAL_MDNS_ENABLED:-1}"
+MATTERHUB_LOCAL_HOSTNAME="${MATTERHUB_LOCAL_HOSTNAME:-matterhub-setup-whatsmatter}"
+MATTERHUB_LOCAL_SERVICE_NAME="${MATTERHUB_LOCAL_SERVICE_NAME:-MatterHub Wi-Fi Setup}"
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -82,6 +85,12 @@ Options:
                       Keep inbound TCP port open under UFW policy (repeatable).
   --harden-local-console-pam
                       Apply local-console hardening (PAM + disable local UI/TTY exposure).
+  --disable-local-mdns
+                      Skip local mDNS hostname/HTTP service provisioning.
+  --local-hostname <name>
+                      Set local mDNS hostname label (default: matterhub-setup-whatsmatter).
+  --local-service-name <name>
+                      Set HTTP DNS-SD service name (default: MatterHub Wi-Fi Setup).
 
 Environment variables:
   RUN_USER     systemd service user (default: current shell user)
@@ -146,6 +155,17 @@ while [ "$#" -gt 0 ]; do
     --harden-local-console-pam)
       HARDEN_LOCAL_CONSOLE_PAM=1
       ;;
+    --disable-local-mdns)
+      LOCAL_MDNS_ENABLED=0
+      ;;
+    --local-hostname)
+      MATTERHUB_LOCAL_HOSTNAME="$2"
+      shift
+      ;;
+    --local-service-name)
+      MATTERHUB_LOCAL_SERVICE_NAME="$2"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -163,6 +183,21 @@ if [ "$DRY_RUN" -ne 1 ] && [ "$(uname -s)" != "Linux" ]; then
   echo "This installer must be executed on Ubuntu/Linux. Use --dry-run for planning on macOS." >&2
   exit 1
 fi
+
+case "$LOCAL_MDNS_ENABLED" in
+  0|1)
+    ;;
+  true|yes)
+    LOCAL_MDNS_ENABLED=1
+    ;;
+  false|no)
+    LOCAL_MDNS_ENABLED=0
+    ;;
+  *)
+    echo "LOCAL_MDNS_ENABLED must be one of: 0,1,true,false,yes,no" >&2
+    exit 1
+    ;;
+esac
 
 SERVICE_UNITS=()
 while IFS= read -r unit_name; do
@@ -231,10 +266,16 @@ if [ "$HARDEN_LOCAL_CONSOLE_PAM" -eq 1 ]; then
   log "고정 정책: local UI/TTY 비노출 + root 제외 LOCAL 로그인 차단"
 fi
 
+if [ "$LOCAL_MDNS_ENABLED" -eq 1 ]; then
+  log "로컬 mDNS 접속: 활성화 예정 (${MATTERHUB_LOCAL_HOSTNAME}.local)"
+else
+  log "로컬 mDNS 접속: 비활성화"
+fi
+
 if [ "$SKIP_OS_PACKAGES" -eq 0 ]; then
   log "Ubuntu 필수 패키지 설치"
   sudo_cmd apt update
-  sudo_cmd apt install -y python3-venv python3-pip network-manager autossh openssh-server
+  sudo_cmd apt install -y python3-venv python3-pip network-manager autossh openssh-server avahi-daemon avahi-utils libnss-mdns
 else
   log "OS 패키지 설치 단계 생략"
 fi
@@ -301,6 +342,27 @@ if [ "$DRY_RUN" -eq 0 ]; then
   if [ "${#ENABLED_SERVICE_UNITS[@]}" -gt 0 ]; then
     sudo systemctl --no-pager --full status "${ENABLED_SERVICE_UNITS[@]}" || true
   fi
+fi
+
+if [ "$LOCAL_MDNS_ENABLED" -eq 1 ]; then
+  LOCAL_MDNS_SCRIPT="$SCRIPT_DIR/setup_local_hostname_mdns.sh"
+  if [ ! -f "$LOCAL_MDNS_SCRIPT" ]; then
+    echo "setup_local_hostname_mdns.sh not found: $LOCAL_MDNS_SCRIPT" >&2
+    exit 1
+  fi
+
+  local_mdns_cmd=(
+    bash "$LOCAL_MDNS_SCRIPT"
+    --env-file "$PROJECT_ROOT/.env"
+    --hostname "$MATTERHUB_LOCAL_HOSTNAME"
+    --service-name "$MATTERHUB_LOCAL_SERVICE_NAME"
+  )
+  if [ "$DRY_RUN" -eq 1 ]; then
+    local_mdns_cmd+=(--dry-run)
+  fi
+
+  log "로컬 mDNS/HTTP 서비스 광고 설정 실행"
+  run_cmd "${local_mdns_cmd[@]}"
 fi
 
 if [ "$SETUP_SUPPORT_TUNNEL" -eq 1 ]; then

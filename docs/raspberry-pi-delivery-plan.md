@@ -154,7 +154,8 @@ AP 진입 조건:
 AP 모드 UX:
 
 - SSID: `Matterhub-Setup-WhatsMatter` (기본값)
-- AP 접속 후 `http://10.42.0.1:8100/local/admin/network`에서 설정
+- 우선 접속: `http://matterhub-setup-whatsmatter.local:8100/local/admin/network`
+- fallback 접속: `http://10.42.0.1:8100/local/admin/network`
 - 연결 성공 시 STA 전환
 
 ## 11. `matterhub-provision` 상세 정의 (현재 구현 반영)

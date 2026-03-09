@@ -19,16 +19,22 @@
 
 ### 3.1 일반 모드(장비가 기존 Wi-Fi에 연결된 상태)
 
+- 권장 접속 URL: `http://matterhub-setup-whatsmatter.local:8100/local/admin/network`
 - 접속 URL: `http://<라즈베리파이_IP>:8100/local/admin/network`
 - 예시: `http://192.168.1.94:8100/local/admin/network`
+
+현재 기본 로컬 호스트명은 `matterhub-setup-whatsmatter.local` 이다.
+같은 로컬망에서 mDNS(`.local`) 해석이 되는 환경이면 IP를 몰라도 위 주소로 접속할 수 있다.
 
 ### 3.2 AP 모드(초기 설치/네트워크 장애 복구 상태)
 
 - AP SSID 기본값: `Matterhub-Setup-WhatsMatter`
 - AP 게이트웨이 기본값: `10.42.0.1`
+- 권장 접속 URL: `http://matterhub-setup-whatsmatter.local:8100/local/admin/network`
 - 접속 URL: `http://10.42.0.1:8100/local/admin/network`
 
 현재 구현은 AP 주소를 `10.42.0.1/24`로 고정하도록 설정되어 있다.
+단, 단말기에서 `.local` 해석이 안 되면 `10.42.0.1`로 접속하면 된다.
 
 ## 3.3 신규 장비 초기 통합 설치 권장 명령
 
@@ -52,15 +58,17 @@ bash device_config/setup_initial_device.sh
 ### 4.1 장비가 이미 Wi-Fi에 연결된 경우
 
 1. 같은 네트워크에 PC/모바일을 연결한다.
-2. 브라우저에서 `http://<라즈베리파이_IP>:8100/local/admin/network` 접속한다.
-3. 페이지에서 주변 Wi-Fi를 스캔하거나 SSID/Password를 입력해 연결을 변경한다.
+2. 브라우저에서 `http://matterhub-setup-whatsmatter.local:8100/local/admin/network` 접속한다.
+3. `.local` 접속이 안 되면 `http://<라즈베리파이_IP>:8100/local/admin/network`로 접속한다.
+4. 페이지에서 주변 Wi-Fi를 스캔하거나 SSID/Password를 입력해 연결을 변경한다.
 
 ### 4.2 장비가 Wi-Fi에 연결되지 않은 초기/장애 상태
 
 1. PC/모바일에서 `Matterhub-Setup-WhatsMatter` SSID에 연결한다.
-2. 브라우저에서 `http://10.42.0.1:8100/local/admin/network` 접속한다.
-3. 대상 SSID/Password를 입력해 연결한다.
-4. 연결 성공 후 장비가 대상 Wi-Fi로 붙으면 기존 AP 연결은 끊길 수 있다.
+2. 브라우저에서 `http://matterhub-setup-whatsmatter.local:8100/local/admin/network` 접속한다.
+3. `.local` 접속이 안 되면 `http://10.42.0.1:8100/local/admin/network` 접속한다.
+4. 대상 SSID/Password를 입력해 연결한다.
+5. 연결 성공 후 장비가 대상 Wi-Fi로 붙으면 기존 AP 연결은 끊길 수 있다.
 
 ## 5. 화면에서 제공되는 기능
 
@@ -76,7 +84,8 @@ bash device_config/setup_initial_device.sh
 
 - 복구 모드 시작 시 장비가 임시 Wi-Fi(AP)를 연다.
 - 사용자는 해당 AP에 접속해서 설정 페이지로 다시 들어올 수 있다.
-- 기본 접속 주소는 `http://10.42.0.1:8100/local/admin/network` 이다.
+- 기본 접속 주소는 `http://matterhub-setup-whatsmatter.local:8100/local/admin/network` 이다.
+- `.local` 접속이 안 되면 `http://10.42.0.1:8100/local/admin/network` 을 사용한다.
 - 정상 Wi-Fi 연결이 완료되면 복구 모드는 더 이상 필요하지 않다.
 
 ## 6. 실패 시 동작(롤백/복구)
@@ -115,6 +124,9 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_AP_AUTO_RECONNECT_TIMEOUT_SECONDS` (기본: `20`)
 - `WIFI_BOOTSTRAP_AP_SSID` (선택)
 - `WIFI_BOOTSTRAP_AP_PASSWORD` (선택)
+- `LOCAL_MDNS_ENABLED` (기본: `1`)
+- `MATTERHUB_LOCAL_HOSTNAME` (기본: `matterhub-setup-whatsmatter`)
+- `MATTERHUB_LOCAL_SERVICE_NAME` (기본: `MatterHub Wi-Fi Setup`)
 
 ## 8.1 재부팅 후 로그인해야만 Wi-Fi/터널이 붙는 경우
 
