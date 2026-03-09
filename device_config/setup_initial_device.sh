@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/.env}"
 
-RUN_USER="${RUN_USER:-$(id -un)}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(id -un)}}"
 DRY_RUN=0
 SKIP_OS_PACKAGES=0
 

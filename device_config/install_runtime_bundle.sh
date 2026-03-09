@@ -13,7 +13,7 @@ fi
 
 BUNDLE_PATH=""
 RUNTIME_ROOT="${RUNTIME_ROOT:-/opt/matterhub}"
-RUN_USER="${RUN_USER:-$(id -un)}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(id -un)}}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 DRY_RUN=0
 
@@ -175,4 +175,3 @@ if [ "${#ENABLED_UNITS[@]}" -gt 0 ]; then
 fi
 
 log "runtime bundle installation completed"
-

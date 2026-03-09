@@ -83,6 +83,22 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         self.assertIn("--support-remote-port 22608", output)
         self.assertIn("--support-relay-operator-user ec2-user", output)
 
+    def test_dry_run_prefers_sudo_user_when_run_user_is_missing(self) -> None:
+        env = os.environ.copy()
+        env.pop("RUN_USER", None)
+        env["SUDO_USER"] = "whatsmatter"
+
+        result = subprocess.run(
+            ["bash", str(SETUP_SCRIPT), "--dry-run"],
+            cwd=PROJECT_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        self.assertIn("--support-device-user whatsmatter", result.stdout)
+
     def test_dry_run_passes_hardening_options_to_install_script(self) -> None:
         result = subprocess.run(
             [

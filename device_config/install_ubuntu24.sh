@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-RUN_USER="${RUN_USER:-$(id -un)}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(id -un)}}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-$PROJECT_ROOT/venv}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"

@@ -108,6 +108,14 @@ class SupportTunnelConfigTest(unittest.TestCase):
         self.assertIn("maint@support.example.com", command)
         self.assertIn("ConnectTimeout=10", command)
 
+    def test_build_ssh_command_disables_autossh_monitor_port(self) -> None:
+        config = _valid_config(command="autossh")
+
+        command = build_ssh_command(config)
+
+        self.assertEqual("autossh", command[0])
+        self.assertEqual(["-M", "0"], command[1:3])
+
     def test_build_operator_connect_command_uses_proxycommand(self) -> None:
         config = _valid_config()
 

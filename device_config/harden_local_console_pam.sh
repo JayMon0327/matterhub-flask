@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-RUN_USER="${RUN_USER:-$(id -un)}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(id -un)}}"
 PAM_LOGIN_PATH="${PAM_LOGIN_PATH:-/etc/pam.d/login}"
 GDM_PASSWORD_PAM_PATH="${GDM_PASSWORD_PAM_PATH:-/etc/pam.d/gdm-password}"
 GDM_AUTOLOGIN_PAM_PATH="${GDM_AUTOLOGIN_PAM_PATH:-/etc/pam.d/gdm-autologin}"

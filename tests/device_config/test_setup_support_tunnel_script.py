@@ -143,6 +143,42 @@ class SetupSupportTunnelScriptTest(unittest.TestCase):
             )
             self.assertIn("SUPPORT_TUNNEL_REMOTE_PORT=22321", output)
 
+    def test_dry_run_prefers_sudo_user_when_run_user_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("", encoding="utf-8")
+
+            env = os.environ.copy()
+            env.pop("RUN_USER", None)
+            env["SUDO_USER"] = "whatsmatter"
+            env["PYTHON_BIN"] = sys.executable
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(SETUP_SCRIPT),
+                    "--dry-run",
+                    "--env-file",
+                    str(env_file),
+                    "--host",
+                    "support.whatsmatter.local",
+                    "--user",
+                    "whatsmatter",
+                    "--remote-port",
+                    "22321",
+                ],
+                cwd=PROJECT_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIn(
+                "key_path=/home/whatsmatter/.ssh/matterhub_support_tunnel_ed25519",
+                result.stdout,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

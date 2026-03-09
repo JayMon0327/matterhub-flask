@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-RUN_USER="${RUN_USER:-$(id -un)}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(id -un)}}"
 ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/.env}"
 DEFAULT_PYTHON_BIN="$PROJECT_ROOT/venv/bin/python"
 if [ -x "$DEFAULT_PYTHON_BIN" ]; then

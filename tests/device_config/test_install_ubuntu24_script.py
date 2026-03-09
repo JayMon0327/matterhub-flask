@@ -52,6 +52,22 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         )
         self.assertIn("OS 패키지 설치 단계 생략", result.stdout)
 
+    def test_dry_run_prefers_sudo_user_when_run_user_is_missing(self) -> None:
+        env = os.environ.copy()
+        env.pop("RUN_USER", None)
+        env["SUDO_USER"] = "whatsmatter"
+
+        result = subprocess.run(
+            ["bash", str(INSTALL_SCRIPT), "--dry-run", "--skip-os-packages"],
+            cwd=PROJECT_ROOT,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("서비스 실행 사용자: whatsmatter", result.stdout)
+
     def test_dry_run_can_disable_local_mdns(self) -> None:
         result = subprocess.run(
             [

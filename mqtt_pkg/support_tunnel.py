@@ -173,29 +173,34 @@ def build_ssh_command(config: TunnelConfig) -> list[str]:
         f"{config.remote_bind_address}:{config.remote_port}:localhost:{config.local_port}"
     )
 
-    command = [
-        config.command,
-        "-N",
-        "-T",
-        "-R",
-        reverse_spec,
-        "-p",
-        str(config.port),
-        "-o",
-        "ExitOnForwardFailure=yes",
-        "-o",
-        f"ConnectTimeout={config.connect_timeout_seconds}",
-        "-o",
-        f"ServerAliveInterval={config.server_alive_interval}",
-        "-o",
-        f"ServerAliveCountMax={config.server_alive_count_max}",
-        "-o",
-        (
-            "StrictHostKeyChecking=yes"
-            if config.strict_host_key_checking
-            else "StrictHostKeyChecking=no"
-        ),
-    ]
+    command = [config.command]
+    if config.command == "autossh":
+        command.extend(["-M", "0"])
+
+    command.extend(
+        [
+            "-N",
+            "-T",
+            "-R",
+            reverse_spec,
+            "-p",
+            str(config.port),
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            f"ConnectTimeout={config.connect_timeout_seconds}",
+            "-o",
+            f"ServerAliveInterval={config.server_alive_interval}",
+            "-o",
+            f"ServerAliveCountMax={config.server_alive_count_max}",
+            "-o",
+            (
+                "StrictHostKeyChecking=yes"
+                if config.strict_host_key_checking
+                else "StrictHostKeyChecking=no"
+            ),
+        ]
+    )
 
     if config.known_hosts_path:
         command.extend(["-o", f"UserKnownHostsFile={config.known_hosts_path}"])

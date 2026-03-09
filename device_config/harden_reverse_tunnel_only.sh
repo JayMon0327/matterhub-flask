@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-RUN_USER="${RUN_USER:-$(id -un)}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(id -un)}}"
 ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/.env}"
 SSHD_DROPIN_PATH="${SSHD_DROPIN_PATH:-/etc/ssh/sshd_config.d/90-matterhub-reverse-tunnel-only.conf}"
 DRY_RUN=0
