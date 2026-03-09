@@ -50,6 +50,8 @@ bash device_config/setup_initial_device.sh
 - Wi-Fi/AP 기본값을 `.env`에 반영
 - `install_ubuntu24.sh` 호출
 - `network-manager`, `nmcli`, AP/polkit 권한 설정 포함
+- `iw` 설치 및 Wi-Fi 국가코드(`WIFI_COUNTRY_CODE`) 고정
+- AP 모드 진입 전 충돌 서비스(`WIFI_AP_CONFLICT_SERVICES`, 기본 `named.service`) 제어 권한 설치
 - `openssh-server` 설치 및 `ssh` 서비스 `enable --now`
 - venv/requirements/systemd 서비스 설치 및 재시작
 
@@ -115,6 +117,8 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_AP_SSID` (기본: `Matterhub-Setup-WhatsMatter`)
 - `WIFI_AP_PASSWORD` (기본: `00000000`)
 - `WIFI_AP_IPV4_CIDR` (기본: `10.42.0.1/24`)
+- `WIFI_COUNTRY_CODE` (기본: `KR`)
+- `WIFI_AP_CONFLICT_SERVICES` (기본: `named.service`)
 - `WIFI_AUTO_AP_ON_BOOT` (기본: `true`)
 - `WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS` (기본: `45`, 부팅 직후 AP 전환 전 대기시간)
 - `WIFI_AUTO_AP_ON_DISCONNECT` (기본: `true`)
@@ -149,6 +153,20 @@ sudo nmcli connection up "$PROFILE_NAME"
 ```bash
 nmcli -f NAME,UUID,TYPE,AUTOCONNECT connection show
 ```
+
+## 8.2 AP 모드가 보이지 않을 때
+
+먼저 아래 3가지를 확인한다.
+
+```bash
+iw reg get
+sudo ss -lntup | grep :53
+nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status
+```
+
+- `phy#1 country 99: DFS-UNSET` 이면 국가코드가 제대로 고정되지 않은 상태일 수 있다.
+- `named.service` 가 `wlan0:53` 을 점유하고 있으면 `NetworkManager shared hotspot` 의 dnsmasq 가 실패할 수 있다.
+- 현재 설치 스크립트는 AP 진입 시 기본적으로 `named.service` 를 잠시 중단했다가, STA 연결 복귀 후 다시 시작하도록 구성한다.
 
 ## 9. 권장 운영 정책
 

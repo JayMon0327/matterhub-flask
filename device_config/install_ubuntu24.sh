@@ -17,6 +17,8 @@ HARDEN_LOCAL_CONSOLE_PAM=0
 LOCAL_MDNS_ENABLED="${LOCAL_MDNS_ENABLED:-1}"
 MATTERHUB_LOCAL_HOSTNAME="${MATTERHUB_LOCAL_HOSTNAME:-matterhub-setup-whatsmatter}"
 MATTERHUB_LOCAL_SERVICE_NAME="${MATTERHUB_LOCAL_SERVICE_NAME:-MatterHub Wi-Fi Setup}"
+WIFI_COUNTRY_CODE="${WIFI_COUNTRY_CODE:-KR}"
+WIFI_AP_CONFLICT_SERVICES="${WIFI_AP_CONFLICT_SERVICES:-named.service}"
 SUPPORT_HOST="${SUPPORT_HOST:-${SUPPORT_TUNNEL_HOST:-}}"
 SUPPORT_USER="${SUPPORT_USER:-${SUPPORT_TUNNEL_USER:-}}"
 SUPPORT_PORT="${SUPPORT_PORT:-${SUPPORT_TUNNEL_PORT:-}}"
@@ -26,6 +28,7 @@ SUPPORT_RELAY_OPERATOR_USER="${SUPPORT_RELAY_OPERATOR_USER:-${SUPPORT_TUNNEL_REL
 SUPPORT_RELAY_ACCESS_PUBKEY="${SUPPORT_RELAY_ACCESS_PUBKEY:-${SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY:-}}"
 HARDEN_ALLOW_INBOUND_PORTS=()
 POLKIT_RULE_PATH="${POLKIT_RULE_PATH:-/etc/polkit-1/rules.d/49-matterhub-networkmanager.rules}"
+WIFI_AP_SUDOERS_PATH="${WIFI_AP_SUDOERS_PATH:-/etc/sudoers.d/90-matterhub-wifi-ap}"
 
 log() {
   printf '[matterhub-install] %s\n' "$*"
@@ -91,6 +94,10 @@ Options:
                       Set local mDNS hostname label (default: matterhub-setup-whatsmatter).
   --local-service-name <name>
                       Set HTTP DNS-SD service name (default: MatterHub Wi-Fi Setup).
+  --wifi-country-code <code>
+                      Regulatory domain / Wi-Fi country code (default: KR).
+  --wifi-ap-conflict-services <csv>
+                      Comma-separated services to pause during AP mode (default: named.service).
 
 Environment variables:
   RUN_USER     systemd service user (default: current shell user)
@@ -164,6 +171,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --local-service-name)
       MATTERHUB_LOCAL_SERVICE_NAME="$2"
+      shift
+      ;;
+    --wifi-country-code)
+      WIFI_COUNTRY_CODE="$2"
+      shift
+      ;;
+    --wifi-ap-conflict-services)
+      WIFI_AP_CONFLICT_SERVICES="$2"
       shift
       ;;
     -h|--help)
@@ -272,10 +287,13 @@ else
   log "로컬 mDNS 접속: 비활성화"
 fi
 
+log "Wi-Fi country code: $WIFI_COUNTRY_CODE"
+log "AP 충돌 서비스: $WIFI_AP_CONFLICT_SERVICES"
+
 if [ "$SKIP_OS_PACKAGES" -eq 0 ]; then
   log "Ubuntu 필수 패키지 설치"
   sudo_cmd apt update
-  sudo_cmd apt install -y python3-venv python3-pip network-manager autossh openssh-server avahi-daemon avahi-utils libnss-mdns
+  sudo_cmd apt install -y python3-venv python3-pip network-manager autossh openssh-server avahi-daemon avahi-utils libnss-mdns iw
 else
   log "OS 패키지 설치 단계 생략"
 fi
@@ -313,6 +331,50 @@ EOF
 
 log "NetworkManager 제어 권한(polkit) 설치: $POLKIT_RULE_PATH"
 sudo_cmd install -m 0644 "$POLKIT_RULE_FILE" "$POLKIT_RULE_PATH"
+
+SYSTEMCTL_BIN="$(command -v systemctl || true)"
+if [ -z "$SYSTEMCTL_BIN" ]; then
+  SYSTEMCTL_BIN="/usr/bin/systemctl"
+fi
+SUDOERS_FILE="$TMP_DIR/90-matterhub-wifi-ap"
+IFS=',' read -r -a AP_CONFLICT_SERVICE_ARRAY <<< "$WIFI_AP_CONFLICT_SERVICES"
+SUDOERS_COMMANDS=()
+for raw_service in "${AP_CONFLICT_SERVICE_ARRAY[@]}"; do
+  service_name="$(printf '%s' "$raw_service" | xargs)"
+  if [ -z "$service_name" ]; then
+    continue
+  fi
+  case "$service_name" in
+    *[!A-Za-z0-9_.@-]*)
+      echo "invalid service name in WIFI_AP_CONFLICT_SERVICES: $service_name" >&2
+      exit 1
+      ;;
+  esac
+  if [[ "$service_name" != *.* ]]; then
+    service_name="${service_name}.service"
+  fi
+  SUDOERS_COMMANDS+=("${SYSTEMCTL_BIN} stop ${service_name}")
+  SUDOERS_COMMANDS+=("${SYSTEMCTL_BIN} start ${service_name}")
+  SUDOERS_COMMANDS+=("${SYSTEMCTL_BIN} is-active ${service_name}")
+done
+
+if [ "${#SUDOERS_COMMANDS[@]}" -gt 0 ]; then
+  {
+    printf 'Defaults:%s !requiretty\n' "$RUN_USER"
+    printf '%s ALL=(root) NOPASSWD: ' "$RUN_USER"
+    first=1
+    for sudoers_command in "${SUDOERS_COMMANDS[@]}"; do
+      if [ "$first" -eq 0 ]; then
+        printf ', '
+      fi
+      first=0
+      printf '%s' "$sudoers_command"
+    done
+    printf '\n'
+  } > "$SUDOERS_FILE"
+  log "AP 충돌 서비스 sudoers 설치: $WIFI_AP_SUDOERS_PATH"
+  sudo_cmd install -m 0440 "$SUDOERS_FILE" "$WIFI_AP_SUDOERS_PATH"
+fi
 
 log "systemd 유닛 렌더링"
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -364,6 +426,23 @@ if [ "$LOCAL_MDNS_ENABLED" -eq 1 ]; then
   log "로컬 mDNS/HTTP 서비스 광고 설정 실행"
   run_cmd "${local_mdns_cmd[@]}"
 fi
+
+REGDOM_SCRIPT="$SCRIPT_DIR/setup_wifi_regulatory_domain.sh"
+if [ ! -f "$REGDOM_SCRIPT" ]; then
+  echo "setup_wifi_regulatory_domain.sh not found: $REGDOM_SCRIPT" >&2
+  exit 1
+fi
+
+regdom_cmd=(
+  bash "$REGDOM_SCRIPT"
+  --country-code "$WIFI_COUNTRY_CODE"
+)
+if [ "$DRY_RUN" -eq 1 ]; then
+  regdom_cmd+=(--dry-run)
+fi
+
+log "Wi-Fi 국가코드/Regdom 설정 실행"
+run_cmd "${regdom_cmd[@]}"
 
 if [ "$SETUP_SUPPORT_TUNNEL" -eq 1 ]; then
   SETUP_SCRIPT="$SCRIPT_DIR/setup_support_tunnel.sh"

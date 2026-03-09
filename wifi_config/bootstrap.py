@@ -31,6 +31,11 @@ def _as_int(value: Optional[str], default: int, *, min_value: int, max_value: in
 
 
 def _create_wifi_service() -> WifiConfigService:
+    ap_conflict_services = [
+        item.strip()
+        for item in os.environ.get("WIFI_AP_CONFLICT_SERVICES", "named.service").split(",")
+        if item.strip()
+    ]
     return WifiConfigService(
         interface=os.environ.get("WIFI_INTERFACE", "wlan0"),
         default_health_host=os.environ.get("WIFI_HEALTH_HOST", "8.8.8.8"),
@@ -38,6 +43,7 @@ def _create_wifi_service() -> WifiConfigService:
         ap_password=os.environ.get("WIFI_AP_PASSWORD", "00000000"),
         ap_ipv4_cidr=os.environ.get("WIFI_AP_IPV4_CIDR", "10.42.0.1/24"),
         ap_band=os.environ.get("WIFI_AP_BAND", "bg"),
+        ap_conflict_services=ap_conflict_services,
     )
 
 

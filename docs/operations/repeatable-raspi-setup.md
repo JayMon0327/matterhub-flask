@@ -81,6 +81,13 @@ bash device_config/setup_initial_device.sh \
 
 `--harden-allow-inbound-port 8100 --harden-allow-inbound-port 8123`를 빼면 1호기와 달리 로컬 Wi-Fi 설정 페이지와 Home Assistant 접근이 막힌다.
 
+현재 통합 스크립트는 기본적으로 아래도 같이 맞춘다.
+
+- `WIFI_COUNTRY_CODE=KR`
+- `WIFI_AP_CONFLICT_SERVICES=named.service`
+
+즉, 신규 장비는 별도 수동 작업 없이 Wi-Fi 국가코드 고정과 AP 모드 충돌 서비스 제어까지 같이 적용된다.
+
 ## 5. 설치 직후 필수 후속 작업
 
 초기 설치만으로는 1호기와 완전히 같지 않다. 아래 후속 작업까지 끝나야 parity가 맞는다.

@@ -28,6 +28,8 @@ WIFI_HEALTH_HOST="${WIFI_HEALTH_HOST:-8.8.8.8}"
 WIFI_AP_SSID="${WIFI_AP_SSID:-Matterhub-Setup-WhatsMatter}"
 WIFI_AP_PASSWORD="${WIFI_AP_PASSWORD:-00000000}"
 WIFI_AP_IPV4_CIDR="${WIFI_AP_IPV4_CIDR:-10.42.0.1/24}"
+WIFI_COUNTRY_CODE="${WIFI_COUNTRY_CODE:-KR}"
+WIFI_AP_CONFLICT_SERVICES="${WIFI_AP_CONFLICT_SERVICES:-named.service}"
 WIFI_AUTO_AP_ON_BOOT="${WIFI_AUTO_AP_ON_BOOT:-1}"
 WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS="${WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS:-45}"
 WIFI_BOOTSTRAP_AP_SSID="${WIFI_BOOTSTRAP_AP_SSID:-}"
@@ -116,6 +118,8 @@ Options:
   --wifi-ap-ssid <ssid>              Default: Matterhub-Setup-WhatsMatter
   --wifi-ap-password <password>      Default: 00000000
   --wifi-ap-ipv4-cidr <cidr>         Default: 10.42.0.1/24
+  --wifi-country-code <code>         Default: KR
+  --wifi-ap-conflict-services <csv>  Default: named.service
   --wifi-auto-ap-on-boot <0|1>       Default: 1
   --wifi-bootstrap-startup-grace-seconds <sec>
                                      Default: 45 (AP 시작 전 대기)
@@ -181,6 +185,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --wifi-ap-ipv4-cidr)
       WIFI_AP_IPV4_CIDR="$2"
+      shift 2
+      ;;
+    --wifi-country-code)
+      WIFI_COUNTRY_CODE="$2"
+      shift 2
+      ;;
+    --wifi-ap-conflict-services)
+      WIFI_AP_CONFLICT_SERVICES="$2"
       shift 2
       ;;
     --wifi-auto-ap-on-boot)
@@ -349,6 +361,8 @@ set_env_value "WIFI_HEALTH_HOST" "$WIFI_HEALTH_HOST"
 set_env_value "WIFI_AP_SSID" "$WIFI_AP_SSID"
 set_env_value "WIFI_AP_PASSWORD" "$WIFI_AP_PASSWORD"
 set_env_value "WIFI_AP_IPV4_CIDR" "$WIFI_AP_IPV4_CIDR"
+set_env_value "WIFI_COUNTRY_CODE" "$WIFI_COUNTRY_CODE"
+set_env_value "WIFI_AP_CONFLICT_SERVICES" "$WIFI_AP_CONFLICT_SERVICES"
 set_env_value "WIFI_AUTO_AP_ON_BOOT" "$WIFI_AUTO_AP_ON_BOOT"
 set_env_value "WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS"
 set_env_value "LOCAL_MDNS_ENABLED" "$LOCAL_MDNS_ENABLED"
@@ -379,6 +393,8 @@ case "$LOCAL_MDNS_ENABLED" in
     install_cmd+=(--disable-local-mdns)
     ;;
 esac
+install_cmd+=(--wifi-country-code "$WIFI_COUNTRY_CODE")
+install_cmd+=(--wifi-ap-conflict-services "$WIFI_AP_CONFLICT_SERVICES")
 install_cmd+=(--local-hostname "$MATTERHUB_LOCAL_HOSTNAME")
 install_cmd+=(--local-service-name "$MATTERHUB_LOCAL_SERVICE_NAME")
 if [ "$SETUP_SUPPORT_TUNNEL" -eq 1 ]; then

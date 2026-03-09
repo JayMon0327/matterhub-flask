@@ -49,8 +49,10 @@ bash device_config/setup_initial_device.sh
 - Ubuntu 필수 패키지 설치
 - `openssh-server` 설치 및 `ssh` 서비스 활성화
 - `avahi-daemon` 기반 로컬 mDNS 호스트명 설정
+- `iw` 설치 및 Wi-Fi 국가코드(`WIFI_COUNTRY_CODE`) 고정
 - `venv` 생성 및 Python 의존성 설치
 - `NetworkManager` 제어 권한(polkit) 설치
+- AP 진입 시 충돌 서비스(`WIFI_AP_CONFLICT_SERVICES`, 기본 `named.service`) 제어 권한 설치
 - systemd 유닛 렌더링 및 설치
 - 서비스 enable/restart
 - `matterhub-update-agent.service` 자동기동 포함

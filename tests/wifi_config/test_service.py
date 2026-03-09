@@ -276,6 +276,129 @@ class WifiConfigServiceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least 8"):
             service.start_ap_mode(ssid="MatterHub-Setup-abc123", password="12345")
 
+    def test_start_ap_mode_pauses_conflicting_service_before_hotspot(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["sudo", "-n", "systemctl", "is-active", "named.service"],
+                    completed(stdout="active\n"),
+                ),
+                (
+                    ["sudo", "-n", "systemctl", "stop", "named.service"],
+                    completed(stdout=""),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "device",
+                        "wifi",
+                        "hotspot",
+                        "ifname",
+                        "wlan0",
+                        "band",
+                        "bg",
+                        "ssid",
+                        "Matterhub-Setup-test01",
+                        "password",
+                        "00000000",
+                    ],
+                    completed(stdout="Hotspot created"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Hotspot-1:ap-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    completed(stdout="Hotspot-1:802-11-wireless:5\n"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        "id",
+                        "Hotspot-1",
+                        "ipv4.method",
+                        "shared",
+                        "ipv4.addresses",
+                        "10.42.0.1/24",
+                        "ipv6.method",
+                        "ignore",
+                    ],
+                    completed(stdout=""),
+                ),
+                (
+                    ["nmcli", "connection", "up", "id", "Hotspot-1", "ifname", "wlan0"],
+                    completed(stdout="Connection up"),
+                ),
+            ]
+        )
+        service = WifiConfigService(
+            runner=runner,
+            ap_password="00000000",
+            default_ap_ssid="Matterhub-Setup-test01",
+            ap_ipv4_cidr="10.42.0.1/24",
+            ap_conflict_services=["named.service"],
+        )
+
+        result = service.start_ap_mode()
+
+        self.assertEqual("Matterhub-Setup-test01", result["ssid"])
+        self.assertIn(
+            ["sudo", "-n", "systemctl", "stop", "named.service"],
+            runner.calls,
+        )
+
+    def test_start_ap_mode_resumes_conflicting_service_on_failure(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["sudo", "-n", "systemctl", "is-active", "named.service"],
+                    completed(stdout="active\n"),
+                ),
+                (
+                    ["sudo", "-n", "systemctl", "stop", "named.service"],
+                    completed(stdout=""),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "device",
+                        "wifi",
+                        "hotspot",
+                        "ifname",
+                        "wlan0",
+                        "band",
+                        "bg",
+                        "ssid",
+                        "Matterhub-Setup-test01",
+                        "password",
+                        "00000000",
+                    ],
+                    completed(return_code=10, stderr="hotspot failed"),
+                ),
+                (
+                    ["sudo", "-n", "systemctl", "start", "named.service"],
+                    completed(stdout=""),
+                ),
+            ]
+        )
+        service = WifiConfigService(
+            runner=runner,
+            ap_password="00000000",
+            default_ap_ssid="Matterhub-Setup-test01",
+            ap_conflict_services=["named.service"],
+        )
+
+        with self.assertRaisesRegex(Exception, "hotspot failed"):
+            service.start_ap_mode()
+
+        self.assertIn(
+            ["sudo", "-n", "systemctl", "start", "named.service"],
+            runner.calls,
+        )
+
     def test_start_ap_mode_retries_when_device_unavailable(self) -> None:
         runner = OrderedRunner(
             [
@@ -485,6 +608,10 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout="connected\n"),
                 ),
                 (
+                    ["sudo", "-n", "systemctl", "start", "named.service"],
+                    completed(stdout=""),
+                ),
+                (
                     ["nmcli", "-t", "-f", "IN-USE,SSID", "device", "wifi", "list", "ifname", "wlan0"],
                     completed(stdout="*:HomeNet\n"),
                 ),
@@ -492,9 +619,11 @@ class WifiConfigServiceTest(unittest.TestCase):
         )
         service = WifiConfigService(
             runner=runner,
+            ap_conflict_services=["named.service"],
             sleep_fn=lambda _: None,
             monotonic_fn=lambda: 0.0,
         )
+        service._paused_conflict_services.add("named.service")
 
         result = service.activate_saved_connection("HomeNet", timeout_seconds=10)
 

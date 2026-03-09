@@ -93,6 +93,7 @@ class WifiConfigService:
         ap_password: str = "00000000",
         ap_ipv4_cidr: str = "10.42.0.1/24",
         ap_band: str = "bg",
+        ap_conflict_services: Optional[list[str]] = None,
         runner: Optional[Runner] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         monotonic_fn: Callable[[], float] = time.monotonic,
@@ -103,6 +104,8 @@ class WifiConfigService:
         self.ap_password = ap_password
         self.ap_ipv4_cidr = ap_ipv4_cidr
         self.ap_band = ap_band.strip()
+        self.ap_conflict_services = self._normalize_service_names(ap_conflict_services or [])
+        self._paused_conflict_services: set[str] = set()
         self._runner: Runner = runner or _default_runner
         self._sleep = sleep_fn
         self._monotonic = monotonic_fn
@@ -240,6 +243,7 @@ class WifiConfigService:
             active = self.get_active_wifi_connection()
             general_state = self._get_general_state()
             if active and active.get("name") == name and general_state.startswith("connected"):
+                self._resume_paused_conflicting_services()
                 return {
                     "success": True,
                     "connection_name": name,
@@ -260,6 +264,8 @@ class WifiConfigService:
         ap_password = (password or "").strip() or self.ap_password
         if len(ap_password) < 8:
             raise ValueError("AP password must be at least 8 characters")
+
+        self._pause_conflicting_services_for_ap()
 
         hotspot_command = [
             "device",
@@ -293,10 +299,15 @@ class WifiConfigService:
                     continue
                 break
         if start_error is not None:
+            self._resume_paused_conflicting_services()
             raise start_error
 
         connection_name = self._resolve_ap_connection_name(ap_ssid)
-        self._configure_ap_ipv4_for_ap(connection_name, ap_ssid)
+        try:
+            self._configure_ap_ipv4_for_ap(connection_name, ap_ssid)
+        except Exception:
+            self._resume_paused_conflicting_services()
+            raise
         gateway_ip = self._ap_gateway_ip()
         return {
             "ssid": ap_ssid,
@@ -367,6 +378,11 @@ class WifiConfigService:
         if (connect_error or not health_ok) and ap_mode_on_failure and not rollback_success:
             ap_mode_result = self.start_ap_mode()
             ap_mode_started = True
+
+        if connect_error is None and health_ok:
+            self._resume_paused_conflicting_services()
+        elif rollback_success:
+            self._resume_paused_conflicting_services()
 
         success = connect_error is None and health_ok
         result: dict[str, object] = {
@@ -622,6 +638,55 @@ class WifiConfigService:
             return True
         except NmcliCommandError:
             return False
+
+    def _pause_conflicting_services_for_ap(self) -> None:
+        for service_name in self.ap_conflict_services:
+            if service_name in self._paused_conflict_services:
+                continue
+            state = self._run_command_best_effort(
+                ["sudo", "-n", "systemctl", "is-active", service_name],
+                timeout=10,
+            )
+            if state not in {"active", "activating"}:
+                continue
+            if self._run_command_success(
+                ["sudo", "-n", "systemctl", "stop", service_name],
+                timeout=20,
+            ):
+                self._paused_conflict_services.add(service_name)
+
+    def _resume_paused_conflicting_services(self) -> None:
+        if not self._paused_conflict_services:
+            return
+        paused_services = list(self._paused_conflict_services)
+        self._paused_conflict_services.clear()
+        for service_name in paused_services:
+            self._run_command_success(
+                ["sudo", "-n", "systemctl", "start", service_name],
+                timeout=20,
+            )
+
+    def _run_command_success(self, command: list[str], *, timeout: int) -> bool:
+        result = self._runner(command, timeout)
+        return result.returncode == 0
+
+    def _run_command_best_effort(self, command: list[str], *, timeout: int) -> str:
+        result = self._runner(command, timeout)
+        if result.returncode != 0:
+            return ""
+        return (result.stdout or "").strip()
+
+    def _normalize_service_names(self, service_names: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in service_names:
+            service_name = item.strip()
+            if not service_name:
+                continue
+            if "." not in service_name:
+                service_name = f"{service_name}.service"
+            if service_name not in normalized:
+                normalized.append(service_name)
+        return normalized
 
     def _ensure_system_autoconnect_profile(
         self,
