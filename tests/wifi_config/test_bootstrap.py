@@ -163,6 +163,7 @@ class WifiBootstrapTest(unittest.TestCase):
                 "WIFI_AP_AUTO_RECONNECT_ENABLED": "1",
                 "WIFI_AP_AUTO_RECONNECT_INTERVAL_SECONDS": "5",
                 "WIFI_AP_AUTO_RECONNECT_TIMEOUT_SECONDS": "20",
+                "WIFI_AP_AUTO_RECONNECT_HOLD_SECONDS": "0",
             },
             clear=False,
         ):
@@ -196,6 +197,7 @@ class WifiBootstrapTest(unittest.TestCase):
             {
                 "WIFI_AUTO_AP_ON_DISCONNECT": "1",
                 "WIFI_AP_AUTO_RECONNECT_ENABLED": "1",
+                "WIFI_AP_AUTO_RECONNECT_HOLD_SECONDS": "45",
             },
             clear=False,
         ):

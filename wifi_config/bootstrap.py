@@ -308,6 +308,12 @@ def watch_disconnection_and_start_ap(
         min_value=5,
         max_value=180,
     )
+    auto_reconnect_hold_seconds = _as_int(
+        os.environ.get("WIFI_AP_AUTO_RECONNECT_HOLD_SECONDS"),
+        45,
+        min_value=0,
+        max_value=600,
+    )
 
     wifi_service = service or _create_wifi_service()
     provision_state = state_store or get_provision_state_store()
@@ -316,6 +322,7 @@ def watch_disconnection_and_start_ap(
     configured_ap_ssid = bootstrap_ap_ssid or wifi_service.default_ap_ssid
 
     disconnected_since: Optional[float] = None
+    ap_active_since: Optional[float] = None
     next_auto_reconnect_check_at = 0.0
     checks = 0
 
@@ -350,12 +357,15 @@ def watch_disconnection_and_start_ap(
         if is_connected or is_ap_active:
             disconnected_since = None
             if is_ap_active:
+                if ap_active_since is None:
+                    ap_active_since = monotonic_fn()
                 provision_state.set_state(
                     "AP_MODE",
                     reason="watchdog_ap_active",
                     details={"ssid": current_ssid or active_name},
                 )
             else:
+                ap_active_since = None
                 provision_state.set_state(
                     "STA_CONNECTED",
                     reason="watchdog_sta_connected",
@@ -363,6 +373,9 @@ def watch_disconnection_and_start_ap(
                 )
             if is_ap_active and auto_reconnect_enabled:
                 now = monotonic_fn()
+                if ap_active_since is not None and now < ap_active_since + auto_reconnect_hold_seconds:
+                    sleep_fn(check_interval)
+                    continue
                 if now >= next_auto_reconnect_check_at:
                     next_auto_reconnect_check_at = now + auto_reconnect_interval
                     candidate = _pick_known_network_candidate(
@@ -419,6 +432,7 @@ def watch_disconnection_and_start_ap(
             sleep_fn(check_interval)
             continue
 
+        ap_active_since = None
         if auto_reconnect_enabled:
             now = monotonic_fn()
             if now >= next_auto_reconnect_check_at:
