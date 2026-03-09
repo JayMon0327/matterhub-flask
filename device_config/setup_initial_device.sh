@@ -65,6 +65,21 @@ run_cmd() {
   "$@"
 }
 
+ensure_env_file_owner() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "env ownership ensure: $ENV_FILE -> $RUN_USER"
+    return 0
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    return 0
+  fi
+  if [ ! -f "$ENV_FILE" ]; then
+    return 0
+  fi
+  chown "$RUN_USER:$RUN_USER" "$ENV_FILE"
+  chmod 0600 "$ENV_FILE"
+}
+
 set_env_value() {
   local key="$1"
   local value="$2"
@@ -380,6 +395,8 @@ fi
 if [ -n "$WIFI_BOOTSTRAP_AP_PASSWORD" ]; then
   set_env_value "WIFI_BOOTSTRAP_AP_PASSWORD" "$WIFI_BOOTSTRAP_AP_PASSWORD"
 fi
+
+ensure_env_file_owner
 
 install_cmd=(bash "$INSTALL_SCRIPT")
 if [ "$DRY_RUN" -eq 1 ]; then

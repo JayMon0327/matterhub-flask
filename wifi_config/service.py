@@ -266,6 +266,7 @@ class WifiConfigService:
             raise ValueError("AP password must be at least 8 characters")
 
         self._pause_conflicting_services_for_ap()
+        self._disconnect_active_wifi_before_ap(ap_ssid)
 
         hotspot_command = [
             "device",
@@ -619,6 +620,14 @@ class WifiConfigService:
     def _recover_hotspot_connection(self) -> None:
         self._run_nmcli_best_effort(["connection", "down", "id", "Hotspot"], timeout=15)
         self._run_nmcli_best_effort(["connection", "delete", "id", "Hotspot"], timeout=15)
+
+    def _disconnect_active_wifi_before_ap(self, ap_ssid: str) -> None:
+        active = self.get_active_wifi_connection()
+        active_name = str((active or {}).get("name") or "").strip()
+        if not active_name or _is_hotspot_profile_name(active_name, ap_ssid=ap_ssid):
+            return
+        self._run_nmcli_best_effort(["connection", "down", "id", active_name], timeout=20)
+        self._run_nmcli_best_effort(["device", "disconnect", self.interface], timeout=15)
 
     def _is_device_unavailable_error(self, error: NmcliCommandError) -> bool:
         text = f"{error.stderr}\n{error.stdout}".lower()

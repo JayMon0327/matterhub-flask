@@ -34,6 +34,7 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         self.assertIn("env update: UPDATE_AGENT_ENABLED=1", output)
         self.assertIn("env update: UPDATE_AGENT_REQUIRE_MANIFEST=1", output)
         self.assertIn("env update: UPDATE_AGENT_REQUIRE_SHA256=0", output)
+        self.assertIn("env ownership ensure:", output)
         self.assertIn("install_ubuntu24.sh 실행", output)
         self.assertIn("install_ubuntu24.sh --dry-run", output)
         self.assertIn("--local-hostname matterhub-setup-whatsmatter", output)

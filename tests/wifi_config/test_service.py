@@ -194,6 +194,18 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(return_code=10, stderr="activation failed"),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="NewWifi:new-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "connection", "down", "id", "NewWifi"],
+                    completed(stdout="Connection deactivated"),
+                ),
+                (
+                    ["nmcli", "device", "disconnect", "wlan0"],
+                    completed(stdout="Device disconnected"),
+                ),
+                (
                     [
                         "nmcli",
                         "device",
@@ -288,6 +300,18 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout=""),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Supervisor wlan0:sta-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "connection", "down", "id", "Supervisor wlan0"],
+                    completed(stdout="Connection deactivated"),
+                ),
+                (
+                    ["nmcli", "device", "disconnect", "wlan0"],
+                    completed(stdout="Device disconnected"),
+                ),
+                (
                     [
                         "nmcli",
                         "device",
@@ -362,6 +386,18 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout=""),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Supervisor wlan0:sta-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "connection", "down", "id", "Supervisor wlan0"],
+                    completed(stdout="Connection deactivated"),
+                ),
+                (
+                    ["nmcli", "device", "disconnect", "wlan0"],
+                    completed(stdout="Device disconnected"),
+                ),
+                (
                     [
                         "nmcli",
                         "device",
@@ -402,6 +438,18 @@ class WifiConfigServiceTest(unittest.TestCase):
     def test_start_ap_mode_retries_when_device_unavailable(self) -> None:
         runner = OrderedRunner(
             [
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Supervisor wlan0:sta-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "connection", "down", "id", "Supervisor wlan0"],
+                    completed(stdout="Connection deactivated"),
+                ),
+                (
+                    ["nmcli", "device", "disconnect", "wlan0"],
+                    completed(stdout="Device disconnected"),
+                ),
                 (
                     [
                         "nmcli",
@@ -496,6 +544,18 @@ class WifiConfigServiceTest(unittest.TestCase):
     def test_start_ap_mode_falls_back_to_hotspot_profile_name(self) -> None:
         runner = OrderedRunner(
             [
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="HomeNet:home-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "connection", "down", "id", "HomeNet"],
+                    completed(stdout="Connection deactivated"),
+                ),
+                (
+                    ["nmcli", "device", "disconnect", "wlan0"],
+                    completed(stdout="Device disconnected"),
+                ),
                 (
                     [
                         "nmcli",
