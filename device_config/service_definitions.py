@@ -36,7 +36,13 @@ DEFAULT_HARDENING_DIRECTIVES: tuple[str, ...] = (
 API_HARDENING_DIRECTIVES: tuple[str, ...] = tuple(
     directive
     for directive in DEFAULT_HARDENING_DIRECTIVES
-    if directive not in {"NoNewPrivileges=true", "RestrictSUIDSGID=true"}
+    if directive
+    not in {
+        "NoNewPrivileges=true",
+        "RestrictSUIDSGID=true",
+        "CapabilityBoundingSet=",
+        "AmbientCapabilities=",
+    }
 )
 
 

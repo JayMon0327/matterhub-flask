@@ -68,10 +68,14 @@ class ServiceDefinitionsTest(unittest.TestCase):
         self.assertEqual("/srv/matterhub", context["@WORKING_DIRECTORY@"])
         self.assertNotIn("NoNewPrivileges=true", context["@HARDENING_DIRECTIVES@"])
         self.assertNotIn("RestrictSUIDSGID=true", context["@HARDENING_DIRECTIVES@"])
+        self.assertNotIn("CapabilityBoundingSet=", context["@HARDENING_DIRECTIVES@"])
+        self.assertNotIn("AmbientCapabilities=", context["@HARDENING_DIRECTIVES@"])
 
     def test_api_hardening_drops_privilege_blocking_directives(self) -> None:
         self.assertNotIn("NoNewPrivileges=true", API_HARDENING_DIRECTIVES)
         self.assertNotIn("RestrictSUIDSGID=true", API_HARDENING_DIRECTIVES)
+        self.assertNotIn("CapabilityBoundingSet=", API_HARDENING_DIRECTIVES)
+        self.assertNotIn("AmbientCapabilities=", API_HARDENING_DIRECTIVES)
         self.assertIn("ProtectSystem=full", API_HARDENING_DIRECTIVES)
 
     def test_default_hardening_directives_attached(self) -> None:

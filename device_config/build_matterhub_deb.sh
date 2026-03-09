@@ -192,9 +192,13 @@ create_unit() {
   local exec_path="$3"
   local no_new_privileges="NoNewPrivileges=true"
   local restrict_suidsgid="RestrictSUIDSGID=true"
+  local capability_bounding_set="CapabilityBoundingSet="
+  local ambient_capabilities="AmbientCapabilities="
   if [ "$unit_name" = "matterhub-api" ]; then
     no_new_privileges=""
     restrict_suidsgid=""
+    capability_bounding_set=""
+    ambient_capabilities=""
   fi
   cat > "${SYSTEMD_DIR}/${unit_name}.service" <<EOF
 [Unit]
@@ -221,8 +225,8 @@ ProtectKernelModules=true
 ${restrict_suidsgid}
 LockPersonality=true
 RestrictRealtime=true
-CapabilityBoundingSet=
-AmbientCapabilities=
+${capability_bounding_set}
+${ambient_capabilities}
 UMask=0077
 
 [Install]

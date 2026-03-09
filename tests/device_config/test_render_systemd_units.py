@@ -72,14 +72,17 @@ class RenderSystemdUnitsTest(unittest.TestCase):
             )
             self.assertNotIn("NoNewPrivileges=true", api_text)
             self.assertNotIn("RestrictSUIDSGID=true", api_text)
+            self.assertNotIn("CapabilityBoundingSet=", api_text)
+            self.assertNotIn("AmbientCapabilities=", api_text)
             self.assertIn("ProtectSystem=full", api_text)
-            self.assertIn("CapabilityBoundingSet=", api_text)
             self.assertIn(
                 "ExecStart=/srv/matterhub/venv/bin/python /srv/matterhub/mqtt.py",
                 mqtt_text,
             )
             self.assertIn("NoNewPrivileges=true", mqtt_text)
             self.assertIn("RestrictSUIDSGID=true", mqtt_text)
+            self.assertIn("CapabilityBoundingSet=", mqtt_text)
+            self.assertIn("AmbientCapabilities=", mqtt_text)
             self.assertIn(
                 "ExecStart=/srv/matterhub/venv/bin/python /srv/matterhub/support_tunnel.py",
                 support_tunnel_text,
