@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/.env}"
 AVAHI_SERVICE_DIR="${AVAHI_SERVICE_DIR:-/etc/avahi/services}"
 AVAHI_SERVICE_FILE="${AVAHI_SERVICE_FILE:-matterhub-wifi-admin.service}"
+HOSTS_PATH="${HOSTS_PATH:-/etc/hosts}"
 
 DRY_RUN=0
 HOSTNAME_VALUE="${MATTERHUB_LOCAL_HOSTNAME:-matterhub-setup-whatsmatter}"
@@ -152,6 +153,7 @@ cleanup() {
 trap cleanup EXIT
 
 SERVICE_FILE_PATH="$TMP_DIR/$AVAHI_SERVICE_FILE"
+HOSTS_TMP="$TMP_DIR/hosts"
 cat > "$SERVICE_FILE_PATH" <<EOF
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
@@ -165,12 +167,46 @@ cat > "$SERVICE_FILE_PATH" <<EOF
 </service-group>
 EOF
 
+render_hosts_file() {
+  local source_path="$1"
+  local output_path="$2"
+  local hostname_value="$3"
+
+  if [ -f "$source_path" ]; then
+    cp "$source_path" "$output_path"
+  else
+    : > "$output_path"
+  fi
+
+  awk -v hostname_value="$hostname_value" '
+    BEGIN { updated=0 }
+    /^[[:space:]]*127\.0\.1\.1([[:space:]]|$)/ {
+      if (!updated) {
+        print "127.0.1.1 " hostname_value
+        updated=1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!updated) {
+        print "127.0.1.1 " hostname_value
+      }
+    }
+  ' "$output_path" > "$output_path.new"
+  mv "$output_path.new" "$output_path"
+}
+
+render_hosts_file "$HOSTS_PATH" "$HOSTS_TMP" "$HOSTNAME_VALUE"
+
 log "env_file=$ENV_FILE"
 log "normalized_hostname=$HOSTNAME_VALUE"
 log "service_name=$SERVICE_NAME"
 log "preferred_url=http://${HOSTNAME_VALUE}.local:${HTTP_PORT}${SETUP_PATH}"
+log "hosts_entry=127.0.1.1 ${HOSTNAME_VALUE}"
 
 sudo_cmd hostnamectl set-hostname "$HOSTNAME_VALUE"
+sudo_cmd install -m 0644 "$HOSTS_TMP" "$HOSTS_PATH"
 sudo_cmd install -d -m 0755 "$AVAHI_SERVICE_DIR"
 sudo_cmd install -m 0644 "$SERVICE_FILE_PATH" "$AVAHI_SERVICE_DIR/$AVAHI_SERVICE_FILE"
 sudo_cmd systemctl enable --now avahi-daemon

@@ -41,8 +41,8 @@ except ImportError:
 
 load_dotenv()
 
-# mqtt 모듈에서 AWSProvisioningClient import
-from mqtt import AWSProvisioningClient
+# 리팩터링 후 프로비저닝 클라이언트는 mqtt_pkg 아래로 이동했다.
+from mqtt_pkg.provisioning import AWSProvisioningClient
 
 
 def main():

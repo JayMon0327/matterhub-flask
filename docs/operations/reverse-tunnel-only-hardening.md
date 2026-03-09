@@ -33,9 +33,14 @@ inbound 예외 포트가 필요하면:
 ```bash
 bash device_config/harden_reverse_tunnel_only.sh \
   --run-user whatsmatter \
-  --allow-inbound-port 80 \
-  --allow-inbound-port 443
+  --allow-inbound-port 8100 \
+  --allow-inbound-port 8123
 ```
+
+현재 1호기 parity 기준 권장 예외 포트는 아래 두 개다.
+
+- `8100/tcp`: MatterHub Wi-Fi 설정 Web UI
+- `8123/tcp`: Home Assistant
 
 ## 4. 통합 설치 스크립트에서 같이 적용
 
@@ -48,7 +53,9 @@ bash device_config/setup_initial_device.sh \
   --support-user whatsmatter \
   --support-relay-operator-user ec2-user \
   --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY" \
-  --harden-reverse-tunnel-only
+  --harden-reverse-tunnel-only \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123
 ```
 
 ## 5. 검증

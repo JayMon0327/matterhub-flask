@@ -36,7 +36,9 @@ bash device_config/install_ubuntu24.sh \
   --support-user whatsmatter \
   --support-device-user whatsmatter \
   --support-relay-operator-user ec2-user \
-  --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY"
+  --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY" \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123
 ```
 
 reverse tunnel만 허용(직접 SSH 차단)까지 같이 적용하려면:
@@ -49,7 +51,9 @@ bash device_config/install_ubuntu24.sh \
   --support-device-user whatsmatter \
   --support-relay-operator-user ec2-user \
   --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY" \
-  --harden-reverse-tunnel-only
+  --harden-reverse-tunnel-only \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123
 ```
 
 reverse tunnel만 별도로 구성하려면 아래 명령을 사용한다.
@@ -74,12 +78,44 @@ bash device_config/setup_support_tunnel.sh \
 
 ## 4. support server에 공개키 등록
 
-설치 스크립트 출력에 있는 `authorized_keys` 한 줄을 support server의 유지보수 계정(`whatsmatter`)에 추가한다.
+설치 스크립트 출력에 있는 `authorized_keys` 한 줄을 support server의 유지보수 계정(`whatsmatter`)에 추가해야 실제 터널이 붙는다.
 
 예시 형태:
 
 ```text
 restrict,port-forwarding,permitlisten="127.0.0.1:<REMOTE_PORT>" ssh-ed25519 AAAA... matterhub-support-tunnel@...
+```
+
+`j <hub_id>`까지 사용하려면 아래 두 단계가 모두 끝나야 한다.
+
+1. 장비에서 `matterhub_id` 발급
+
+```bash
+cd /home/whatsmatter/Desktop/matterhub
+venv/bin/python3 run_provision.py
+sudo systemctl restart matterhub-mqtt.service
+```
+
+2. relay `hubs.map` 등록
+
+장비 셸에서 공개키 확인:
+
+```bash
+cat /home/whatsmatter/.ssh/matterhub_support_tunnel_ed25519.pub
+```
+
+운영자 PC에서:
+
+```bash
+bash device_config/register_hub_on_relay.sh \
+  --relay-host 3.38.126.167 \
+  --relay-port 443 \
+  --relay-user ec2-user \
+  --relay-key ~/.ssh/matterhub-relay-operator-key.pem \
+  --hub-id <matterhub_id> \
+  --remote-port <REMOTE_PORT> \
+  --hub-pubkey /tmp/matterhub_support_tunnel_ed25519.pub \
+  --device-user whatsmatter
 ```
 
 ## 5. 터널 시작/상태 확인

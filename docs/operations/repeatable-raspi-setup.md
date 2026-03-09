@@ -41,9 +41,12 @@ bash device_config/setup_initial_device.sh \
   --enable-support-tunnel-now \
   --support-host 3.38.126.167 \
   --support-user whatsmatter \
+  --support-remote-port <장비별_고유_포트> \
   --support-relay-operator-user ec2-user \
   --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY" \
   --harden-reverse-tunnel-only \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123 \
   --harden-local-console-pam
 ```
 
@@ -63,15 +66,78 @@ bash device_config/setup_initial_device.sh \
   --enable-support-tunnel-now \
   --support-host 3.38.126.167 \
   --support-user whatsmatter \
+  --support-remote-port <장비별_고유_포트> \
   --support-relay-operator-user ec2-user \
   --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY" \
   --harden-reverse-tunnel-only \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123 \
   --harden-local-console-pam
 ```
 
 `--skip-os-packages`는 OS 패키지 설치 단계를 건너뛰므로, 최초 설치에서는 사용하지 않는다.
 
-## 5. 설치 후 검증
+`--support-remote-port`는 장비마다 반드시 다르게 잡는다. 예: 1호기 `22608`, 2호기 `22609`, 3호기 `22610`.
+
+`--harden-allow-inbound-port 8100 --harden-allow-inbound-port 8123`를 빼면 1호기와 달리 로컬 Wi-Fi 설정 페이지와 Home Assistant 접근이 막힌다.
+
+## 5. 설치 직후 필수 후속 작업
+
+초기 설치만으로는 1호기와 완전히 같지 않다. 아래 후속 작업까지 끝나야 parity가 맞는다.
+
+### 5.1 matterhub_id 발급
+
+```bash
+cd ~/Desktop/matterhub
+venv/bin/python3 run_provision.py
+```
+
+성공하면 `.env`에 `matterhub_id="..."`가 저장된다.
+
+### 5.2 MQTT 재시작
+
+```bash
+sudo systemctl restart matterhub-mqtt.service
+```
+
+재시작 후 기대 로그:
+
+- `matterhub_id 로드됨: <발급값>`
+- `[MQTT][SUBSCRIBE] complete total=2 success=2 failed=0 status=success`
+
+### 5.3 relay 등록
+
+장비 공개키와 `hub_id`, `remote_port`를 relay에 등록해야 `j <hub_id>`가 동작한다.
+
+장비 셸에서 공개키 확인:
+
+```bash
+cat /home/whatsmatter/.ssh/matterhub_support_tunnel_ed25519.pub
+```
+
+운영자 PC에서 위 공개키 한 줄을 `/tmp/matterhub_support_tunnel_ed25519.pub`로 저장한 뒤:
+
+```bash
+cd /path/to/local/matterhub-flask
+bash device_config/register_hub_on_relay.sh \
+  --relay-host 3.38.126.167 \
+  --relay-port 443 \
+  --relay-user ec2-user \
+  --relay-key ~/.ssh/matterhub-relay-operator-key.pem \
+  --hub-id <matterhub_id> \
+  --remote-port <장비별_고유_포트> \
+  --hub-pubkey /tmp/matterhub_support_tunnel_ed25519.pub \
+  --device-user whatsmatter
+```
+
+등록 후 relay에서 검증:
+
+```bash
+ssh -i ~/.ssh/matterhub-relay-operator-key.pem -p 443 ec2-user@3.38.126.167
+j <matterhub_id>
+```
+
+## 6. 설치 후 검증
 
 ```bash
 systemctl is-active matterhub-api.service
@@ -100,7 +166,19 @@ Wi-Fi 설정 페이지:
 
 `.local` 접속이 안 되는 단말/망에서는 기존 IP 또는 AP 주소를 사용한다.
 
-## 6. 업데이트 번들 적용 (운영 중 버전 교체)
+## 7. 2호기 적용에서 실제 확인된 차이와 보정
+
+- 차이 1: `--harden-reverse-tunnel-only`만 적용하면 `8100/8123` inbound가 막혀 1호기와 달라진다.
+  - 보정: 설치 명령에 `--harden-allow-inbound-port 8100 --harden-allow-inbound-port 8123`를 반드시 포함한다.
+- 차이 2: support tunnel은 설치 직후 바로 살아나지 않을 수 있다.
+  - 원인: relay `authorized_keys`와 `hubs.map`에 장비 공개키/매핑이 아직 없기 때문이다.
+  - 보정: `register_hub_on_relay.sh` 단계까지 완료한다.
+- 차이 3: `matterhub_id`는 초기 설치만으로 자동 반영되지 않을 수 있다.
+  - 보정: `venv/bin/python3 run_provision.py` 실행 후 `matterhub-mqtt.service`를 재시작한다.
+- 차이 4: mDNS hostname만 바꾸고 `/etc/hosts`를 갱신하지 않으면 `sudo: unable to resolve host ...` 경고가 생긴다.
+  - 보정: `setup_local_hostname_mdns.sh`가 `/etc/hosts`의 `127.0.1.1` 엔트리까지 같이 관리하도록 수정했다.
+
+## 8. 업데이트 번들 적용 (운영 중 버전 교체)
 
 ### 6.1 수동 적용
 
@@ -141,7 +219,7 @@ bash device_config/setup_initial_device.sh \
 
 이 경우 `update/inbox/<bundle>.tar.gz.sha256` 사이드카 파일도 함께 넣어야 한다.
 
-## 7. 실행파일 전용 납품 흐름 (Git 비의존 운영)
+## 9. 실행파일 전용 납품 흐름 (Git 비의존 운영)
 
 빌드 서버(개발 PC)에서:
 
@@ -163,7 +241,7 @@ bash device_config/install_runtime_bundle.sh \
 
 위 경로는 `.py` 원본 없이 runtime bundle만 설치하는 절차다.
 
-## 8. 선택 옵션 (필요 시)
+## 10. 선택 옵션 (필요 시)
 
 AP 기본값을 변경하고 싶다면 설치 명령에 옵션을 추가한다.
 
@@ -175,7 +253,7 @@ AP 기본값을 변경하고 싶다면 설치 명령에 옵션을 추가한다.
 --local-service-name "MatterHub Wi-Fi Setup"
 ```
 
-## 9. 참고
+## 11. 참고
 
 - [납품 및 운영 런북](./delivery-runbook.md)
 - [Wi-Fi 설정 방법](../network/wifi-setup-guide.md)

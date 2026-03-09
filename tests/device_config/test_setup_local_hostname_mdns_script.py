@@ -30,7 +30,9 @@ class SetupLocalHostnameMdnsScriptTest(unittest.TestCase):
         output = result.stdout
         self.assertIn("normalized_hostname=matterhub-setup-whatsmatter", output)
         self.assertIn("preferred_url=http://matterhub-setup-whatsmatter.local:8100/local/admin/network", output)
+        self.assertIn("hosts_entry=127.0.1.1 matterhub-setup-whatsmatter", output)
         self.assertIn("[dry-run] sudo hostnamectl set-hostname matterhub-setup-whatsmatter", output)
+        self.assertIn("[dry-run] sudo install -m 0644", output)
         self.assertIn("[dry-run] sudo systemctl enable --now avahi-daemon", output)
         self.assertIn("fallback_url=http://10.42.0.1:8100/local/admin/network", output)
 

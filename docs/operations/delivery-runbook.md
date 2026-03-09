@@ -65,7 +65,9 @@ bash device_config/install_ubuntu24.sh \
   --support-host 3.38.126.167 \
   --support-user whatsmatter \
   --support-relay-operator-user ec2-user \
-  --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY"
+  --support-relay-access-pubkey "$RELAY_HUB_ACCESS_PUBKEY" \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123
 ```
 
 ## 4. 운영 절차 초안
@@ -191,6 +193,8 @@ bash device_config/build_matterhub_deb.sh --version 2026.03.05 --mode pyc
 bash device_config/setup_initial_device.sh \
   --setup-support-tunnel \
   --harden-reverse-tunnel-only \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123 \
   --harden-local-console-pam
 ```
 
