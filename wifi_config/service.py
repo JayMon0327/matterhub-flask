@@ -73,6 +73,16 @@ def _parse_terse_rows(output: str, columns: list[str]) -> list[dict[str, str]]:
     return rows
 
 
+def _is_hotspot_profile_name(name: str, *, ap_ssid: str = "") -> bool:
+    normalized = name.strip().lower()
+    normalized_ap_ssid = ap_ssid.strip().lower()
+    if not normalized:
+        return False
+    if normalized_ap_ssid and normalized == normalized_ap_ssid:
+        return True
+    return normalized.startswith("hotspot")
+
+
 class WifiConfigService:
     def __init__(
         self,
@@ -498,7 +508,7 @@ class WifiConfigService:
 
     def _configure_ap_ipv4_for_ap(self, connection_name: str, ap_ssid: str) -> None:
         candidates: list[str] = []
-        for candidate in [connection_name, "Hotspot", ap_ssid]:
+        for candidate in [connection_name, *self._list_hotspot_connection_names(ap_ssid), "Hotspot", ap_ssid]:
             normalized = candidate.strip()
             if normalized and normalized not in candidates:
                 candidates.append(normalized)
@@ -520,8 +530,11 @@ class WifiConfigService:
     def _resolve_ap_connection_name(self, ap_ssid: str) -> str:
         active = self.get_active_wifi_connection()
         active_name = str((active or {}).get("name") or "").strip()
-        if active_name in {"Hotspot", ap_ssid}:
+        if _is_hotspot_profile_name(active_name, ap_ssid=ap_ssid):
             return active_name
+        hotspot_names = self._list_hotspot_connection_names(ap_ssid)
+        if hotspot_names:
+            return hotspot_names[0]
         return "Hotspot"
 
     def _ap_gateway_ip(self) -> str:
@@ -550,6 +563,34 @@ class WifiConfigService:
             if ssid:
                 return ssid
         return None
+
+    def _list_hotspot_connection_names(self, ap_ssid: str) -> list[str]:
+        try:
+            rows = _parse_terse_rows(
+                self._run_nmcli(
+                    ["-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    timeout=10,
+                ),
+                ["NAME", "TYPE", "TIMESTAMP"],
+            )
+        except NmcliCommandError:
+            return []
+
+        candidates: list[tuple[int, str]] = []
+        for row in rows:
+            if row.get("TYPE") != "802-11-wireless":
+                continue
+            name = str(row.get("NAME") or "").strip()
+            if not _is_hotspot_profile_name(name, ap_ssid=ap_ssid):
+                continue
+            try:
+                timestamp = int(str(row.get("TIMESTAMP") or "0").strip() or "0")
+            except ValueError:
+                timestamp = 0
+            candidates.append((timestamp, name))
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [name for _, name in candidates]
 
     def _prepare_device_for_ap_retry(self) -> None:
         self._run_nmcli_best_effort(["radio", "wifi", "on"], timeout=10)

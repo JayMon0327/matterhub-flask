@@ -62,7 +62,9 @@ def _pick_known_network_candidate(
         profile_ssid = str(item.get("ssid") or profile_name).strip()
         if not profile_name:
             continue
-        if profile_ssid == configured_ap_ssid or profile_name == configured_ap_ssid:
+        if _is_ap_profile(profile_name, configured_ap_ssid=configured_ap_ssid):
+            continue
+        if _is_ap_profile(profile_ssid, configured_ap_ssid=configured_ap_ssid):
             continue
         candidates.append(
             {
@@ -91,6 +93,16 @@ def _pick_known_network_candidate(
         if candidate["autoconnect"] == "1":
             return candidate
     return candidates[0] if candidates else None
+
+
+def _is_ap_profile(name: str, *, configured_ap_ssid: str) -> bool:
+    normalized = name.strip().lower()
+    configured = configured_ap_ssid.strip().lower()
+    if not normalized:
+        return False
+    if configured and normalized == configured:
+        return True
+    return normalized.startswith("hotspot")
 
 
 def ensure_bootstrap_ap(
@@ -331,7 +343,7 @@ def watch_disconnection_and_start_ap(
 
         is_ap_active = bool(
             (current_ssid and current_ssid == configured_ap_ssid)
-            or (active_name and active_name == configured_ap_ssid)
+            or _is_ap_profile(active_name, configured_ap_ssid=configured_ap_ssid)
         )
         is_connected = general_state.startswith("connected") and bool(current_ssid or active_name)
 

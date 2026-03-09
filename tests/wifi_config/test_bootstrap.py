@@ -181,6 +181,37 @@ class WifiBootstrapTest(unittest.TestCase):
         )
         self.assertEqual("STA_CONNECTED", state_store.snapshot()["state"])
 
+    def test_watchdog_treats_hotspot_prefixed_profile_as_ap_active(self) -> None:
+        service = Mock()
+        state_store = ProvisionStateStore()
+        service.default_ap_ssid = "Matterhub-Setup-WhatsMatter"
+        service.get_status.return_value = {
+            "general_state": "connecting",
+            "current_ssid": "",
+            "active_connection": {"name": "Hotspot-1"},
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "WIFI_AUTO_AP_ON_DISCONNECT": "1",
+                "WIFI_AP_AUTO_RECONNECT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            watch_disconnection_and_start_ap(
+                service,
+                state_store=state_store,
+                logger=lambda _: None,
+                max_checks=1,
+                sleep_fn=lambda _: None,
+                monotonic_fn=lambda: 0.0,
+            )
+
+        service.activate_saved_connection.assert_not_called()
+        service.start_ap_mode.assert_not_called()
+        self.assertEqual("AP_MODE", state_store.snapshot()["state"])
+
     def test_watchdog_reconnects_known_network_before_ap_when_disconnected(self) -> None:
         service = Mock()
         state_store = ProvisionStateStore()

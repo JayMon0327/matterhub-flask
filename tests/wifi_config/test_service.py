@@ -215,6 +215,10 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout="Matterhub-Setup-test01:ap-uuid:802-11-wireless:wlan0\n"),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    completed(stdout="Matterhub-Setup-test01:802-11-wireless:5\n"),
+                ),
+                (
                     [
                         "nmcli",
                         "connection",
@@ -329,6 +333,10 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout="Matterhub-Setup-test01:ap-uuid:802-11-wireless:wlan0\n"),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    completed(stdout="Matterhub-Setup-test01:802-11-wireless:5\n"),
+                ),
+                (
                     [
                         "nmcli",
                         "connection",
@@ -387,12 +395,32 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout="HomeNet:home-uuid:802-11-wireless:wlan0\n"),
                 ),
                 (
+                    ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    completed(
+                        stdout=(
+                            "HomeNet:802-11-wireless:1\n"
+                            "Hotspot-1:802-11-wireless:5\n"
+                            "Hotspot:802-11-wireless:3\n"
+                        )
+                    ),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    completed(
+                        stdout=(
+                            "HomeNet:802-11-wireless:1\n"
+                            "Hotspot-1:802-11-wireless:5\n"
+                            "Hotspot:802-11-wireless:3\n"
+                        )
+                    ),
+                ),
+                (
                     [
                         "nmcli",
                         "connection",
                         "modify",
                         "id",
-                        "Hotspot",
+                        "Hotspot-1",
                         "ipv4.method",
                         "shared",
                         "ipv4.addresses",
@@ -403,7 +431,7 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout=""),
                 ),
                 (
-                    ["nmcli", "connection", "up", "id", "Hotspot", "ifname", "wlan0"],
+                    ["nmcli", "connection", "up", "id", "Hotspot-1", "ifname", "wlan0"],
                     completed(stdout="Connection up"),
                 ),
             ]
