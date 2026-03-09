@@ -677,11 +677,26 @@ class WifiConfigService:
 
     def _run_command_success(self, command: list[str], *, timeout: int) -> bool:
         result = self._runner(command, timeout)
+        if result.returncode != 0:
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            print(
+                "[WIFI][CMD] failed "
+                f"cmd={' '.join(command)} rc={result.returncode} "
+                f"stdout={stdout} stderr={stderr}"
+            )
         return result.returncode == 0
 
     def _run_command_best_effort(self, command: list[str], *, timeout: int) -> str:
         result = self._runner(command, timeout)
         if result.returncode != 0:
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            print(
+                "[WIFI][CMD] best-effort failed "
+                f"cmd={' '.join(command)} rc={result.returncode} "
+                f"stdout={stdout} stderr={stderr}"
+            )
             return ""
         return (result.stdout or "").strip()
 
