@@ -257,10 +257,6 @@ class WifiConfigServiceTest(unittest.TestCase):
                     completed(stdout=""),
                 ),
                 (
-                    ["nmcli", "connection", "up", "id", "Matterhub-Setup-test01", "ifname", "wlan0"],
-                    completed(stdout="Connection up"),
-                ),
-                (
                     ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
                     completed(stdout="Matterhub-Setup-test01:ap-uuid:802-11-wireless:wlan0\n"),
                 ),
@@ -362,10 +358,6 @@ class WifiConfigServiceTest(unittest.TestCase):
                     ],
                     completed(stdout=""),
                 ),
-                (
-                    ["nmcli", "connection", "up", "id", "Hotspot-1", "ifname", "wlan0"],
-                    completed(stdout="Connection up"),
-                ),
             ]
         )
         service = WifiConfigService(
@@ -381,6 +373,10 @@ class WifiConfigServiceTest(unittest.TestCase):
         self.assertEqual("Matterhub-Setup-test01", result["ssid"])
         self.assertIn(
             ["sudo", "-n", "systemctl", "stop", "named.service"],
+            runner.calls,
+        )
+        self.assertNotIn(
+            ["nmcli", "connection", "up", "id", "Hotspot-1", "ifname", "wlan0"],
             runner.calls,
         )
 
@@ -532,10 +528,6 @@ class WifiConfigServiceTest(unittest.TestCase):
                         "ignore",
                     ],
                     completed(stdout=""),
-                ),
-                (
-                    ["nmcli", "connection", "up", "id", "Matterhub-Setup-test01", "ifname", "wlan0"],
-                    completed(stdout="Connection up"),
                 ),
             ]
         )

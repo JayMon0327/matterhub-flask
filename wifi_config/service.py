@@ -306,9 +306,13 @@ class WifiConfigService:
             self._resume_paused_conflicting_services()
             raise start_error
 
-        connection_name = self._resolve_ap_connection_name(ap_ssid)
+        connection_name, connection_active = self._resolve_ap_connection(ap_ssid)
         try:
-            self._configure_ap_ipv4_for_ap(connection_name, ap_ssid)
+            self._configure_ap_ipv4_for_ap(
+                connection_name,
+                ap_ssid,
+                activate_connection=not connection_active,
+            )
         except Exception:
             self._resume_paused_conflicting_services()
             raise
@@ -505,7 +509,7 @@ class WifiConfigService:
             )
         return stdout
 
-    def _configure_ap_ipv4(self, connection_name: str) -> None:
+    def _configure_ap_ipv4(self, connection_name: str, *, activate_connection: bool) -> None:
         self._run_nmcli(
             [
                 "connection",
@@ -521,12 +525,20 @@ class WifiConfigService:
             ],
             timeout=20,
         )
+        if not activate_connection:
+            return
         self._run_nmcli(
             ["connection", "up", "id", connection_name, "ifname", self.interface],
             timeout=30,
         )
 
-    def _configure_ap_ipv4_for_ap(self, connection_name: str, ap_ssid: str) -> None:
+    def _configure_ap_ipv4_for_ap(
+        self,
+        connection_name: str,
+        ap_ssid: str,
+        *,
+        activate_connection: bool,
+    ) -> None:
         candidates: list[str] = []
         for candidate in [connection_name, *self._list_hotspot_connection_names(ap_ssid), "Hotspot", ap_ssid]:
             normalized = candidate.strip()
@@ -536,7 +548,10 @@ class WifiConfigService:
         last_error: Optional[NmcliCommandError] = None
         for candidate in candidates:
             try:
-                self._configure_ap_ipv4(candidate)
+                self._configure_ap_ipv4(
+                    candidate,
+                    activate_connection=activate_connection or candidate != connection_name,
+                )
                 return
             except NmcliCommandError as exc:
                 last_error = exc
@@ -547,15 +562,15 @@ class WifiConfigService:
         if last_error is not None:
             raise last_error
 
-    def _resolve_ap_connection_name(self, ap_ssid: str) -> str:
+    def _resolve_ap_connection(self, ap_ssid: str) -> tuple[str, bool]:
         active = self.get_active_wifi_connection()
         active_name = str((active or {}).get("name") or "").strip()
         if _is_hotspot_profile_name(active_name, ap_ssid=ap_ssid):
-            return active_name
+            return active_name, True
         hotspot_names = self._list_hotspot_connection_names(ap_ssid)
         if hotspot_names:
-            return hotspot_names[0]
-        return "Hotspot"
+            return hotspot_names[0], False
+        return "Hotspot", False
 
     def _ap_gateway_ip(self) -> str:
         cidr = self.ap_ipv4_cidr.strip()
