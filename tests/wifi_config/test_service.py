@@ -6,7 +6,11 @@ from collections import deque
 from typing import Deque, Iterable
 from unittest.mock import patch
 
-from wifi_config.service import WifiConfigService, _split_terse_line
+from wifi_config.service import (
+    WifiConfigService,
+    _GLOBAL_PAUSED_CONFLICT_SERVICES,
+    _split_terse_line,
+)
 
 
 def completed(
@@ -42,6 +46,12 @@ class OrderedRunner:
 
 
 class WifiConfigServiceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        _GLOBAL_PAUSED_CONFLICT_SERVICES.clear()
+
+    def tearDown(self) -> None:
+        _GLOBAL_PAUSED_CONFLICT_SERVICES.clear()
+
     def test_split_terse_line_handles_escaped_colons(self) -> None:
         self.assertEqual(
             ["*", "Office:Lab", "75", "WPA2"],
@@ -710,6 +720,37 @@ class WifiConfigServiceTest(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertEqual("BadNet", result["connection_name"])
+
+    def test_conflicting_services_resume_across_service_instances(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["sudo", "-n", "systemctl", "is-active", "named.service"],
+                    completed(stdout="active\n"),
+                ),
+                (
+                    ["sudo", "-n", "systemctl", "stop", "named.service"],
+                    completed(stdout=""),
+                ),
+                (
+                    ["sudo", "-n", "systemctl", "start", "named.service"],
+                    completed(stdout=""),
+                ),
+            ]
+        )
+        ap_service = WifiConfigService(
+            runner=runner,
+            ap_conflict_services=["named.service"],
+        )
+        reconnect_service = WifiConfigService(
+            runner=runner,
+            ap_conflict_services=["named.service"],
+        )
+
+        ap_service._pause_conflicting_services_for_ap()
+        reconnect_service._resume_paused_conflicting_services()
+
+        self.assertEqual(set(), _GLOBAL_PAUSED_CONFLICT_SERVICES)
 
 
 if __name__ == "__main__":

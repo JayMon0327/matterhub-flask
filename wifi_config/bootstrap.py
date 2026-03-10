@@ -111,6 +111,17 @@ def _is_ap_profile(name: str, *, configured_ap_ssid: str) -> bool:
     return normalized.startswith("hotspot")
 
 
+def _manual_ap_hold_active(state_snapshot: dict[str, Any]) -> bool:
+    if state_snapshot.get("state") != "AP_MODE":
+        return False
+    details = state_snapshot.get("details") or {}
+    try:
+        hold_until = float(details.get("manual_hold_until"))
+    except (TypeError, ValueError):
+        return False
+    return hold_until > time.time()
+
+
 def ensure_bootstrap_ap(
     service: Optional[WifiConfigService] = None,
     state_store: Optional[ProvisionStateStore] = None,
@@ -359,17 +370,19 @@ def watch_disconnection_and_start_ap(
             or _is_ap_profile(active_name, configured_ap_ssid=configured_ap_ssid)
         )
         is_connected = general_state.startswith("connected") and bool(current_ssid or active_name)
+        state_snapshot = provision_state.snapshot()
 
         if is_connected or is_ap_active:
             disconnected_since = None
             if is_ap_active:
                 if ap_active_since is None:
                     ap_active_since = monotonic_fn()
-                provision_state.set_state(
-                    "AP_MODE",
-                    reason="watchdog_ap_active",
-                    details={"ssid": current_ssid or active_name},
-                )
+                if not _manual_ap_hold_active(state_snapshot):
+                    provision_state.set_state(
+                        "AP_MODE",
+                        reason="watchdog_ap_active",
+                        details={"ssid": current_ssid or active_name},
+                    )
             else:
                 ap_active_since = None
                 provision_state.set_state(
@@ -379,6 +392,9 @@ def watch_disconnection_and_start_ap(
                 )
             if is_ap_active and auto_reconnect_enabled:
                 now = monotonic_fn()
+                if _manual_ap_hold_active(state_snapshot):
+                    sleep_fn(check_interval)
+                    continue
                 if ap_active_since is not None and now < ap_active_since + auto_reconnect_hold_seconds:
                     sleep_fn(check_interval)
                     continue

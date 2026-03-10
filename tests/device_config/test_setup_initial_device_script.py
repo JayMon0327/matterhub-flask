@@ -29,6 +29,7 @@ class SetupInitialDeviceScriptTest(unittest.TestCase):
         self.assertIn("env update: WIFI_AP_IPV4_CIDR=10.42.0.1/24", output)
         self.assertIn("env update: WIFI_COUNTRY_CODE=KR", output)
         self.assertIn("env update: WIFI_AP_CONFLICT_SERVICES=named.service", output)
+        self.assertIn("env update: WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS=600", output)
         self.assertIn("env update: LOCAL_MDNS_ENABLED=1", output)
         self.assertIn("env update: MATTERHUB_LOCAL_HOSTNAME=matterhub-setup-whatsmatter", output)
         self.assertIn("env update: UPDATE_AGENT_ENABLED=1", output)

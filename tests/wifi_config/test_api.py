@@ -141,6 +141,19 @@ class WifiApiBlueprintTest(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual(["OfficeWifi"], self.service.deleted)
 
+    def test_manual_recovery_endpoint_sets_hold_window(self) -> None:
+        response = self.client.post("/local/admin/network/recovery/ap-mode", json={})
+        body = response.get_json()
+
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(body["ok"])
+        self.assertEqual(600, body["data"]["manual_hold_seconds"])
+        self.assertIn("manual_hold_until", body["data"])
+        snapshot = self.state_store.snapshot()
+        self.assertEqual("AP_MODE", snapshot["state"])
+        self.assertEqual("manual_recovery_started", snapshot["reason"])
+        self.assertIn("manual_hold_until", snapshot["details"])
+
     def test_wifi_admin_page_renders_template(self) -> None:
         response = self.client.get("/local/admin/network")
         text = response.get_data(as_text=True)

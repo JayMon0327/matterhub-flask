@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
 
 from flask import Blueprint, jsonify, render_template, request
@@ -32,6 +33,20 @@ def _parse_timeout(value: Any, default: int = 60) -> int:
     except (TypeError, ValueError):
         timeout = default
     return max(10, min(timeout, 180))
+
+
+def _parse_bounded_int(
+    value: Any,
+    default: int,
+    *,
+    min_value: int,
+    max_value: int,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(min_value, min(parsed, max_value))
 
 
 def create_wifi_blueprint(
@@ -175,6 +190,17 @@ def create_wifi_blueprint(
         payload = request.get_json(silent=True) or {}
         ssid = str(payload.get("ssid", "")).strip() or None
         password = str(payload.get("password", "")).strip() or None
+        manual_hold_seconds = _parse_bounded_int(
+            payload.get("hold_seconds"),
+            _parse_bounded_int(
+                os.environ.get("WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS"),
+                600,
+                min_value=0,
+                max_value=86400,
+            ),
+            min_value=0,
+            max_value=86400,
+        )
         try:
             provision_state.set_state(
                 "AP_STARTING",
@@ -182,11 +208,17 @@ def create_wifi_blueprint(
                 details={"requested_ssid": ssid or ""},
             )
             result = wifi_service.start_ap_mode(ssid=ssid, password=password)
+            details = {"ssid": str(result.get("ssid") or "")}
+            if manual_hold_seconds > 0:
+                details["manual_hold_until"] = time.time() + manual_hold_seconds
             provision_state.set_state(
                 "AP_MODE",
                 reason="manual_recovery_started",
-                details={"ssid": str(result.get("ssid") or "")},
+                details=details,
             )
+            result["manual_hold_seconds"] = manual_hold_seconds
+            if "manual_hold_until" in details:
+                result["manual_hold_until"] = details["manual_hold_until"]
             return jsonify({"ok": True, "data": result})
         except ValueError as exc:
             return jsonify({"ok": False, "error": {"message": str(exc)}}), 400

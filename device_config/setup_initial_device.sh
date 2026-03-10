@@ -30,6 +30,7 @@ WIFI_AP_PASSWORD="${WIFI_AP_PASSWORD:-00000000}"
 WIFI_AP_IPV4_CIDR="${WIFI_AP_IPV4_CIDR:-10.42.0.1/24}"
 WIFI_COUNTRY_CODE="${WIFI_COUNTRY_CODE:-KR}"
 WIFI_AP_CONFLICT_SERVICES="${WIFI_AP_CONFLICT_SERVICES:-named.service}"
+WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS="${WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS:-600}"
 WIFI_AUTO_AP_ON_BOOT="${WIFI_AUTO_AP_ON_BOOT:-1}"
 WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS="${WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS:-45}"
 WIFI_BOOTSTRAP_AP_SSID="${WIFI_BOOTSTRAP_AP_SSID:-}"
@@ -135,6 +136,8 @@ Options:
   --wifi-ap-ipv4-cidr <cidr>         Default: 10.42.0.1/24
   --wifi-country-code <code>         Default: KR
   --wifi-ap-conflict-services <csv>  Default: named.service
+  --wifi-ap-manual-recovery-hold-seconds <sec>
+                                     Default: 600
   --wifi-auto-ap-on-boot <0|1>       Default: 1
   --wifi-bootstrap-startup-grace-seconds <sec>
                                      Default: 45 (AP 시작 전 대기)
@@ -208,6 +211,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --wifi-ap-conflict-services)
       WIFI_AP_CONFLICT_SERVICES="$2"
+      shift 2
+      ;;
+    --wifi-ap-manual-recovery-hold-seconds)
+      WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS="$2"
       shift 2
       ;;
     --wifi-auto-ap-on-boot)
@@ -378,6 +385,7 @@ set_env_value "WIFI_AP_PASSWORD" "$WIFI_AP_PASSWORD"
 set_env_value "WIFI_AP_IPV4_CIDR" "$WIFI_AP_IPV4_CIDR"
 set_env_value "WIFI_COUNTRY_CODE" "$WIFI_COUNTRY_CODE"
 set_env_value "WIFI_AP_CONFLICT_SERVICES" "$WIFI_AP_CONFLICT_SERVICES"
+set_env_value "WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS" "$WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS"
 set_env_value "WIFI_AUTO_AP_ON_BOOT" "$WIFI_AUTO_AP_ON_BOOT"
 set_env_value "WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS" "$WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS"
 set_env_value "LOCAL_MDNS_ENABLED" "$LOCAL_MDNS_ENABLED"

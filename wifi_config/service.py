@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 
 Runner = Callable[[list[str], int], subprocess.CompletedProcess[str]]
+_GLOBAL_PAUSED_CONFLICT_SERVICES: set[str] = set()
+_GLOBAL_PAUSED_CONFLICT_SERVICES_LOCK = threading.Lock()
 
 
 def _default_runner(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
@@ -663,13 +666,19 @@ class WifiConfigService:
                 timeout=20,
             ):
                 self._paused_conflict_services.add(service_name)
+                with _GLOBAL_PAUSED_CONFLICT_SERVICES_LOCK:
+                    _GLOBAL_PAUSED_CONFLICT_SERVICES.add(service_name)
 
     def _resume_paused_conflicting_services(self) -> None:
-        if not self._paused_conflict_services:
-            return
-        paused_services = list(self._paused_conflict_services)
+        paused_services = set(self._paused_conflict_services)
+        with _GLOBAL_PAUSED_CONFLICT_SERVICES_LOCK:
+            paused_services.update(_GLOBAL_PAUSED_CONFLICT_SERVICES)
+            for service_name in paused_services:
+                _GLOBAL_PAUSED_CONFLICT_SERVICES.discard(service_name)
         self._paused_conflict_services.clear()
-        for service_name in paused_services:
+        if not paused_services:
+            return
+        for service_name in sorted(paused_services):
             self._run_command_success(
                 ["sudo", "-n", "systemctl", "start", service_name],
                 timeout=20,

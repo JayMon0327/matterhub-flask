@@ -85,6 +85,7 @@ bash device_config/setup_initial_device.sh
 복구 모드는 "현재 Wi-Fi가 안 잡히거나 설정을 처음부터 다시 해야 할 때" 사용하는 기능이다.
 
 - 복구 모드 시작 시 장비가 임시 Wi-Fi(AP)를 연다.
+- 수동으로 복구 모드를 시작하면 기본적으로 10분 동안 AP를 유지한 뒤에만 저장된 Wi-Fi 자동 복귀를 다시 시도한다.
 - 사용자는 해당 AP에 접속해서 설정 페이지로 다시 들어올 수 있다.
 - 기본 접속 주소는 `http://matterhub-setup-whatsmatter.local:8100/local/admin/network` 이다.
 - `.local` 접속이 안 되면 `http://10.42.0.1:8100/local/admin/network` 을 사용한다.
@@ -119,6 +120,7 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_AP_IPV4_CIDR` (기본: `10.42.0.1/24`)
 - `WIFI_COUNTRY_CODE` (기본: `KR`)
 - `WIFI_AP_CONFLICT_SERVICES` (기본: `named.service`)
+- `WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS` (기본: `600`, 수동 복구 AP 유지 시간)
 - `WIFI_AUTO_AP_ON_BOOT` (기본: `true`)
 - `WIFI_BOOTSTRAP_STARTUP_GRACE_SECONDS` (기본: `45`, 부팅 직후 AP 전환 전 대기시간)
 - `WIFI_AUTO_AP_ON_DISCONNECT` (기본: `true`)
