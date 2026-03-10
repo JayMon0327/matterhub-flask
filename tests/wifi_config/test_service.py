@@ -294,6 +294,85 @@ class WifiConfigServiceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least 8"):
             service.start_ap_mode(ssid="MatterHub-Setup-abc123", password="12345")
 
+    def test_start_ap_mode_applies_country_code_before_hotspot(self) -> None:
+        runner = OrderedRunner(
+            [
+                (
+                    ["sudo", "-n", "/usr/sbin/iw", "reg", "set", "KR"],
+                    completed(stdout=""),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Supervisor wlan0:sta-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "connection", "down", "id", "Supervisor wlan0"],
+                    completed(stdout="Connection deactivated"),
+                ),
+                (
+                    ["nmcli", "device", "disconnect", "wlan0"],
+                    completed(stdout="Device disconnected"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "device",
+                        "wifi",
+                        "hotspot",
+                        "ifname",
+                        "wlan0",
+                        "band",
+                        "bg",
+                        "ssid",
+                        "Matterhub-Setup-test01",
+                        "password",
+                        "00000000",
+                    ],
+                    completed(stdout="Hotspot created"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+                    completed(stdout="Hotspot-1:ap-uuid:802-11-wireless:wlan0\n"),
+                ),
+                (
+                    ["nmcli", "-t", "-f", "NAME,TYPE,TIMESTAMP", "connection", "show"],
+                    completed(stdout="Hotspot-1:802-11-wireless:5\n"),
+                ),
+                (
+                    [
+                        "nmcli",
+                        "connection",
+                        "modify",
+                        "id",
+                        "Hotspot-1",
+                        "ipv4.method",
+                        "shared",
+                        "ipv4.addresses",
+                        "10.42.0.1/24",
+                        "ipv6.method",
+                        "ignore",
+                    ],
+                    completed(stdout=""),
+                ),
+            ]
+        )
+        service = WifiConfigService(
+            runner=runner,
+            ap_password="00000000",
+            default_ap_ssid="Matterhub-Setup-test01",
+            ap_ipv4_cidr="10.42.0.1/24",
+            country_code="KR",
+            iw_binary="/usr/sbin/iw",
+            sleep_fn=lambda _: None,
+        )
+
+        service.start_ap_mode()
+
+        self.assertEqual(
+            ["sudo", "-n", "/usr/sbin/iw", "reg", "set", "KR"],
+            runner.calls[0],
+        )
+
     def test_start_ap_mode_pauses_conflicting_service_before_hotspot(self) -> None:
         runner = OrderedRunner(
             [

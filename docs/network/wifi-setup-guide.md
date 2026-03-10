@@ -119,6 +119,7 @@ Wi-Fi 연결 시 내부 동작은 아래 순서다.
 - `WIFI_AP_PASSWORD` (기본: `00000000`)
 - `WIFI_AP_IPV4_CIDR` (기본: `10.42.0.1/24`)
 - `WIFI_COUNTRY_CODE` (기본: `KR`)
+  - 설치 시 커널/시스템 규제영역에 반영하고, AP 시작 직전에도 `iw reg set`으로 한 번 더 적용을 시도한다.
 - `WIFI_AP_CONFLICT_SERVICES` (기본: `named.service`)
 - `WIFI_AP_MANUAL_RECOVERY_HOLD_SECONDS` (기본: `600`, 수동 복구 AP 유지 시간)
 - `WIFI_AUTO_AP_ON_BOOT` (기본: `true`)

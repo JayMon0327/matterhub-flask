@@ -38,6 +38,7 @@ class InstallUbuntu24ScriptTest(unittest.TestCase):
         self.assertIn("로컬 mDNS/HTTP 서비스 광고 설정 실행", output)
         self.assertIn("setup_local_hostname_mdns.sh", output)
         self.assertIn("--hostname matterhub-setup-whatsmatter", output)
+        self.assertIn("AP 규제영역 runtime helper 허용:", output)
         enable_lines = [line for line in output.splitlines() if "systemctl enable" in line]
         self.assertTrue(enable_lines)
         self.assertTrue(all("matterhub-support-tunnel.service" not in line for line in enable_lines))

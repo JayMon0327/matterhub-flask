@@ -111,3 +111,5 @@ fi
 log "NetworkManager 재시작"
 sudo_cmd systemctl restart NetworkManager
 log "재부팅 후 iw reg get 으로 country code 적용 여부 확인 필요"
+log "iw reg get 결과에 'phy#... country 99' 가 남아 있으면 1회 재부팅 후 다시 확인"
+log "AP가 보이지 않고 journalctl -k 에 'brcmf_set_channel ... reason -52' 가 보이면 regdom/driver 이슈 가능성 높음"

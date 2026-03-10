@@ -65,6 +65,7 @@ def create_wifi_blueprint(
         ap_password=os.environ.get("WIFI_AP_PASSWORD", "00000000"),
         ap_ipv4_cidr=os.environ.get("WIFI_AP_IPV4_CIDR", "10.42.0.1/24"),
         ap_band=os.environ.get("WIFI_AP_BAND", "bg"),
+        country_code=os.environ.get("WIFI_COUNTRY_CODE", "KR"),
         ap_conflict_services=ap_conflict_services,
     )
     provision_state = state_store or get_provision_state_store()

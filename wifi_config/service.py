@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import threading
 import time
@@ -96,7 +97,9 @@ class WifiConfigService:
         ap_password: str = "00000000",
         ap_ipv4_cidr: str = "10.42.0.1/24",
         ap_band: str = "bg",
+        country_code: str = "",
         ap_conflict_services: Optional[list[str]] = None,
+        iw_binary: Optional[str] = None,
         runner: Optional[Runner] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         monotonic_fn: Callable[[], float] = time.monotonic,
@@ -107,7 +110,9 @@ class WifiConfigService:
         self.ap_password = ap_password
         self.ap_ipv4_cidr = ap_ipv4_cidr
         self.ap_band = ap_band.strip()
+        self.country_code = country_code.strip().upper()
         self.ap_conflict_services = self._normalize_service_names(ap_conflict_services or [])
+        self.iw_binary = (iw_binary or shutil.which("iw") or "/usr/sbin/iw").strip() or "/usr/sbin/iw"
         self._paused_conflict_services: set[str] = set()
         self._runner: Runner = runner or _default_runner
         self._sleep = sleep_fn
@@ -268,6 +273,7 @@ class WifiConfigService:
         if len(ap_password) < 8:
             raise ValueError("AP password must be at least 8 characters")
 
+        self._apply_regulatory_domain_for_ap()
         self._pause_conflicting_services_for_ap()
         self._disconnect_active_wifi_before_ap(ap_ssid)
 
@@ -698,6 +704,15 @@ class WifiConfigService:
                 ["sudo", "-n", "systemctl", "start", service_name],
                 timeout=20,
             )
+
+    def _apply_regulatory_domain_for_ap(self) -> None:
+        if not self.country_code:
+            return
+        if self._run_command_success(
+            ["sudo", "-n", self.iw_binary, "reg", "set", self.country_code],
+            timeout=10,
+        ):
+            self._sleep(1)
 
     def _run_command_success(self, command: list[str], *, timeout: int) -> bool:
         result = self._runner(command, timeout)

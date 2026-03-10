@@ -336,6 +336,10 @@ SYSTEMCTL_BIN="$(command -v systemctl || true)"
 if [ -z "$SYSTEMCTL_BIN" ]; then
   SYSTEMCTL_BIN="/usr/bin/systemctl"
 fi
+IW_BIN="$(command -v iw || true)"
+if [ -z "$IW_BIN" ]; then
+  IW_BIN="/usr/sbin/iw"
+fi
 SUDOERS_FILE="$TMP_DIR/90-matterhub-wifi-ap"
 IFS=',' read -r -a AP_CONFLICT_SERVICE_ARRAY <<< "$WIFI_AP_CONFLICT_SERVICES"
 SUDOERS_COMMANDS=()
@@ -357,6 +361,15 @@ for raw_service in "${AP_CONFLICT_SERVICE_ARRAY[@]}"; do
   SUDOERS_COMMANDS+=("${SYSTEMCTL_BIN} start ${service_name}")
   SUDOERS_COMMANDS+=("${SYSTEMCTL_BIN} is-active ${service_name}")
 done
+
+case "$WIFI_COUNTRY_CODE" in
+  *[!A-Za-z0-9_-]*|'')
+    echo "invalid WIFI_COUNTRY_CODE: $WIFI_COUNTRY_CODE" >&2
+    exit 1
+    ;;
+esac
+SUDOERS_COMMANDS+=("${IW_BIN} reg set ${WIFI_COUNTRY_CODE}")
+log "AP 규제영역 runtime helper 허용: ${IW_BIN} reg set ${WIFI_COUNTRY_CODE}"
 
 if [ "${#SUDOERS_COMMANDS[@]}" -gt 0 ]; then
   {
