@@ -41,3 +41,6 @@ awsCertificates/
 awsCredentialDocs/
 device_config/relay/
 codex_context.md
+
+# Ephemeral work files (expect scripts, temp configs, etc.)
+tmp/
