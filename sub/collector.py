@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+load_dotenv(dotenv_path='.env')
 
 # 환경 변수
 HA_host = os.environ.get('HA_host')

@@ -20,7 +20,7 @@ except ImportError:
     print("venv/bin/python3 run_provision.py 처럼 가상환경 Python으로 실행하세요.")
     sys.exit(1)
 
-load_dotenv()
+load_dotenv(dotenv_path='.env')
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _script_dir)

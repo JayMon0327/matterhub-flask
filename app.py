@@ -14,7 +14,7 @@ import json
 import threading
 from sub.scheduler import *
 from sub.ruleEngine import *
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 import os, sys
 
 from libs.device_binding import enforce_mac_binding
@@ -22,8 +22,7 @@ from libs.edit import deleteItem, file_changed_request, putItem, update_env_file
 from wifi_config.api import create_wifi_blueprint
 from wifi_config.bootstrap import ensure_bootstrap_ap, watch_disconnection_and_start_ap
 
-env_file = find_dotenv()
-load_dotenv()
+load_dotenv(dotenv_path='.env')
 
 if not enforce_mac_binding():
     raise SystemExit(1)

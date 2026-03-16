@@ -12,10 +12,10 @@ from typing import Callable, Mapping, Sequence
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover
-    def load_dotenv() -> None:
+    def load_dotenv(**kwargs) -> None:
         return None
 
-load_dotenv()
+load_dotenv(dotenv_path='.env')
 
 
 def _strip_quotes(value: str | None) -> str | None:

@@ -7,7 +7,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(dotenv_path='.env')
 HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
 
@@ -82,7 +82,8 @@ def service(condition, domain, service, entity):
 def schedule_config(one_time):
     schedule.clear()
 
-    with open('resources/schedule.json', 'r', encoding='utf-8') as file:
+    schedules_path = os.environ.get('schedules_file_path', 'resources/schedule.json')
+    with open(schedules_path, 'r', encoding='utf-8') as file:
         data = json.load(file)  # JSON 파일을 파싱하여 Python 객체로 변환
         for _schedule_data in data:
             if(not _schedule_data['activate']):
