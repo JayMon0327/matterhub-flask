@@ -21,7 +21,7 @@ class ServiceDefinition:
 DEFAULT_HARDENING_DIRECTIVES: tuple[str, ...] = (
     "NoNewPrivileges=true",
     "PrivateTmp=true",
-    "ProtectSystem=full",
+    "ProtectSystem=false",
     "ProtectControlGroups=true",
     "ProtectKernelTunables=true",
     "ProtectKernelModules=true",
@@ -32,7 +32,6 @@ DEFAULT_HARDENING_DIRECTIVES: tuple[str, ...] = (
     "AmbientCapabilities=",
     "UMask=0077",
 )
-
 API_HARDENING_DIRECTIVES: tuple[str, ...] = tuple(
     directive
     for directive in DEFAULT_HARDENING_DIRECTIVES
@@ -40,10 +39,12 @@ API_HARDENING_DIRECTIVES: tuple[str, ...] = tuple(
     not in {
         "NoNewPrivileges=true",
         "RestrictSUIDSGID=true",
+        "ProtectSystem=false",
         "CapabilityBoundingSet=",
         "AmbientCapabilities=",
     }
-)
+) + ("ProtectSystem=false", "ReadWritePaths=/etc/matterhub",)
+
 
 
 SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
@@ -51,7 +52,7 @@ SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
         service_name="matterhub-api",
         description="MatterHub Flask API",
         script_path=Path("app.py"),
-        hardening_directives=API_HARDENING_DIRECTIVES,
+        hardening_directives=(),
     ),
     ServiceDefinition(
         service_name="matterhub-mqtt",

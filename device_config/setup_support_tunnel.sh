@@ -14,25 +14,26 @@ else
 fi
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 
-SUPPORT_TUNNEL_HOST="${SUPPORT_TUNNEL_HOST:-support.whatsmatter.local}"
-SUPPORT_TUNNEL_USER="${SUPPORT_TUNNEL_USER:-whatsmatter}"
-SUPPORT_TUNNEL_PORT="${SUPPORT_TUNNEL_PORT:-443}"
+SUPPORT_TUNNEL_HOST="${SUPPORT_TUNNEL_HOST:-}"
+SUPPORT_TUNNEL_USER="${SUPPORT_TUNNEL_USER:-}"
+SUPPORT_TUNNEL_PORT="${SUPPORT_TUNNEL_PORT:-}"
 SUPPORT_TUNNEL_REMOTE_PORT="${SUPPORT_TUNNEL_REMOTE_PORT:-}"
-SUPPORT_TUNNEL_LOCAL_PORT="${SUPPORT_TUNNEL_LOCAL_PORT:-22}"
-SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS="${SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS:-127.0.0.1}"
-SUPPORT_TUNNEL_COMMAND="${SUPPORT_TUNNEL_COMMAND:-autossh}"
-SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING="${SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING:-1}"
-SUPPORT_TUNNEL_DEVICE_USER="${SUPPORT_TUNNEL_DEVICE_USER:-$RUN_USER}"
-SUPPORT_TUNNEL_RELAY_OPERATOR_USER="${SUPPORT_TUNNEL_RELAY_OPERATOR_USER:-ec2-user}"
-SUPPORT_TUNNEL_PRIVATE_KEY_PATH="${SUPPORT_TUNNEL_PRIVATE_KEY_PATH:-/home/$RUN_USER/.ssh/matterhub_support_tunnel_ed25519}"
-SUPPORT_TUNNEL_KNOWN_HOSTS_PATH="${SUPPORT_TUNNEL_KNOWN_HOSTS_PATH:-/home/$RUN_USER/.ssh/known_hosts}"
-SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL="${SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL:-30}"
-SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX="${SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX:-3}"
-SUPPORT_TUNNEL_AUTOSSH_GATETIME="${SUPPORT_TUNNEL_AUTOSSH_GATETIME:-0}"
+SUPPORT_TUNNEL_LOCAL_PORT="${SUPPORT_TUNNEL_LOCAL_PORT:-}"
+SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS="${SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS:-}"
+SUPPORT_TUNNEL_COMMAND="${SUPPORT_TUNNEL_COMMAND:-}"
+SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING="${SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING:-}"
+SUPPORT_TUNNEL_DEVICE_USER="${SUPPORT_TUNNEL_DEVICE_USER:-}"
+SUPPORT_TUNNEL_RELAY_OPERATOR_USER="${SUPPORT_TUNNEL_RELAY_OPERATOR_USER:-}"
+SUPPORT_TUNNEL_PRIVATE_KEY_PATH="${SUPPORT_TUNNEL_PRIVATE_KEY_PATH:-}"
+SUPPORT_TUNNEL_KNOWN_HOSTS_PATH="${SUPPORT_TUNNEL_KNOWN_HOSTS_PATH:-}"
+SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL="${SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL:-}"
+SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX="${SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX:-}"
+SUPPORT_TUNNEL_AUTOSSH_GATETIME="${SUPPORT_TUNNEL_AUTOSSH_GATETIME:-}"
 SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY="${SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY:-}"
 
 ENABLE_NOW=0
 DRY_RUN=0
+SKIP_INSTALL_UNIT=0
 
 log() {
   printf '[support-tunnel-setup] %s\n' "$*"
@@ -61,7 +62,11 @@ sudo_cmd() {
     print_command "[dry-run] sudo" "$@"
     return 0
   fi
-  sudo "$@"
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
 }
 
 strip_quotes() {
@@ -140,6 +145,7 @@ Options:
   --relay-access-pubkey <key>   Relay hub-access public key to append on this device for passwordless j
   --env-file <path>             Target .env path (default: <project>/.env)
   --run-user <username>         systemd run user (default: current shell user)
+  --skip-install-unit           Skip rendering/installing unit file and reuse existing service unit
   --enable-now                  Enable and start matterhub-support-tunnel.service
   --dry-run                     Print planned commands and env updates only
   -h, --help                    Show this help
@@ -204,6 +210,10 @@ while [ "$#" -gt 0 ]; do
       RUN_USER="$2"
       shift 2
       ;;
+    --skip-install-unit)
+      SKIP_INSTALL_UNIT=1
+      shift
+      ;;
     --enable-now)
       ENABLE_NOW=1
       shift
@@ -224,7 +234,49 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+for key in \
+  SUPPORT_TUNNEL_HOST \
+  SUPPORT_TUNNEL_USER \
+  SUPPORT_TUNNEL_PORT \
+  SUPPORT_TUNNEL_REMOTE_PORT \
+  SUPPORT_TUNNEL_LOCAL_PORT \
+  SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS \
+  SUPPORT_TUNNEL_COMMAND \
+  SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING \
+  SUPPORT_TUNNEL_DEVICE_USER \
+  SUPPORT_TUNNEL_RELAY_OPERATOR_USER \
+  SUPPORT_TUNNEL_PRIVATE_KEY_PATH \
+  SUPPORT_TUNNEL_KNOWN_HOSTS_PATH \
+  SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL \
+  SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX \
+  SUPPORT_TUNNEL_AUTOSSH_GATETIME \
+  SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY
+do
+  current_value="${!key:-}"
+  if [ -z "$current_value" ]; then
+    env_value="$(get_env_value "$key" "$ENV_FILE")"
+    if [ -n "$env_value" ]; then
+      printf -v "$key" '%s' "$env_value"
+    fi
+  fi
+done
+
+SUPPORT_TUNNEL_HOST="${SUPPORT_TUNNEL_HOST:-support.whatsmatter.local}"
+SUPPORT_TUNNEL_USER="${SUPPORT_TUNNEL_USER:-whatsmatter}"
+SUPPORT_TUNNEL_PORT="${SUPPORT_TUNNEL_PORT:-443}"
+SUPPORT_TUNNEL_LOCAL_PORT="${SUPPORT_TUNNEL_LOCAL_PORT:-22}"
+SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS="${SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS:-127.0.0.1}"
+SUPPORT_TUNNEL_COMMAND="${SUPPORT_TUNNEL_COMMAND:-autossh}"
+SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING="${SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING:-1}"
+SUPPORT_TUNNEL_DEVICE_USER="${SUPPORT_TUNNEL_DEVICE_USER:-$RUN_USER}"
+SUPPORT_TUNNEL_RELAY_OPERATOR_USER="${SUPPORT_TUNNEL_RELAY_OPERATOR_USER:-ec2-user}"
+SUPPORT_TUNNEL_PRIVATE_KEY_PATH="${SUPPORT_TUNNEL_PRIVATE_KEY_PATH:-/home/$RUN_USER/.ssh/matterhub_support_tunnel_ed25519}"
+SUPPORT_TUNNEL_KNOWN_HOSTS_PATH="${SUPPORT_TUNNEL_KNOWN_HOSTS_PATH:-/home/$RUN_USER/.ssh/known_hosts}"
+SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL="${SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL:-30}"
+SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX="${SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX:-3}"
+SUPPORT_TUNNEL_AUTOSSH_GATETIME="${SUPPORT_TUNNEL_AUTOSSH_GATETIME:-0}"
+
+if [ "$SKIP_INSTALL_UNIT" -ne 1 ] && ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Python executable not found: $PYTHON_BIN" >&2
   exit 1
 fi
@@ -264,6 +316,9 @@ if [ "$DRY_RUN" -eq 0 ]; then
   chmod 600 "$SUPPORT_TUNNEL_PRIVATE_KEY_PATH"
   if [ -f "$PUB_KEY_PATH" ]; then
     chmod 644 "$PUB_KEY_PATH"
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    chown -R "$RUN_USER:$RUN_USER" "$KEY_DIR"
   fi
 fi
 
@@ -333,20 +388,27 @@ if [ -n "$SUPPORT_TUNNEL_RELAY_ACCESS_PUBKEY" ]; then
     else
       log "relay access pubkey already present in ${AUTH_FILE}"
     fi
+    if [ "$(id -u)" -eq 0 ]; then
+      chown -R "$RUN_USER:$RUN_USER" "$AUTH_DIR"
+    fi
   fi
 fi
 
-TMP_DIR="$(mktemp -d)"
-cleanup() {
-  rm -rf "$TMP_DIR"
-}
-trap cleanup EXIT
+if [ "$SKIP_INSTALL_UNIT" -eq 1 ]; then
+  log "skipping unit render/install and reusing existing matterhub-support-tunnel.service"
+else
+  TMP_DIR="$(mktemp -d)"
+  cleanup() {
+    rm -rf "$TMP_DIR"
+  }
+  trap cleanup EXIT
 
-run_cmd "$PYTHON_BIN" "$SCRIPT_DIR/render_systemd_units.py" \
-  --project-root "$PROJECT_ROOT" \
-  --run-user "$RUN_USER" \
-  --output-dir "$TMP_DIR"
-sudo_cmd install -m 0644 "$TMP_DIR/matterhub-support-tunnel.service" "$SYSTEMD_DIR/matterhub-support-tunnel.service"
+  run_cmd "$PYTHON_BIN" "$SCRIPT_DIR/render_systemd_units.py" \
+    --project-root "$PROJECT_ROOT" \
+    --run-user "$RUN_USER" \
+    --output-dir "$TMP_DIR"
+  sudo_cmd install -m 0644 "$TMP_DIR/matterhub-support-tunnel.service" "$SYSTEMD_DIR/matterhub-support-tunnel.service"
+fi
 sudo_cmd systemctl daemon-reload
 
 if [ "$ENABLE_NOW" -eq 1 ]; then

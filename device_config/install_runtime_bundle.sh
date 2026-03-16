@@ -124,6 +124,35 @@ log "run_user=$RUN_USER"
 sudo_cmd mkdir -p "$RUNTIME_ROOT"
 sudo_cmd chown -R "$RUN_USER":"$RUN_USER" "$RUNTIME_ROOT"
 
+TMP_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+RUNTIME_ENV_PATH="$RUNTIME_ROOT/.env"
+DEFAULT_ENV_TEMPLATE="$TMP_DIR/matterhub.env"
+cat > "$DEFAULT_ENV_TEMPLATE" <<'EOF'
+# MatterHub runtime defaults
+SUPPORT_TUNNEL_ENABLED=0
+SUPPORT_TUNNEL_COMMAND=ssh
+SUPPORT_TUNNEL_PORT=443
+SUPPORT_TUNNEL_LOCAL_PORT=22
+SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS=127.0.0.1
+MATTERHUB_AUTO_PROVISION=1
+WIFI_AUTO_AP_ON_BOOT=0
+WIFI_AUTO_AP_ON_DISCONNECT=0
+WIFI_AP_AUTO_RECONNECT_ENABLED=0
+EOF
+
+if [ -f "$RUNTIME_ENV_PATH" ]; then
+  log "existing runtime env preserved: $RUNTIME_ENV_PATH"
+else
+  log "initializing runtime env with Wi-Fi automation disabled: $RUNTIME_ENV_PATH"
+  sudo_cmd install -m 0644 "$DEFAULT_ENV_TEMPLATE" "$RUNTIME_ENV_PATH"
+  sudo_cmd chown "$RUN_USER":"$RUN_USER" "$RUNTIME_ENV_PATH"
+fi
+
 APPLY_SCRIPT="$SCRIPT_DIR/apply_update_bundle.sh"
 if [ ! -f "$APPLY_SCRIPT" ]; then
   echo "apply_update_bundle.sh not found: $APPLY_SCRIPT" >&2
@@ -134,12 +163,6 @@ run_cmd bash "$APPLY_SCRIPT" \
   --bundle "$BUNDLE_PATH" \
   --project-root "$RUNTIME_ROOT" \
   --skip-restart
-
-TMP_DIR="$(mktemp -d)"
-cleanup() {
-  rm -rf "$TMP_DIR"
-}
-trap cleanup EXIT
 
 RENDER_SCRIPT="$SCRIPT_DIR/render_systemd_units.py"
 if [ ! -f "$RENDER_SCRIPT" ]; then
@@ -167,6 +190,16 @@ for unit_file in "$TMP_DIR"/*.service; do
   [ -f "$unit_file" ] || continue
   sudo_cmd install -m 0644 "$unit_file" "$SYSTEMD_DIR/$(basename "$unit_file")"
 done
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  sudo_cmd ufw allow 8100/tcp
+  sudo_cmd ufw allow 8123/tcp
+elif command -v ufw >/dev/null 2>&1; then
+  sudo_cmd ufw allow 8100/tcp
+  sudo_cmd ufw allow 8123/tcp
+else
+  log "ufw not installed; skipping 8100/8123 allow rules"
+fi
 
 sudo_cmd systemctl daemon-reload
 if [ "${#ENABLED_UNITS[@]}" -gt 0 ]; then

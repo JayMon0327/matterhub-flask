@@ -22,6 +22,7 @@ OPTIONAL_DIRS=(
   "templates"
   "resources"
   "certificates"
+  "konai_certificates"
 )
 
 log() {
@@ -145,4 +146,3 @@ run_cmd mkdir -p "$(dirname "$OUTPUT_BUNDLE")"
 run_cmd tar -czf "$OUTPUT_BUNDLE" -C "$TMP_DIR" payload manifest.json
 
 log "runtime bundle created: $OUTPUT_BUNDLE"
-
