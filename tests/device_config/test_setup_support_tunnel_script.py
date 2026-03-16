@@ -179,6 +179,50 @@ class SetupSupportTunnelScriptTest(unittest.TestCase):
                 result.stdout,
             )
 
+    def test_dry_run_skip_install_unit_uses_env_file_defaults_without_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        'matterhub_id="hub-9"',
+                        "SUPPORT_TUNNEL_HOST=support.whatsmatter.local",
+                        "SUPPORT_TUNNEL_USER=whatsmatter",
+                        "SUPPORT_TUNNEL_COMMAND=ssh",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["PYTHON_BIN"] = "/no/such/python"
+            env["RUN_USER"] = "matterhub"
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(SETUP_SCRIPT),
+                    "--dry-run",
+                    "--env-file",
+                    str(env_file),
+                    "--skip-install-unit",
+                    "--enable-now",
+                ],
+                cwd=PROJECT_ROOT,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            output = result.stdout
+            self.assertIn("remote port not specified; derived from matterhub_id", output)
+            self.assertIn("env update: SUPPORT_TUNNEL_COMMAND=ssh", output)
+            self.assertIn("skipping unit render/install and reusing existing matterhub-support-tunnel.service", output)
+            self.assertIn("[dry-run] sudo systemctl enable --now matterhub-support-tunnel.service", output)
+            self.assertNotIn("render_systemd_units.py", output)
+
 
 if __name__ == "__main__":
     unittest.main()

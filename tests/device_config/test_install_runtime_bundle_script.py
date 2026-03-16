@@ -40,10 +40,13 @@ class InstallRuntimeBundleScriptTest(unittest.TestCase):
                 text=True,
             )
             output = result.stdout
+            self.assertIn("initializing runtime env with Wi-Fi automation disabled", output)
             self.assertIn("apply_update_bundle.sh", output)
             self.assertIn("--skip-restart", output)
             self.assertIn("render_systemd_units.py", output)
             self.assertIn("--runtime-mode binary", output)
+            self.assertIn("ufw allow 8100/tcp", output)
+            self.assertIn("ufw allow 8123/tcp", output)
             self.assertIn("systemctl daemon-reload", output)
             self.assertIn("systemctl enable", output)
             self.assertIn("matterhub-update-agent.service", output)
@@ -52,4 +55,3 @@ class InstallRuntimeBundleScriptTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

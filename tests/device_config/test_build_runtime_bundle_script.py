@@ -81,9 +81,9 @@ class BuildRuntimeBundleScriptTest(unittest.TestCase):
                 names = archive.getnames()
             self.assertIn("payload/bin/matterhub-api/matterhub-api", names)
             self.assertIn("payload/bin/matterhub-update-agent/matterhub-update-agent", names)
+            self.assertIn("payload/konai_certificates/cert.pem", names)
             self.assertIn("manifest.json", names)
 
 
 if __name__ == "__main__":
     unittest.main()
-

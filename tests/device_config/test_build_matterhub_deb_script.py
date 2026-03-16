@@ -18,8 +18,6 @@ class BuildMatterhubDebScriptTest(unittest.TestCase):
                 "--dry-run",
                 "--version",
                 "1.2.3",
-                "--mode",
-                "pyc",
                 "--output-dir",
                 "/tmp/matterhub-dist",
             ],
@@ -31,8 +29,15 @@ class BuildMatterhubDebScriptTest(unittest.TestCase):
         output = result.stdout
         self.assertIn("package_name=matterhub", output)
         self.assertIn("version=1.2.3", output)
-        self.assertIn("mode=pyc", output)
+        self.assertIn("mode=source", output)
         self.assertIn("output_file=/tmp/matterhub-dist/matterhub_1.2.3_arm64.deb", output)
+        self.assertIn("package python payload as source files (mode=source)", output)
+        self.assertIn("include update-agent in package payload", output)
+        self.assertIn("include claim and Konai certificate assets plus provisioning launcher", output)
+        self.assertIn("default env with Wi-Fi automation/AP disabled", output)
+        self.assertIn("bootstrap claim provisioning via systemd", output)
+        self.assertIn("auto-configure and enable support tunnel after matterhub_id is available, including reboot retries", output)
+        self.assertIn("persistent UFW allow rules for 8100/tcp and 8123/tcp", output)
         self.assertIn("plan: run dpkg-deb --build", output)
 
 
