@@ -1,3 +1,9 @@
+# OS metadata
+.DS_Store
+
+# Environment (contains device-specific secrets)
+.env
+
 # Distribution / packaging
 .Python
 *.pyc
