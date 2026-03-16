@@ -20,6 +20,21 @@
 - systemd 서비스 enable 상태 확인
 - 초기 프로비저닝 완료 확인
 
+## 2.1 현재 패키징 상태 해석
+
+현재 저장소 기준으로는 "패키징 스크립트와 테스트는 준비됨" 상태이며, "최종 납품용 산출물까지 생성 완료" 상태는 아니다.
+
+즉, 아래 두 상태를 분리해서 판단한다.
+
+- 준비 완료: `.deb`/runtime bundle 빌드 스크립트와 테스트가 존재하고 dry-run 및 단위 테스트가 통과함
+- 납품 완료: 실제 `dist/*.deb` 또는 `dist/*.tar.gz` 산출물을 생성하고, 라즈베리파이 실기기에 설치 검증까지 마침
+
+추가 주의:
+
+- 현재 패키징 스크립트는 Wi-Fi 관련 코드/템플릿도 함께 포함한다.
+- 다만 현재 납품 단계에서는 Wi-Fi 자동 설정/AP hotspot 동작을 기본 비활성화한 상태로 패키징한다.
+- 따라서 최종 패키지 빌드 자체는 진행할 수 있고, Wi-Fi 자동화 재활성화는 별도 핫픽스 범위로 분리한다.
+
 ## 3. 설치 절차 초안
 
 1. 장비에 기본 OS 이미지 준비
@@ -72,6 +87,11 @@ bash device_config/install_ubuntu24.sh \
   --harden-allow-inbound-port 8123
 ```
 
+운영 기준:
+
+- `8100/tcp`, `8123/tcp`는 영구 허용 포트다.
+- `22/tcp`, `8110/tcp`는 유지보수 작업 중에만 임시 허용하고 끝나면 다시 닫는다.
+
 ## 4. 운영 절차 초안
 
 ### 일반 점검
@@ -94,6 +114,13 @@ bash device_config/install_ubuntu24.sh \
 - [Reverse SSH Tunnel 빠른 적용 가이드](../remote-maintenance/reverse-ssh-tunnel-quickstart.md)
 - [리버스 터널 접속방법](../remote-maintenance/reverse-tunnel-access-method.md)
 - [Reverse Tunnel Only 하드닝 가이드](./reverse-tunnel-only-hardening.md)
+
+포트 정책:
+
+- 고객사 납품 상태에서는 direct SSH `22/tcp` inbound를 차단한다.
+- 단, `8100/tcp`와 `8123/tcp`는 항상 열어 둔다.
+- `8100/tcp`: MatterHub Wi-Fi 설정 Web UI
+- `8123/tcp`: Home Assistant
 
 ### Wi-Fi 변경 지원
 
@@ -184,8 +211,22 @@ journalctl -u matterhub-update-agent.service -n 50 --no-pager
 
 ```bash
 cd /home/whatsmatter/Desktop/matterhub
-bash device_config/build_matterhub_deb.sh --version 2026.03.05 --mode pyc
+bash device_config/build_matterhub_deb.sh --version 2026.03.05
 ```
+
+현재 패키징 기준:
+
+- Wi-Fi 자동 설정/AP hotspot 동작은 기본 비활성화 상태로 패키징한다.
+- 패키지 기본 env는 `WIFI_AUTO_AP_ON_BOOT=0`, `WIFI_AUTO_AP_ON_DISCONNECT=0`, `WIFI_AP_AUTO_RECONNECT_ENABLED=0`를 포함한다.
+- 이번 납품 범위는 `api`, `mqtt`, `rule-engine`, `notifier`, `support-tunnel`, `update-agent` 패키징 완료를 우선 기준으로 삼는다.
+
+최종 납품 완료로 판단하려면 아래가 추가로 필요하다.
+
+- 실제 `dist/` 산출물 생성
+- 생성된 패키지 또는 runtime bundle을 실기기에 설치
+- 서비스 기동 및 reverse tunnel 정책 검증
+- `22/tcp` 차단, `8100/tcp`/`8123/tcp` 유지 개방 확인
+- Wi-Fi 자동화 재활성화 여부는 별도 핫픽스 범위로 관리
 
 ## 9. 물리 콘솔 접근 제한
 

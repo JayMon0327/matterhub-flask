@@ -79,7 +79,21 @@
 - `tests/device_config/test_setup_initial_device_script.py`
 - `tests/device_config/test_setup_local_hostname_mdns_script.py`
 
-### 2.6 MAC 바인딩
+### 2.6 패키징 자동화
+
+- `.deb` 빌드 스크립트 존재
+- PyInstaller 기반 runtime binary 빌드 스크립트 존재
+- runtime bundle 생성/설치 스크립트 존재
+- 관련 자동화 테스트 통과 기준 존재
+
+자동화 확인:
+
+- `tests/device_config/test_build_matterhub_deb_script.py`
+- `tests/device_config/test_build_runtime_binaries_script.py`
+- `tests/device_config/test_build_runtime_bundle_script.py`
+- `tests/device_config/test_install_runtime_bundle_script.py`
+
+### 2.7 MAC 바인딩
 
 - 허용 MAC 검증 모듈 존재
 - 주요 엔트리포인트 preflight 적용
@@ -122,6 +136,20 @@
 - 연결 modal 동작 확인
 - 연결 10초 안내 문구와 상태 배너 확인
 - 모바일 폭에서 카드 재배치 확인
+
+### 3.4 최종 납품 패키지 산출물 생성
+
+확인 목표:
+
+- 실제 `dist/*.deb` 또는 `dist/*.tar.gz` 산출물 생성
+- 생성된 산출물을 라즈베리파이에 설치
+- 서비스 기동 및 재부팅 후 유지 확인
+
+주의:
+
+- 현재 패키징 스크립트는 Wi-Fi 도메인도 같이 payload에 포함한다.
+- 다만 현재 납품 단계에서는 Wi-Fi 자동 설정/AP hotspot 동작을 기본 비활성화한 상태로 패키징한다.
+- 따라서 현재 패키징 완료 판단은 Wi-Fi 자동화 검증이 아니라, 비-Wi-Fi 서비스 패키징/설치/기동 검증을 우선 기준으로 삼는다.
 
 ## 4. 구현 완료 후 유의사항
 

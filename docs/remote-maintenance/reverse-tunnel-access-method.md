@@ -91,3 +91,35 @@ ssh -i ~/.ssh/matterhub-relay-operator-key.pem -p 443 ec2-user@3.38.126.167 \
 - 권장 범위: `22000-23999`
 - `register-hub`로 `hubs.map` 갱신 후 접속
 - 운영자 접속은 반드시 relay operator key 기반으로 수행
+
+## 7. 포트 운영 기준
+
+reverse tunnel only 하드닝 장비의 포트 정책은 아래 기준을 따른다.
+
+- `8100/tcp`: 영구 허용
+- `8123/tcp`: 영구 허용
+- `22/tcp`: reverse tunnel 경유 유지보수 중에만 임시 허용
+- `8110/tcp`: 유지보수 또는 연동 작업 중에만 임시 허용
+
+장비에서 예외 포트를 영구 반영할 때는:
+
+```bash
+bash device_config/harden_reverse_tunnel_only.sh \
+  --run-user whatsmatter \
+  --allow-inbound-port 8100 \
+  --allow-inbound-port 8123
+```
+
+이미 hardening 된 장비에서 direct SSH 또는 `8110` 접근이 잠깐 필요하면 reverse tunnel로 접속한 뒤:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 8110/tcp
+```
+
+작업 종료 후에는 반드시 다시 닫는다.
+
+```bash
+sudo ufw delete allow 22/tcp
+sudo ufw delete allow 8110/tcp
+```

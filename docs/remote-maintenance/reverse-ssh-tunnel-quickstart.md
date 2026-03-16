@@ -41,6 +41,11 @@ bash device_config/install_ubuntu24.sh \
   --harden-allow-inbound-port 8123
 ```
 
+포트 운영 기준:
+
+- `8100/tcp`, `8123/tcp`는 영구 허용으로 유지한다.
+- `22/tcp`, `8110/tcp`는 유지보수 시에만 임시 허용하고 작업 종료 후 다시 닫는다.
+
 reverse tunnel만 허용(직접 SSH 차단)까지 같이 적용하려면:
 
 ```bash
@@ -124,6 +129,20 @@ bash device_config/register_hub_on_relay.sh \
 sudo systemctl enable --now matterhub-support-tunnel.service
 systemctl status matterhub-support-tunnel.service --no-pager
 journalctl -u matterhub-support-tunnel.service -n 100 --no-pager
+```
+
+임시 direct SSH 또는 `8110` 접근이 필요하면 reverse tunnel 접속 후:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 8110/tcp
+```
+
+작업 종료 후:
+
+```bash
+sudo ufw delete allow 22/tcp
+sudo ufw delete allow 8110/tcp
 ```
 
 ## 6. 운영자 접속 방법

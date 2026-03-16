@@ -81,6 +81,11 @@ bash device_config/setup_initial_device.sh \
 
 `--harden-allow-inbound-port 8100 --harden-allow-inbound-port 8123`를 빼면 1호기와 달리 로컬 Wi-Fi 설정 페이지와 Home Assistant 접근이 막힌다.
 
+운영 규칙:
+
+- `8100/tcp`, `8123/tcp`는 reverse-tunnel-only 장비에서도 영구 허용으로 유지한다.
+- `22/tcp`, `8110/tcp`는 유지보수 작업이 필요할 때만 임시 허용하고, 작업이 끝나면 다시 닫는다.
+
 현재 통합 스크립트는 기본적으로 아래도 같이 맞춘다.
 
 - `WIFI_COUNTRY_CODE=KR`
@@ -88,9 +93,45 @@ bash device_config/setup_initial_device.sh \
 
 즉, 신규 장비는 별도 수동 작업 없이 Wi-Fi 국가코드 고정과 AP 모드 충돌 서비스 제어까지 같이 적용된다.
 
-## 5. 설치 직후 필수 후속 작업
+## 4-A. 원스톱 프로비저닝 (권장)
+
+운영자 PC에서 한 번에 장비 설정 + relay 등록까지 완료하는 방법:
+
+```bash
+cd /path/to/matterhub-flask
+bash device_config/provision_device_full.sh \
+  --device-ip <장비_IP> \
+  --device-ssh-user whatsmatter \
+  --device-ssh-password '<비밀번호>' \
+  --support-remote-port <장비별_고유_포트> \
+  --harden-reverse-tunnel-only \
+  --harden-allow-inbound-port 8100 \
+  --harden-allow-inbound-port 8123 \
+  --harden-local-console-pam
+```
+
+이 스크립트는 다음을 자동으로 수행한다:
+1. relay hub-access 공개키를 조회하여 장비에 주입
+2. 장비에 SSH 접속 → `setup_initial_device.sh` 실행
+3. 장비 tunnel 공개키 수집
+4. relay에 허브 등록 (`register_hub_on_relay.sh`)
+5. `j <hub_id>` 접속 검증
+
+이미 장비 설정이 끝난 상태에서 relay 등록만 하려면:
+
+```bash
+bash device_config/provision_device_full.sh \
+  --device-ip <장비_IP> \
+  --device-ssh-user whatsmatter \
+  --device-ssh-password '<비밀번호>' \
+  --support-remote-port <장비별_고유_포트> \
+  --skip-device-setup
+```
+
+## 5. 설치 직후 필수 후속 작업 (수동 설치 시)
 
 초기 설치만으로는 1호기와 완전히 같지 않다. 아래 후속 작업까지 끝나야 parity가 맞는다.
+원스톱 프로비저닝(4-A)을 사용한 경우 5.3(relay 등록)은 자동 완료된다.
 
 ### 5.1 matterhub_id 발급
 
@@ -177,6 +218,8 @@ Wi-Fi 설정 페이지:
 
 - 차이 1: `--harden-reverse-tunnel-only`만 적용하면 `8100/8123` inbound가 막혀 1호기와 달라진다.
   - 보정: 설치 명령에 `--harden-allow-inbound-port 8100 --harden-allow-inbound-port 8123`를 반드시 포함한다.
+- 차이 1-보강: direct SSH 또는 별도 로컬 서비스(`8110`)가 잠깐 필요할 수 있다.
+  - 보정: reverse tunnel 접속 후 `sudo ufw allow 22/tcp`, `sudo ufw allow 8110/tcp`로 임시 오픈하고, 작업 종료 후 `sudo ufw delete allow 22/tcp`, `sudo ufw delete allow 8110/tcp`로 원복한다.
 - 차이 2: support tunnel은 설치 직후 바로 살아나지 않을 수 있다.
   - 원인: relay `authorized_keys`와 `hubs.map`에 장비 공개키/매핑이 아직 없기 때문이다.
   - 보정: `register_hub_on_relay.sh` 단계까지 완료한다.

@@ -37,10 +37,15 @@ bash device_config/harden_reverse_tunnel_only.sh \
   --allow-inbound-port 8123
 ```
 
-현재 1호기 parity 기준 권장 예외 포트는 아래 두 개다.
+현재 운영 기준에서 아래 두 포트는 영구 허용 대상이다.
 
 - `8100/tcp`: MatterHub Wi-Fi 설정 Web UI
 - `8123/tcp`: Home Assistant
+
+운영 원칙:
+
+- `8100/tcp`, `8123/tcp`는 reverse-tunnel-only 하드닝 이후에도 항상 유지한다.
+- `22/tcp`(직접 SSH), `8110/tcp`는 유지보수 시에만 임시 허용하고 작업 종료 후 다시 닫는다.
 
 ## 4. 통합 설치 스크립트에서 같이 적용
 
@@ -75,13 +80,33 @@ ssh -i ~/.ssh/matterhub-relay-operator-key.pem -p 443 ec2-user@3.38.126.167
 j <hub_id>
 ```
 
-## 6. 주의사항
+## 6. 임시 유지보수 포트 운영
+
+direct SSH 또는 별도 로컬 서비스 접근이 잠깐 필요하면 reverse tunnel로 장비에 접속한 뒤 아래처럼 임시 예외를 추가한다.
+
+임시 오픈:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 8110/tcp
+sudo ufw status numbered
+```
+
+작업 종료 후 즉시 원복:
+
+```bash
+sudo ufw delete allow 22/tcp
+sudo ufw delete allow 8110/tcp
+sudo ufw status numbered
+```
+
+## 7. 주의사항
 
 - 하드닝 적용 후에는 장비 내부 IP로 직접 SSH 접속이 차단된다.
 - relay 또는 key 설정이 잘못된 상태에서 적용하면 복구 작업이 어려워진다.
 - 반드시 `--dry-run`으로 계획을 먼저 확인하고 적용한다.
 
-## 7. 로컬 콘솔 로그인(PAM) 제한
+## 8. 로컬 콘솔 로그인(PAM) 제한
 
 물리 모니터/키보드 연결 시 로그인까지 제한하려면 아래 스크립트를 추가 적용한다.
 
