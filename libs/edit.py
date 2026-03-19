@@ -4,7 +4,7 @@ import os
 HA_host = os.environ.get('HA_host')
 hass_token = os.environ.get('hass_token')
 
-load_dotenv()
+load_dotenv(dotenv_path='.env')
 
 expected_rule_structure = {
     "id": str,
@@ -102,13 +102,16 @@ def file_changed_request(event_type):
     return response
 
 def update_env_file(env_file_path, key, value):
+    # 심볼릭 링크인 경우 실제 파일 경로를 찾음
+    target_path = os.path.realpath(env_file_path)
+
     # .env 파일 읽기
-    with open(env_file_path, 'r') as file:
+    with open(target_path, 'r') as file:
         lines = file.readlines()
 
     # 파일의 내용을 수정
     key_found = False
-    with open(env_file_path, 'w') as file:
+    with open(target_path, 'w') as file:
         for line in lines:
             if line.startswith(f'{key}='):
                 file.write(f'{key}={value}\n')  # 키 값 변경

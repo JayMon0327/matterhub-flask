@@ -1,0 +1,230 @@
+from __future__ import annotations
+
+import unittest
+from typing import Mapping, Sequence
+from unittest.mock import Mock
+
+from mqtt_pkg.support_tunnel import (
+    TunnelConfig,
+    build_operator_connect_command,
+    build_ssh_command,
+    execute,
+    load_config,
+    validate_config,
+)
+
+
+def _valid_config(**overrides: object) -> TunnelConfig:
+    data = {
+        "enabled": True,
+        "command": "ssh",
+        "user": "maint",
+        "host": "support.example.com",
+        "port": 443,
+        "remote_port": 2222,
+        "local_port": 22,
+        "remote_bind_address": "127.0.0.1",
+        "private_key_path": None,
+        "known_hosts_path": None,
+        "strict_host_key_checking": True,
+        "server_alive_interval": 30,
+        "server_alive_count_max": 3,
+        "extra_options": tuple(),
+        "autossh_gatetime": "0",
+        "relay_operator_user": "ec2-user",
+        "operator_key_path_hint": "<relay-operator-key.pem>",
+        "reconnect_delay_seconds": 5,
+        "max_reconnect_delay_seconds": 60,
+        "connect_timeout_seconds": 10,
+        "preflight_tcp_check": True,
+        "preflight_tcp_timeout_seconds": 5,
+    }
+    data.update(overrides)
+    return TunnelConfig(**data)
+
+
+class SupportTunnelConfigTest(unittest.TestCase):
+    def test_load_config_parses_env_values(self) -> None:
+        env = {
+            "SUPPORT_TUNNEL_ENABLED": "1",
+            "SUPPORT_TUNNEL_COMMAND": "autossh",
+            "SUPPORT_TUNNEL_USER": "maint",
+            "SUPPORT_TUNNEL_HOST": "support.example.com",
+            "SUPPORT_TUNNEL_PORT": "443",
+            "SUPPORT_TUNNEL_REMOTE_PORT": "2222",
+            "SUPPORT_TUNNEL_LOCAL_PORT": "22",
+            "SUPPORT_TUNNEL_REMOTE_BIND_ADDRESS": "0.0.0.0",
+            "SUPPORT_TUNNEL_PRIVATE_KEY_PATH": "/keys/id_ed25519",
+            "SUPPORT_TUNNEL_KNOWN_HOSTS_PATH": "/keys/known_hosts",
+            "SUPPORT_TUNNEL_STRICT_HOST_KEY_CHECKING": "0",
+            "SUPPORT_TUNNEL_SERVER_ALIVE_INTERVAL": "20",
+            "SUPPORT_TUNNEL_SERVER_ALIVE_COUNT_MAX": "2",
+            "SUPPORT_TUNNEL_SSH_EXTRA_OPTS": "-v -o LogLevel=ERROR",
+            "SUPPORT_TUNNEL_AUTOSSH_GATETIME": "5",
+            "SUPPORT_TUNNEL_RELAY_OPERATOR_USER": "relayops",
+            "SUPPORT_TUNNEL_OPERATOR_KEY_PATH": "/keys/relay.pem",
+            "SUPPORT_TUNNEL_RECONNECT_DELAY_SECONDS": "7",
+            "SUPPORT_TUNNEL_MAX_RECONNECT_DELAY_SECONDS": "30",
+        }
+
+        config = load_config(env=env)
+
+        self.assertTrue(config.enabled)
+        self.assertEqual("autossh", config.command)
+        self.assertEqual("maint", config.user)
+        self.assertEqual("support.example.com", config.host)
+        self.assertEqual(2222, config.remote_port)
+        self.assertEqual("0.0.0.0", config.remote_bind_address)
+        self.assertFalse(config.strict_host_key_checking)
+        self.assertEqual(20, config.server_alive_interval)
+        self.assertEqual(2, config.server_alive_count_max)
+        self.assertEqual(("-v", "-o", "LogLevel=ERROR"), config.extra_options)
+        self.assertEqual("5", config.autossh_gatetime)
+        self.assertEqual("relayops", config.relay_operator_user)
+        self.assertEqual("/keys/relay.pem", config.operator_key_path_hint)
+        self.assertEqual(7, config.reconnect_delay_seconds)
+        self.assertEqual(30, config.max_reconnect_delay_seconds)
+        self.assertEqual(10, config.connect_timeout_seconds)
+        self.assertTrue(config.preflight_tcp_check)
+        self.assertEqual(5, config.preflight_tcp_timeout_seconds)
+
+    def test_validate_config_reports_missing_required_fields(self) -> None:
+        config = _valid_config(user=None, host=None, remote_port=None)
+
+        errors = validate_config(config)
+
+        self.assertIn("SUPPORT_TUNNEL_USER is required.", errors)
+        self.assertIn("SUPPORT_TUNNEL_HOST is required.", errors)
+        self.assertIn("SUPPORT_TUNNEL_REMOTE_PORT is required.", errors)
+
+    def test_build_ssh_command_includes_expected_reverse_forward(self) -> None:
+        config = _valid_config()
+
+        command = build_ssh_command(config)
+
+        self.assertEqual("ssh", command[0])
+        self.assertIn("-R", command)
+        self.assertIn("127.0.0.1:2222:localhost:22", command)
+        self.assertIn("maint@support.example.com", command)
+        self.assertIn("ConnectTimeout=10", command)
+
+    def test_build_ssh_command_disables_autossh_monitor_port(self) -> None:
+        config = _valid_config(command="autossh")
+
+        command = build_ssh_command(config)
+
+        self.assertEqual("autossh", command[0])
+        self.assertEqual(["-M", "0"], command[1:3])
+
+    def test_build_operator_connect_command_uses_proxycommand(self) -> None:
+        config = _valid_config()
+
+        command = build_operator_connect_command(config, device_user="whatsmatter")
+
+        self.assertEqual(
+            [
+                "ssh",
+                "-o",
+                "ProxyCommand=ssh -i <relay-operator-key.pem> -p 443 ec2-user@support.example.com -W %h:%p",
+                "-p",
+                "2222",
+                "whatsmatter@127.0.0.1",
+            ],
+            command,
+        )
+
+
+class SupportTunnelExecuteTest(unittest.TestCase):
+    def test_execute_returns_zero_when_disabled(self) -> None:
+        config = _valid_config(enabled=False)
+        runner = Mock()
+
+        return_code = execute(config, runner=runner)
+
+        self.assertEqual(0, return_code)
+        runner.assert_not_called()
+
+    def test_execute_dry_run_does_not_invoke_runner(self) -> None:
+        config = _valid_config()
+        runner = Mock()
+
+        return_code = execute(config, dry_run=True, runner=runner)
+
+        self.assertEqual(0, return_code)
+        runner.assert_not_called()
+
+    def test_execute_injects_autossh_env(self) -> None:
+        captured_env: dict[str, str] = {}
+
+        def fake_runner(command: Sequence[str], env: Mapping[str, str] | None) -> int:
+            self.assertEqual("autossh", command[0])
+            self.assertIsNotNone(env)
+            captured_env.update(env or {})
+            return 0
+
+        config = _valid_config(command="autossh", autossh_gatetime="10")
+
+        return_code = execute(
+            config,
+            runner=fake_runner,
+            retry_forever=False,
+            tcp_probe=lambda _host, _port, _timeout: True,
+        )
+
+        self.assertEqual(0, return_code)
+        self.assertEqual("10", captured_env.get("AUTOSSH_GATETIME"))
+
+    def test_execute_reconnect_loop_retries_with_backoff(self) -> None:
+        call_count = 0
+        sleep_calls: list[float] = []
+
+        def fake_runner(command: Sequence[str], env: Mapping[str, str] | None) -> int:
+            nonlocal call_count
+            call_count += 1
+            self.assertEqual("ssh", command[0])
+            return 255
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        config = _valid_config(reconnect_delay_seconds=2, max_reconnect_delay_seconds=5)
+
+        return_code = execute(
+            config,
+            runner=fake_runner,
+            retry_forever=True,
+            max_attempts=3,
+            sleep_fn=fake_sleep,
+            tcp_probe=lambda _host, _port, _timeout: True,
+        )
+
+        self.assertEqual(255, return_code)
+        self.assertEqual(3, call_count)
+        self.assertEqual([2, 4], sleep_calls)
+
+    def test_execute_fails_when_private_key_path_missing(self) -> None:
+        config = _valid_config(private_key_path="/no/such/key")
+        runner = Mock()
+
+        return_code = execute(config, runner=runner, retry_forever=False)
+
+        self.assertEqual(2, return_code)
+        runner.assert_not_called()
+
+    def test_execute_returns_three_when_tcp_preflight_fails(self) -> None:
+        config = _valid_config()
+        runner = Mock()
+
+        return_code = execute(
+            config,
+            runner=runner,
+            retry_forever=False,
+            tcp_probe=lambda _host, _port, _timeout: False,
+        )
+
+        self.assertEqual(3, return_code)
+        runner.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -4,8 +4,11 @@ import json
 import requests
 import os, time
 from dotenv import load_dotenv
+from libs.device_binding import enforce_mac_binding
 
-load_dotenv()
+# wm-app가 먼저 리소스/파일을 생성할 시간을 주기 위해 약간 지연
+time.sleep(5)
+load_dotenv(dotenv_path='.env')
 hass_token = os.environ.get('hass_token')
 HA_host = os.environ.get('HA_host')
 
@@ -27,7 +30,8 @@ subscribe_file_changed_body = {
 }
 
 def get_rules():
-    with open('resources/rules.json', 'r', encoding='utf-8') as file:
+    rules_path = os.environ.get('rules_file_path', 'resources/rules.json')
+    with open(rules_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
 
         return data
@@ -192,6 +196,9 @@ async def subscribe(r):
             print(f"Error details: {e}")
             time.sleep(5)
 if __name__ == "__main__":
+    if not enforce_mac_binding():
+        raise SystemExit(1)
+
     r = rule_engine()
 
     asyncio.run(subscribe(r))
