@@ -3,6 +3,8 @@ from typing import Dict
 
 from dotenv import load_dotenv
 
+from providers.konai import settings as konai_defaults
+
 load_dotenv(dotenv_path='.env')
 
 
@@ -18,23 +20,14 @@ HA_HOST = os.environ.get("HA_host")
 HASS_TOKEN = os.environ.get("hass_token")
 LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://localhost:8100")
 
-# core → 허브 방향 요청 수신용 (구독)
-_KONAI_TOPIC_DELTA_DEFAULT = (
-    "update/delta/dev/c3c6d27d5f2f353991afac4e3af69029303795a2/matter/k3O6TL"
-)
-# 허브 → core 응답·이벤트 발행용
-_KONAI_TOPIC_REPORTED_DEFAULT = (
-    "update/reported/dev/c3c6d27d5f2f353991afac4e3af69029303795a2/matter/k3O6TL"
-)
-
 # 레거시: 단일 토픽 설정 시 구독/발행 모두 이 값 사용
 KONAI_TOPIC = _strip_quotes(os.environ.get("KONAI_TOPIC"))
 
 _req_raw = os.environ.get("KONAI_TOPIC_REQUEST") or os.environ.get("KONAI_TOPIC")
-KONAI_TOPIC_REQUEST = _strip_quotes(_req_raw) or _KONAI_TOPIC_DELTA_DEFAULT
+KONAI_TOPIC_REQUEST = _strip_quotes(_req_raw) or konai_defaults.TOPIC_DELTA
 
 _res_raw = os.environ.get("KONAI_TOPIC_RESPONSE") or os.environ.get("KONAI_TOPIC")
-KONAI_TOPIC_RESPONSE = _strip_quotes(_res_raw) or _KONAI_TOPIC_REPORTED_DEFAULT
+KONAI_TOPIC_RESPONSE = _strip_quotes(_res_raw) or konai_defaults.TOPIC_REPORTED
 
 KONAI_TEST_TOPIC = _strip_quotes(os.environ.get("KONAI_TEST_TOPIC"))
 KONAI_TEST_TOPIC_REQUEST = _strip_quotes(
@@ -44,19 +37,9 @@ KONAI_TEST_TOPIC_RESPONSE = _strip_quotes(
     os.environ.get("KONAI_TEST_TOPIC_RESPONSE", KONAI_TEST_TOPIC or "")
 )
 
-def _build_default_konai_report_entity_ids() -> list[str]:
-    defaults = [
-        "sensor.smart_ht_sensor_ondo",
-        "sensor.smart_ht_sensor_seubdo",
-    ]
-    defaults.extend([f"sensor.smart_ht_sensor_ondo_{index}" for index in range(1, 21)])
-    defaults.extend([f"sensor.smart_ht_sensor_seubdo_{index}" for index in range(1, 21)])
-    return defaults
-
-
 KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get(
     "KONAI_REPORT_ENTITY_IDS",
-    ",".join(_build_default_konai_report_entity_ids()),
+    ",".join(konai_defaults.build_default_report_entity_ids()),
 )
 _konai_report_entity_ids = [
     entity_id.strip()

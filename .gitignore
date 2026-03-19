@@ -41,6 +41,9 @@ __init__.py
 !tests/__init__.py
 !tests/device_config/__init__.py
 !tests/mqtt_pkg/__init__.py
+!tests/providers/__init__.py
+!providers/__init__.py
+!providers/konai/__init__.py
 
 KONAI_CERTIFICATE_GUIDE.md
 awsCertificates/
@@ -50,3 +53,6 @@ codex_context.md
 
 # Ephemeral work files (expect scripts, temp configs, etc.)
 tmp/
+
+# Portfolio (private)
+portfolio/

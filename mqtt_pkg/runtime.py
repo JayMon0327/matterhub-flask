@@ -8,6 +8,7 @@ from typing import Callable, Dict, Iterable, Optional, Sequence
 from awscrt import io, mqtt
 from awsiot import mqtt_connection_builder
 
+from providers.konai import settings as konai_defaults
 from . import settings
 
 
@@ -31,13 +32,13 @@ class AWSIoTClient:
     """Konai certificate based MQTT client (no provisioning)."""
 
     def __init__(self) -> None:
-        self.cert_path = os.environ.get("KONAI_CERT_PATH", "konai_certificates/")
+        self.cert_path = os.environ.get("KONAI_CERT_PATH", konai_defaults.CERT_DIR)
         self.endpoint = os.environ.get(
-            "KONAI_ENDPOINT", "a34vuzhubahjfj-ats.iot.ap-northeast-2.amazonaws.com"
+            "KONAI_ENDPOINT", konai_defaults.ENDPOINT
         ).strip('"')
         self.client_id = os.environ.get(
             "KONAI_CLIENT_ID",
-            "c3c6d27d5f2f353991afac4e3af69029303795a2-matter-k3O6TL",
+            konai_defaults.CLIENT_ID,
         ).strip('"')
 
     def describe_connection(self) -> dict[str, object]:
