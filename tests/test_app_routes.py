@@ -150,6 +150,59 @@ class AppRouteTest(unittest.TestCase):
         data = resp.get_json()
         self.assertIn("matterhub_id", data)
 
+    @patch("requests.get")
+    def test_states_endpoint_proxies_ha(self, mock_get):
+        """GET /local/api/states — HA 프록시 정상 응답"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [{"entity_id": "light.test", "state": "on"}]
+        mock_get.return_value = mock_resp
+
+        resp = self.client.get("/local/api/states")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsInstance(data, list)
+
+    @patch("requests.get")
+    def test_services_endpoint_proxies_ha(self, mock_get):
+        """GET /local/api/services — HA 프록시 정상 응답"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [{"domain": "light", "services": {}}]
+        mock_get.return_value = mock_resp
+
+        resp = self.client.get("/local/api/services")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsInstance(data, list)
+
+    def test_devices_get_returns_json(self):
+        """GET /local/api/devices — JSON 파일 기반 CRUD"""
+        import tempfile, json
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump([{"entity_id": "light.test"}], f)
+            tmp_path = f.name
+
+        # Patch the module-level variable
+        original = self.app_module.devices_file_path
+        self.app_module.devices_file_path = tmp_path
+        try:
+            resp = self.client.get("/local/api/devices")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertIsInstance(data, list)
+        finally:
+            self.app_module.devices_file_path = original
+            os.unlink(tmp_path)
+
+    def test_webhook_returns_410(self):
+        """POST /webhook — 비활성화 상태 410 반환"""
+        resp = self.client.post("/webhook")
+        self.assertEqual(resp.status_code, 410)
+
+    def test_update_module_importable(self):
+        """mqtt_pkg.update 모듈 import 및 handle_update_command 존재 확인"""
+        from mqtt_pkg.update import handle_update_command
+        self.assertTrue(callable(handle_update_command))
+
 
 if __name__ == "__main__":
     unittest.main()
