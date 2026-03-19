@@ -11,6 +11,11 @@ from unittest.mock import Mock, patch
 
 
 def load_runtime_module():
+    # Ensure project root is on sys.path so real mqtt_pkg is found
+    project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
     awscrt_module = types.ModuleType("awscrt")
     awscrt_module.io = types.SimpleNamespace()
     awscrt_module.mqtt = types.SimpleNamespace(
@@ -31,8 +36,14 @@ def load_runtime_module():
             "dotenv": dotenv_module,
         },
     ):
-        sys.modules.pop("mqtt_pkg.runtime", None)
-        sys.modules.pop("mqtt_pkg.settings", None)
+        # Clear all mqtt_pkg submodules and package to force reimport from project root
+        for mod_name in list(sys.modules):
+            if mod_name == "mqtt_pkg" or mod_name.startswith("mqtt_pkg."):
+                del sys.modules[mod_name]
+        # Also clear providers cache to ensure clean reimport
+        for mod_name in list(sys.modules):
+            if mod_name.startswith("providers"):
+                del sys.modules[mod_name]
         return importlib.import_module("mqtt_pkg.runtime")
 
 

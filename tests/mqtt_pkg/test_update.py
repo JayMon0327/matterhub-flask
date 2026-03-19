@@ -1,11 +1,34 @@
 """mqtt_pkg/update.py handle_update_command 재활성화 검증 테스트."""
 
+import importlib
+import os
+import sys
+import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+
+def _ensure_real_mqtt_pkg():
+    """Ensure the real mqtt_pkg (not tests/mqtt_pkg) is importable."""
+    project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    # If mqtt_pkg in sys.modules points to tests/mqtt_pkg, clear it
+    pkg = sys.modules.get("mqtt_pkg")
+    if pkg and hasattr(pkg, "__file__") and pkg.__file__ and "tests" in pkg.__file__:
+        for mod_name in list(sys.modules):
+            if mod_name == "mqtt_pkg" or mod_name.startswith("mqtt_pkg."):
+                del sys.modules[mod_name]
 
 
 class HandleUpdateCommandTest(unittest.TestCase):
     """handle_update_command가 큐에 enqueue하는지 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
 
     @patch("mqtt_pkg.update.send_immediate_response")
     @patch("mqtt_pkg.update.runtime")

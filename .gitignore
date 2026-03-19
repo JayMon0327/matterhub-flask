@@ -41,7 +41,6 @@ __init__.py
 !tests/__init__.py
 !tests/device_config/__init__.py
 !tests/mqtt_pkg/__init__.py
-!tests/providers/__init__.py
 !providers/__init__.py
 !providers/konai/__init__.py
 
