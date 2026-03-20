@@ -251,6 +251,154 @@ def publish_device_states_bulk() -> None:
     print(f"[MQTT][DEVICE_STATE] 발행 완료: {len(devices)}개 디바이스 → {topic}")
 
 
+def _extract_battery(attributes: dict) -> Optional[int]:
+    for key in ("battery", "battery_level"):
+        val = attributes.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+class DeviceAlertPublisher:
+    def __init__(self) -> None:
+        self._prev_states: Dict[str, str] = {}
+        self._alerted: Dict[str, Set[str]] = {}
+        self._last_check: float = 0.0
+        self._initialized: bool = False
+
+    def check_and_publish(self) -> None:
+        if not runtime.is_connected() or not settings.MATTERHUB_ID:
+            return
+
+        now = time.time()
+        if self._last_check > 0 and (now - self._last_check) < settings.MQTT_ALERT_CHECK_INTERVAL_SEC:
+            return
+
+        states = _fetch_ha_states()
+        if states is None:
+            return
+
+        managed_ids = _load_managed_entity_ids()
+
+        if not self._initialized:
+            for item in states:
+                if not isinstance(item, dict):
+                    continue
+                entity_id = item.get("entity_id")
+                if not entity_id:
+                    continue
+                if managed_ids is not None and entity_id not in managed_ids:
+                    continue
+                current = str(item.get("state", ""))
+                self._prev_states[entity_id] = current
+                if current == "unavailable":
+                    self._alerted.setdefault(entity_id, set()).add("UNAVAILABLE")
+                attrs = item.get("attributes", {})
+                battery = _extract_battery(attrs)
+                if (
+                    settings.MQTT_ALERT_BATTERY_THRESHOLD > 0
+                    and battery is not None
+                    and battery <= settings.MQTT_ALERT_BATTERY_THRESHOLD
+                ):
+                    self._alerted.setdefault(entity_id, set()).add("BATTERY_EMPTY")
+            self._initialized = True
+            self._last_check = time.time()
+            print(f"[MQTT][ALERT] 초기화 완료: {len(self._prev_states)}개 엔티티, "
+                  f"기존 알림 {sum(len(v) for v in self._alerted.values())}건 seed")
+            return
+
+        for item in states:
+            if not isinstance(item, dict):
+                continue
+            entity_id = item.get("entity_id")
+            if not entity_id:
+                continue
+            if managed_ids is not None and entity_id not in managed_ids:
+                continue
+
+            current = str(item.get("state", ""))
+            prev = self._prev_states.get(entity_id)
+            attrs = item.get("attributes", {})
+            battery = _extract_battery(attrs)
+
+            alerted_set = self._alerted.get(entity_id, set())
+
+            # UNAVAILABLE 감지
+            if current == "unavailable" and prev is not None and prev != "unavailable":
+                if "UNAVAILABLE" not in alerted_set:
+                    self._publish_alert(
+                        entity_id=entity_id,
+                        alert_type="UNAVAILABLE",
+                        prev_state=prev,
+                        current_state=current,
+                        battery=battery,
+                        attributes=attrs,
+                    )
+                    self._alerted.setdefault(entity_id, set()).add("UNAVAILABLE")
+            elif current != "unavailable" and "UNAVAILABLE" in alerted_set:
+                alerted_set.discard("UNAVAILABLE")
+
+            # BATTERY_EMPTY 감지
+            if settings.MQTT_ALERT_BATTERY_THRESHOLD > 0 and battery is not None:
+                if battery <= settings.MQTT_ALERT_BATTERY_THRESHOLD:
+                    if "BATTERY_EMPTY" not in alerted_set:
+                        self._publish_alert(
+                            entity_id=entity_id,
+                            alert_type="BATTERY_EMPTY",
+                            prev_state=prev or "",
+                            current_state=current,
+                            battery=battery,
+                            attributes=attrs,
+                        )
+                        self._alerted.setdefault(entity_id, set()).add("BATTERY_EMPTY")
+                else:
+                    if "BATTERY_EMPTY" in alerted_set:
+                        alerted_set.discard("BATTERY_EMPTY")
+
+            self._prev_states[entity_id] = current
+
+        self._last_check = time.time()
+
+    def _publish_alert(
+        self,
+        entity_id: str,
+        alert_type: str,
+        prev_state: str,
+        current_state: str,
+        battery: Optional[int],
+        attributes: dict,
+    ) -> None:
+        topic = f"matterhub/{settings.MATTERHUB_ID}/event/device_alerts"
+        payload = {
+            "hub_id": settings.MATTERHUB_ID,
+            "ts": int(time.time()),
+            "entity_id": entity_id,
+            "alert_type": alert_type,
+            "prev_state": prev_state,
+            "current_state": current_state,
+            "battery": battery,
+            "attributes": {
+                "friendly_name": attributes.get("friendly_name", ""),
+                "device_class": attributes.get("device_class", ""),
+            },
+        }
+        publisher.publish(payload, response_topic=topic)
+        print(f"[MQTT][ALERT] {alert_type}: {entity_id} ({prev_state} → {current_state}) → {topic}")
+
+
+_alert_publisher = DeviceAlertPublisher()
+
+
+def check_and_publish_alerts() -> None:
+    try:
+        _alert_publisher.check_and_publish()
+    except Exception as exc:
+        print(f"[MQTT][ALERT] 실패: {exc}")
+
+
 def _publish_devices_with_chunking(topic: str, devices: Dict[str, Dict[str, object]]) -> None:
     payload = {
         "hub_id": settings.MATTERHUB_ID,

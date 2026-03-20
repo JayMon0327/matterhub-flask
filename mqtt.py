@@ -141,6 +141,7 @@ def main() -> None:
 
     state.publish_bootstrap_all_states()
     state.publish_device_states_bulk()
+    state.check_and_publish_alerts()
     test_subscriber.start_test_subscriber_if_enabled()
 
     try:
@@ -148,6 +149,7 @@ def main() -> None:
         while True:
             state.publish_device_state()
             state.publish_device_states_bulk()
+            state.check_and_publish_alerts()
             connection_check_counter += 1
             if connection_check_counter >= 12:
                 runtime.check_mqtt_connection(

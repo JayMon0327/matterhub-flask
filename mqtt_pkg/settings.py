@@ -77,6 +77,15 @@ MQTT_DEVICE_STATE_INTERVAL_SEC = max(10, int(
 MQTT_DEVICE_STATE_CHUNK_SIZE_KB = max(10, int(
     _env_with_fallback("MQTT_DEVICE_STATE_CHUNK_SIZE_KB") or "100"
 ))
+
+# === 디바이스 알림 발행 ===
+MQTT_ALERT_CHECK_INTERVAL_SEC = max(5, int(
+    _env_with_fallback("MQTT_ALERT_CHECK_INTERVAL_SEC") or "30"
+))
+MQTT_ALERT_BATTERY_THRESHOLD = max(0, int(
+    _env_with_fallback("MQTT_ALERT_BATTERY_THRESHOLD") or "0"
+))
+
 DEVICES_FILE_PATH = os.environ.get("devices_file_path")
 
 SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "0") == "1"
