@@ -121,7 +121,7 @@ tests/domains/support_tunnel/
 
 현재 저장소에는 reverse tunnel 실행기를 아래 경로에 추가한다.
 
-- 실행 모듈: `mqtt_pkg/support_tunnel.py`
+- 실행 모듈: `libs/support_tunnel.py`
 - 엔트리포인트: `support_tunnel.py`
 - systemd 유닛명: `matterhub-support-tunnel.service`
 

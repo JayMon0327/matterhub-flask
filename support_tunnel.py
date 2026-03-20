@@ -1,5 +1,5 @@
 from libs.device_binding import enforce_mac_binding
-from mqtt_pkg.support_tunnel import main
+from libs.support_tunnel import main
 
 
 if __name__ == "__main__":
