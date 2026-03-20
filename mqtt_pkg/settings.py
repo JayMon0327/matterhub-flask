@@ -3,9 +3,11 @@ from typing import Dict
 
 from dotenv import load_dotenv
 
-from providers.konai import settings as konai_defaults
+from providers import load_provider
 
 load_dotenv(dotenv_path='.env')
+
+_provider = load_provider()
 
 
 def _strip_quotes(value: str | None) -> str | None:
@@ -15,41 +17,58 @@ def _strip_quotes(value: str | None) -> str | None:
     return normalized or None
 
 
+def _env_with_fallback(*keys, default=None):
+    """여러 환경변수 키를 순서대로 조회, 첫 번째 유효한 값 반환."""
+    for key in keys:
+        val = os.environ.get(key)
+        if val:
+            return _strip_quotes(val)
+    return default
+
+
 # Environment-derived settings
 HA_HOST = os.environ.get("HA_host")
 HASS_TOKEN = os.environ.get("hass_token")
 LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://localhost:8100")
 
-# 레거시: 단일 토픽 설정 시 구독/발행 모두 이 값 사용
-KONAI_TOPIC = _strip_quotes(os.environ.get("KONAI_TOPIC"))
-
-_req_raw = os.environ.get("KONAI_TOPIC_REQUEST") or os.environ.get("KONAI_TOPIC")
-KONAI_TOPIC_REQUEST = _strip_quotes(_req_raw) or konai_defaults.TOPIC_DELTA
-
-_res_raw = os.environ.get("KONAI_TOPIC_RESPONSE") or os.environ.get("KONAI_TOPIC")
-KONAI_TOPIC_RESPONSE = _strip_quotes(_res_raw) or konai_defaults.TOPIC_REPORTED
-
-KONAI_TEST_TOPIC = _strip_quotes(os.environ.get("KONAI_TEST_TOPIC"))
-KONAI_TEST_TOPIC_REQUEST = _strip_quotes(
-    os.environ.get("KONAI_TEST_TOPIC_REQUEST", KONAI_TEST_TOPIC or "")
+# === MQTT 토픽 (벤더 중립) ===
+# 레거시 호환: KONAI_ 접두어 환경변수도 fallback으로 읽기
+MQTT_TOPIC_SUBSCRIBE = (
+    _env_with_fallback("MQTT_TOPIC_SUBSCRIBE", "KONAI_TOPIC_REQUEST", "KONAI_TOPIC")
+    or _provider.get_topic_subscribe()
 )
-KONAI_TEST_TOPIC_RESPONSE = _strip_quotes(
-    os.environ.get("KONAI_TEST_TOPIC_RESPONSE", KONAI_TEST_TOPIC or "")
+MQTT_TOPIC_PUBLISH = (
+    _env_with_fallback("MQTT_TOPIC_PUBLISH", "KONAI_TOPIC_RESPONSE", "KONAI_TOPIC")
+    or _provider.get_topic_publish()
 )
 
-KONAI_REPORT_ENTITY_IDS_RAW = os.environ.get(
-    "KONAI_REPORT_ENTITY_IDS",
-    ",".join(konai_defaults.build_default_report_entity_ids()),
-)
-_konai_report_entity_ids = [
+_test_topic_legacy = _strip_quotes(os.environ.get("KONAI_TEST_TOPIC"))
+MQTT_TEST_TOPIC = _env_with_fallback("MQTT_TEST_TOPIC", "KONAI_TEST_TOPIC") or ""
+MQTT_TEST_TOPIC_SUBSCRIBE = _env_with_fallback(
+    "MQTT_TEST_TOPIC_SUBSCRIBE", "KONAI_TEST_TOPIC_REQUEST"
+) or MQTT_TEST_TOPIC or _test_topic_legacy or ""
+MQTT_TEST_TOPIC_PUBLISH = _env_with_fallback(
+    "MQTT_TEST_TOPIC_PUBLISH", "KONAI_TEST_TOPIC_RESPONSE"
+) or MQTT_TEST_TOPIC or _test_topic_legacy or ""
+
+# === 센서 보고 ===
+_report_ids_raw = _env_with_fallback("MQTT_REPORT_ENTITY_IDS", "KONAI_REPORT_ENTITY_IDS")
+if not _report_ids_raw:
+    _report_ids_raw = ",".join(_provider.get_default_report_entity_ids())
+_report_ids_list = [
     entity_id.strip()
-    for entity_id in KONAI_REPORT_ENTITY_IDS_RAW.split(",")
+    for entity_id in _report_ids_raw.split(",")
     if entity_id.strip()
 ]
-KONAI_REPORT_ENTITY_IDS = list(dict.fromkeys(_konai_report_entity_ids))
+MQTT_REPORT_ENTITY_IDS = list(dict.fromkeys(_report_ids_list))
 
-KONAI_EVENT_THROTTLE_SEC = max(0.0, float(os.environ.get("KONAI_EVENT_THROTTLE_SEC", "2")))
-KONAI_EVENT_DEDUP_WINDOW_SEC = max(0.0, float(os.environ.get("KONAI_EVENT_DEDUP_WINDOW_SEC", "3")))
+# === 이벤트 조절 ===
+MQTT_EVENT_THROTTLE_SEC = max(0.0, float(
+    _env_with_fallback("MQTT_EVENT_THROTTLE_SEC", "KONAI_EVENT_THROTTLE_SEC") or "2"
+))
+MQTT_EVENT_DEDUP_WINDOW_SEC = max(0.0, float(
+    _env_with_fallback("MQTT_EVENT_DEDUP_WINDOW_SEC", "KONAI_EVENT_DEDUP_WINDOW_SEC") or "3"
+))
 
 SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "0") == "1"
 
