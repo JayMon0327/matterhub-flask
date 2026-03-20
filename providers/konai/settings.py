@@ -4,6 +4,8 @@
 환경변수가 설정되면 환경변수 값이 우선한다 (mqtt_pkg/settings.py, runtime.py에서 처리).
 """
 
+from providers.base import MQTTProviderSettings
+
 # AWS IoT Core 엔드포인트
 ENDPOINT = "a34vuzhubahjfj-ats.iot.ap-northeast-2.amazonaws.com"
 
@@ -31,3 +33,25 @@ def build_default_report_entity_ids() -> list[str]:
     defaults.extend([f"sensor.smart_ht_sensor_ondo_{i}" for i in range(1, 21)])
     defaults.extend([f"sensor.smart_ht_sensor_seubdo_{i}" for i in range(1, 21)])
     return defaults
+
+
+class KonaiSettings(MQTTProviderSettings):
+    """Konai 벤더 설정 인터페이스 구현."""
+
+    def get_endpoint(self) -> str:
+        return ENDPOINT
+
+    def get_client_id(self) -> str:
+        return CLIENT_ID
+
+    def get_cert_dir(self) -> str:
+        return CERT_DIR
+
+    def get_topic_subscribe(self) -> str:
+        return TOPIC_DELTA
+
+    def get_topic_publish(self) -> str:
+        return TOPIC_REPORTED
+
+    def get_default_report_entity_ids(self) -> list[str]:
+        return build_default_report_entity_ids()
