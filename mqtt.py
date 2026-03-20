@@ -140,12 +140,14 @@ def main() -> None:
     )
 
     state.publish_bootstrap_all_states()
+    state.publish_device_states_bulk()
     test_subscriber.start_test_subscriber_if_enabled()
 
     try:
         connection_check_counter = 0
         while True:
             state.publish_device_state()
+            state.publish_device_states_bulk()
             connection_check_counter += 1
             if connection_check_counter >= 12:
                 runtime.check_mqtt_connection(

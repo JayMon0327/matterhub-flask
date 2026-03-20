@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import requests
 
@@ -124,12 +125,7 @@ def publish_bootstrap_all_states() -> None:
         print(f"[MQTT][BOOTSTRAP] 실패: {exc}")
 
 
-def publish_device_state() -> None:
-    global last_entity_publish
-
-    if not runtime.is_connected():
-        return
-
+def _fetch_ha_states() -> Optional[List[Dict[str, object]]]:
     try:
         response = requests.get(
             f"{settings.HA_HOST}/api/states",
@@ -137,16 +133,31 @@ def publish_device_state() -> None:
             timeout=10,
         )
         if response.status_code != 200:
-            return
-
+            return None
         states = response.json()
+        return states if isinstance(states, list) else None
+    except Exception as exc:
+        print(f"[MQTT] HA 상태 조회 실패: {exc}")
+        return None
+
+
+def publish_device_state() -> None:
+    global last_entity_publish
+
+    if not runtime.is_connected():
+        return
+
+    states = _fetch_ha_states()
+    if states is None:
+        return
+
+    try:
         state_map: Dict[str, Dict[str, object]] = {}
-        if isinstance(states, list):
-            for item in states:
-                if isinstance(item, dict):
-                    entity_id = item.get("entity_id")
-                    if entity_id:
-                        state_map[str(entity_id)] = item
+        for item in states:
+            if isinstance(item, dict):
+                entity_id = item.get("entity_id")
+                if entity_id:
+                    state_map[str(entity_id)] = item
 
         for entity_id in settings.MQTT_REPORT_ENTITY_IDS:
             state_entry = state_map.get(entity_id)
@@ -184,3 +195,88 @@ def publish_device_state() -> None:
 
     except Exception as exc:
         print(f"상태 발행(이벤트) 실패: {exc}")
+
+
+def _load_managed_entity_ids() -> Optional[Set[str]]:
+    path = settings.DEVICES_FILE_PATH
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.loads(f.read().strip() or "[]")
+        return {d["entity_id"] for d in data if isinstance(d, dict) and "entity_id" in d}
+    except Exception:
+        return None
+
+
+_last_device_state_publish: float = 0.0
+
+
+def publish_device_states_bulk() -> None:
+    global _last_device_state_publish
+
+    if not runtime.is_connected() or not settings.MATTERHUB_ID:
+        return
+
+    now = time.time()
+    if _last_device_state_publish > 0 and (now - _last_device_state_publish) < settings.MQTT_DEVICE_STATE_INTERVAL_SEC:
+        return
+
+    states = _fetch_ha_states()
+    if states is None:
+        return
+
+    managed_ids = _load_managed_entity_ids()
+    devices: Dict[str, Dict[str, object]] = {}
+    for item in states:
+        if not isinstance(item, dict):
+            continue
+        entity_id = item.get("entity_id")
+        if not entity_id:
+            continue
+        if managed_ids is not None and entity_id not in managed_ids:
+            continue
+        devices[entity_id] = {
+            "state": item.get("state"),
+            "last_changed": item.get("last_changed"),
+            "attributes": item.get("attributes", {}),
+        }
+
+    if not devices:
+        return
+
+    topic = f"matterhub/{settings.MATTERHUB_ID}/state/devices"
+    _publish_devices_with_chunking(topic, devices)
+    _last_device_state_publish = time.time()
+    print(f"[MQTT][DEVICE_STATE] 발행 완료: {len(devices)}개 디바이스 → {topic}")
+
+
+def _publish_devices_with_chunking(topic: str, devices: Dict[str, Dict[str, object]]) -> None:
+    payload = {
+        "hub_id": settings.MATTERHUB_ID,
+        "ts": publisher.utc_timestamp(),
+        "devices": devices,
+    }
+    serialized = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    max_bytes = settings.MQTT_DEVICE_STATE_CHUNK_SIZE_KB * 1024
+
+    if len(serialized) <= max_bytes:
+        publisher.publish(payload, response_topic=topic)
+        return
+
+    # 청크 분할
+    entity_ids = list(devices.keys())
+    avg_size = len(serialized) / len(entity_ids)
+    per_chunk = max(1, int((max_bytes - 500) / avg_size))
+
+    chunks = [entity_ids[i:i + per_chunk] for i in range(0, len(entity_ids), per_chunk)]
+    total = len(chunks)
+    for idx, chunk_ids in enumerate(chunks, start=1):
+        chunk_payload = {
+            "hub_id": settings.MATTERHUB_ID,
+            "ts": publisher.utc_timestamp(),
+            "chunk": idx,
+            "total_chunks": total,
+            "devices": {eid: devices[eid] for eid in chunk_ids},
+        }
+        publisher.publish(chunk_payload, response_topic=topic)

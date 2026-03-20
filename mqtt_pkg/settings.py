@@ -70,6 +70,15 @@ MQTT_EVENT_DEDUP_WINDOW_SEC = max(0.0, float(
     _env_with_fallback("MQTT_EVENT_DEDUP_WINDOW_SEC", "KONAI_EVENT_DEDUP_WINDOW_SEC") or "3"
 ))
 
+# === 디바이스 상태 발행 ===
+MQTT_DEVICE_STATE_INTERVAL_SEC = max(10, int(
+    _env_with_fallback("MQTT_DEVICE_STATE_INTERVAL_SEC") or "60"
+))
+MQTT_DEVICE_STATE_CHUNK_SIZE_KB = max(10, int(
+    _env_with_fallback("MQTT_DEVICE_STATE_CHUNK_SIZE_KB") or "100"
+))
+DEVICES_FILE_PATH = os.environ.get("devices_file_path")
+
 SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "0") == "1"
 
 MATTERHUB_ID = _strip_quotes(os.environ.get("matterhub_id"))
