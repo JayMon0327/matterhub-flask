@@ -42,7 +42,7 @@ class PublisherTest(unittest.TestCase):
         connection.publish.return_value = (future, 1)
 
         with patch.object(publisher.runtime, "get_connection", return_value=connection):
-            with patch.object(publisher.settings, "KONAI_TOPIC_RESPONSE", "update/reported/dev/example"):
+            with patch.object(publisher.settings, "MQTT_TOPIC_PUBLISH", "update/reported/dev/example"):
                 with patch("builtins.print") as print_mock:
                     publisher.publish({"type": "bootstrap_all_states", "data": []})
 
@@ -58,7 +58,7 @@ class PublisherTest(unittest.TestCase):
         connection.publish.side_effect = RuntimeError("boom")
 
         with patch.object(publisher.runtime, "get_connection", return_value=connection):
-            with patch.object(publisher.settings, "KONAI_TOPIC_RESPONSE", "update/reported/dev/example"):
+            with patch.object(publisher.settings, "MQTT_TOPIC_PUBLISH", "update/reported/dev/example"):
                 with patch("builtins.print") as print_mock:
                     publisher.publish({"type": "bootstrap_all_states", "data": []})
 
