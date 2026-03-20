@@ -22,10 +22,10 @@ def _append_unique_topic(topics: List[str], topic: str | None) -> None:
 
 def build_subscribe_topics() -> List[str]:
     topics: List[str] = []
-    _append_unique_topic(topics, settings.KONAI_TOPIC_REQUEST)
-    _append_unique_topic(topics, settings.KONAI_TOPIC_RESPONSE)
-    _append_unique_topic(topics, settings.KONAI_TEST_TOPIC_REQUEST)
-    _append_unique_topic(topics, settings.KONAI_TEST_TOPIC_RESPONSE)
+    _append_unique_topic(topics, settings.MQTT_TOPIC_SUBSCRIBE)
+    _append_unique_topic(topics, settings.MQTT_TOPIC_PUBLISH)
+    _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_SUBSCRIBE)
+    _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_PUBLISH)
     if settings.SUBSCRIBE_MATTERHUB_TOPICS and settings.MATTERHUB_ID:
         _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/git/update")
         _append_unique_topic(topics, f"matterhub/update/specific/{settings.MATTERHUB_ID}")
@@ -140,7 +140,7 @@ def main() -> None:
     )
 
     state.publish_bootstrap_all_states()
-    test_subscriber.start_konai_test_subscriber_if_enabled()
+    test_subscriber.start_test_subscriber_if_enabled()
 
     try:
         connection_check_counter = 0

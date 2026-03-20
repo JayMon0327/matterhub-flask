@@ -88,10 +88,9 @@ def execute_external_update_script(
 ) -> Dict[str, Any]:
     try:
         possible_paths = [
-            "/home/hyodol/whatsmatter-hub-flask-server/update_server.sh",
-            "./update_server.sh",
-            "../update_server.sh",
-            os.path.join(os.path.dirname(__file__), "../update_server.sh"),
+            os.path.join(os.path.dirname(__file__), "../device_config/update_server.sh"),
+            "./device_config/update_server.sh",
+            "/srv/matterhub/device_config/update_server.sh",
         ]
 
         script_path = None

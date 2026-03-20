@@ -14,18 +14,18 @@ from . import settings
 from .provisioning import AWSProvisioningClient
 
 
-def _build_konai_test_subscriber_connection() -> Optional[mqtt.Connection]:
+def _build_test_subscriber_connection() -> Optional[mqtt.Connection]:
     provisioning_client = AWSProvisioningClient()
     has_cert, cert_file, key_file = provisioning_client.check_certificate()
     if not has_cert:
         print("[TEST] device 인증서 없음, Claim 프로비저닝 실행")
         success = provisioning_client.provision_device()
         if not success:
-            print("❌ [TEST] Claim 프로비저닝 실패 - 테스트 구독을 시작하지 않습니다.")
+            print("[TEST] Claim 프로비저닝 실패 - 테스트 구독을 시작하지 않습니다.")
             return None
         has_cert, cert_file, key_file = provisioning_client.check_certificate()
         if not has_cert:
-            print("❌ [TEST] 프로비저닝 후에도 device 인증서를 찾을 수 없습니다.")
+            print("[TEST] 프로비저닝 후에도 device 인증서를 찾을 수 없습니다.")
             return None
 
     event_loop_group = io.EventLoopGroup(1)
@@ -49,28 +49,28 @@ def _build_konai_test_subscriber_connection() -> Optional[mqtt.Connection]:
     return mqtt_conn
 
 
-def _run_konai_test_subscriber_loop() -> None:
-    test_topic = settings.KONAI_TEST_TOPIC_REQUEST or settings.KONAI_TEST_TOPIC
+def _run_test_subscriber_loop() -> None:
+    test_topic = settings.MQTT_TEST_TOPIC_SUBSCRIBE or settings.MQTT_TEST_TOPIC
     if not test_topic:
-        print("[TEST] KONAI_TEST_TOPIC 미설정, 테스트 구독 스킵")
+        print("[TEST] MQTT_TEST_TOPIC 미설정, 테스트 구독 스킵")
         return
 
     try:
-        mqtt_conn = _build_konai_test_subscriber_connection()
+        mqtt_conn = _build_test_subscriber_connection()
         if mqtt_conn is None:
             return
 
         print("[TEST] AWS IoT Core 테스트 구독 MQTT 연결 시도")
         connect_future = mqtt_conn.connect()
         connect_future.result()
-        print("✅ [TEST] 테스트 구독용 MQTT 연결 성공")
+        print("[TEST] 테스트 구독용 MQTT 연결 성공")
 
         def on_message(topic, payload, **kwargs):
             try:
                 body = json.loads(payload.decode("utf-8"))
             except Exception:
                 body = payload.decode("utf-8", errors="ignore")
-            print("\n📩 [TEST 수신] ===============================")
+            print("\n[TEST 수신] ===============================")
             print(f"topic = {topic}")
             print(json.dumps(body, ensure_ascii=False, indent=2))
             print("===========================================\n")
@@ -82,22 +82,22 @@ def _run_konai_test_subscriber_loop() -> None:
             callback=on_message,
         )
         subscribe_future.result()
-        print(f"✅ [TEST] 테스트 토픽 구독 완료: {test_topic}")
+        print(f"[TEST] 테스트 토픽 구독 완료: {test_topic}")
         print("[TEST] 테스트 구독 루프 진입")
 
         while True:
             time.sleep(5)
 
     except Exception as exc:
-        print(f"❌ [TEST] 테스트 구독 루프 오류: {exc}")
+        print(f"[TEST] 테스트 구독 루프 오류: {exc}")
 
 
-def start_konai_test_subscriber_if_enabled() -> None:
-    if os.environ.get("ENABLE_KONAI_TEST_SUBSCRIBER", "0") != "1":
+def start_test_subscriber_if_enabled() -> None:
+    enabled = os.environ.get("ENABLE_TEST_SUBSCRIBER") or os.environ.get("ENABLE_KONAI_TEST_SUBSCRIBER")
+    if enabled != "1":
         return
 
-    print("[TEST] ENABLE_KONAI_TEST_SUBSCRIBER=1, 테스트 구독 스레드 시작")
-    worker = threading.Thread(target=_run_konai_test_subscriber_loop, name="konai-test-subscriber")
+    print("[TEST] ENABLE_TEST_SUBSCRIBER=1, 테스트 구독 스레드 시작")
+    worker = threading.Thread(target=_run_test_subscriber_loop, name="test-subscriber")
     worker.daemon = True
     worker.start()
-

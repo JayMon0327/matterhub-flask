@@ -20,7 +20,6 @@ def load_mqtt_module(
     test_response_topic: str = "",
     matterhub_id: str | None = None,
     subscribe_matterhub_topics: bool = False,
-    subscribe_konai_response_topic: bool = True,
 ):
     mqtt_pkg_module = types.ModuleType("mqtt_pkg")
     mqtt_pkg_module.__path__ = []
@@ -51,12 +50,11 @@ def load_mqtt_module(
     runtime_module.AWSIoTClient = DummyAWSIoTClient
 
     settings_module = types.ModuleType("mqtt_pkg.settings")
-    settings_module.KONAI_TOPIC_REQUEST = request_topic
-    settings_module.KONAI_TOPIC_RESPONSE = response_topic
-    settings_module.KONAI_TEST_TOPIC_REQUEST = test_request_topic
-    settings_module.KONAI_TEST_TOPIC_RESPONSE = test_response_topic
+    settings_module.MQTT_TOPIC_SUBSCRIBE = request_topic
+    settings_module.MQTT_TOPIC_PUBLISH = response_topic
+    settings_module.MQTT_TEST_TOPIC_SUBSCRIBE = test_request_topic
+    settings_module.MQTT_TEST_TOPIC_PUBLISH = test_response_topic
     settings_module.SUBSCRIBE_MATTERHUB_TOPICS = subscribe_matterhub_topics
-    settings_module.SUBSCRIBE_KONAI_RESPONSE_TOPIC = subscribe_konai_response_topic
     settings_module.MATTERHUB_ID = matterhub_id
 
     state_module = types.ModuleType("mqtt_pkg.state")
@@ -64,8 +62,8 @@ def load_mqtt_module(
     state_module.publish_device_state = Mock(name="publish_device_state")
 
     test_subscriber_module = types.ModuleType("mqtt_pkg.test_subscriber")
-    test_subscriber_module.start_konai_test_subscriber_if_enabled = Mock(
-        name="start_konai_test_subscriber_if_enabled"
+    test_subscriber_module.start_test_subscriber_if_enabled = Mock(
+        name="start_test_subscriber_if_enabled"
     )
 
     update_module = types.ModuleType("mqtt_pkg.update")

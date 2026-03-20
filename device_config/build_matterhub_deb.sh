@@ -147,9 +147,9 @@ TOOL_DIR="${PKG_ROOT}${INSTALL_PREFIX}/device_config"
 SYSTEMD_DIR="${PKG_ROOT}/usr/lib/systemd/system"
 DEBIAN_DIR="${PKG_ROOT}/DEBIAN"
 ENV_DIR="${PKG_ROOT}${CONFIG_DIR}"
-RUNTIME_DIRS=(mqtt_pkg sub libs wifi_config templates certificates konai_certificates)
-RUNTIME_FILES=(app.py mqtt.py support_tunnel.py update_agent.py run_provision.py requirements.txt)
-PACKAGE_TOOL_FILES=(setup_support_tunnel.sh ensure_provisioned_support_tunnel.sh apply_update_bundle.sh)
+RUNTIME_DIRS=(mqtt_pkg sub libs wifi_config templates certificates konai_certificates providers)
+RUNTIME_FILES=(app.py mqtt.py support_tunnel.py update_agent.py requirements.txt)
+PACKAGE_TOOL_FILES=(setup_support_tunnel.sh ensure_provisioned_support_tunnel.sh apply_update_bundle.sh run_provision.py update_server.sh setup_matterhub.sh)
 
 cleanup() {
   rm -rf "$BUILD_ROOT"
@@ -208,7 +208,7 @@ create_launcher "matterhub-rule-engine" "sub/ruleEngine"
 create_launcher "matterhub-notifier" "sub/notifier"
 create_launcher "matterhub-support-tunnel" "support_tunnel"
 create_launcher "matterhub-update-agent" "update_agent"
-create_launcher "matterhub-provision" "run_provision"
+create_launcher "matterhub-provision" "device_config/run_provision"
 
 create_unit() {
   local unit_name="$1"

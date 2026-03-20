@@ -30,8 +30,8 @@ def load_run_provision_module(fake_client_class: type[object]):
             "mqtt_pkg.provisioning": provisioning_module,
         },
     ):
-        sys.modules.pop("run_provision", None)
-        return importlib.import_module("run_provision")
+        sys.modules.pop("device_config.run_provision", None)
+        return importlib.import_module("device_config.run_provision")
 
 
 class ExistingIdClient:

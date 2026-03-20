@@ -8,10 +8,10 @@ import requests
 from . import publisher, settings, update
 
 
-def handle_konai_states_request(
+def handle_states_request(
     payload_bytes: Optional[bytes] = None, response_topic: Optional[str] = None
 ) -> None:
-    """Process Konai request: correlation_id is mandatory."""
+    """Process MQTT request: correlation_id is mandatory."""
     try:
         correlation_id: Optional[str] = None
         entity_id: Optional[str] = None
@@ -53,7 +53,7 @@ def handle_konai_states_request(
         if settings.HASS_TOKEN:
             headers["Authorization"] = f"Bearer {settings.HASS_TOKEN}"
 
-        timestamp = publisher.konai_timestamp()
+        timestamp = publisher.utc_timestamp()
 
         if entity_id:
             url = f"{settings.LOCAL_API_BASE}/local/api/states/{entity_id}"
@@ -70,7 +70,7 @@ def handle_konai_states_request(
                     if settings.MATTERHUB_ID:
                         payload["hub_id"] = settings.MATTERHUB_ID
                     publisher.publish(payload, response_topic=response_topic)
-                    print(f"코나이 단일 조회 응답: {entity_id}")
+                    print(f"[MQTT][RESPONSE] 단일 조회: {entity_id}")
                     return
 
                 publisher.publish_error(
@@ -120,7 +120,7 @@ def handle_konai_states_request(
             if settings.MATTERHUB_ID:
                 payload["hub_id"] = settings.MATTERHUB_ID
             publisher.publish(payload, response_topic=response_topic)
-            print("코나이 전체 조회 응답 발행")
+            print("[MQTT][RESPONSE] 전체 조회 발행")
 
         except requests.Timeout:
             publisher.publish_error(
@@ -139,7 +139,7 @@ def handle_konai_states_request(
             )
 
     except Exception as exc:
-        print(f"❌ 코나이 요청 처리 실패: {exc}")
+        print(f"[MQTT][REQUEST] 처리 실패: {exc}")
         try:
             publisher.publish_error(None, "LOCAL_API_ERROR", str(exc), response_topic=response_topic)
         except Exception:
@@ -153,7 +153,7 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
     except Exception:
         parsed = None
 
-    if topic == settings.KONAI_TOPIC_REQUEST:
+    if topic == settings.MQTT_TOPIC_SUBSCRIBE:
         if isinstance(parsed, dict) and parsed.get("type") in {
             "query_response_all",
             "query_response_single",
@@ -162,28 +162,28 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
             "bootstrap_all_states",
         }:
             return
-        print(f"코나이 요청 수신: {topic}")
-        handle_konai_states_request(payload_bytes, response_topic=settings.KONAI_TOPIC_RESPONSE)
+        print(f"[MQTT][REQUEST] 수신: {topic}")
+        handle_states_request(payload_bytes, response_topic=settings.MQTT_TOPIC_PUBLISH)
         return
 
-    if topic == settings.KONAI_TOPIC_RESPONSE and settings.KONAI_TOPIC_RESPONSE != settings.KONAI_TOPIC_REQUEST:
+    if topic == settings.MQTT_TOPIC_PUBLISH and settings.MQTT_TOPIC_PUBLISH != settings.MQTT_TOPIC_SUBSCRIBE:
         return
 
-    if settings.KONAI_TEST_TOPIC_REQUEST and topic == settings.KONAI_TEST_TOPIC_REQUEST:
+    if settings.MQTT_TEST_TOPIC_SUBSCRIBE and topic == settings.MQTT_TEST_TOPIC_SUBSCRIBE:
         test_response_topic = (
-            settings.KONAI_TEST_TOPIC_RESPONSE or settings.KONAI_TEST_TOPIC_REQUEST
+            settings.MQTT_TEST_TOPIC_PUBLISH or settings.MQTT_TEST_TOPIC_SUBSCRIBE
         )
         print(
-            f"코나이 테스트 요청: {topic} -> {test_response_topic}, "
+            f"[MQTT][TEST] 요청: {topic} -> {test_response_topic}, "
             f"matterhub_id={settings.MATTERHUB_ID or '(미설정)'}"
         )
-        handle_konai_states_request(payload_bytes, response_topic=test_response_topic)
+        handle_states_request(payload_bytes, response_topic=test_response_topic)
         return
 
     if (
-        settings.KONAI_TEST_TOPIC_RESPONSE
-        and topic == settings.KONAI_TEST_TOPIC_RESPONSE
-        and settings.KONAI_TEST_TOPIC_RESPONSE != settings.KONAI_TEST_TOPIC_REQUEST
+        settings.MQTT_TEST_TOPIC_PUBLISH
+        and topic == settings.MQTT_TEST_TOPIC_PUBLISH
+        and settings.MQTT_TEST_TOPIC_PUBLISH != settings.MQTT_TEST_TOPIC_SUBSCRIBE
     ):
         return
 

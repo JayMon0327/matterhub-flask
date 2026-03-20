@@ -7,8 +7,8 @@ Claim 인증서로 AWS IoT Core에 사물을 등록하고,
 
 사용법 (venv Python으로 실행):
   cd matterhub-flask
-  venv/bin/python3 run_provision.py
-  venv/bin/python3 run_provision.py --ensure --non-interactive
+  venv/bin/python3 device_config/run_provision.py
+  venv/bin/python3 device_config/run_provision.py --ensure --non-interactive
 
 필요 조건:
   - certificates/ 디렉토리에 Claim 인증서 존재
@@ -24,10 +24,11 @@ import argparse
 import os
 import sys
 
-# 프로젝트 루트에서 실행되도록
+# 프로젝트 루트에서 실행되도록 (device_config/ 하위에서 실행해도 루트 기준)
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _script_dir)
-os.chdir(_script_dir)
+_project_root = os.path.dirname(_script_dir)
+sys.path.insert(0, _project_root)
+os.chdir(_project_root)
 
 # dotenv 등 의존성: venv 사용 필수
 try:

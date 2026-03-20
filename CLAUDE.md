@@ -45,7 +45,7 @@ bash device_config/provision_device_full.sh   # full provisioning
 | Service | Entry Point | Role |
 |---------|-------------|------|
 | matterhub-api | `app.py` | Flask REST API (port 8100), proxies Home Assistant |
-| matterhub-mqtt | `mqtt.py` | AWS IoT Core MQTT client (Konai protocol) |
+| matterhub-mqtt | `mqtt.py` | AWS IoT Core MQTT client (vendor-neutral, default: Konai) |
 | matterhub-rule-engine | `sub/ruleEngine.py` | State-change triggered automation |
 | matterhub-notifier | `sub/notifier.py` | WebSocket event → webhook notifications |
 | matterhub-support-tunnel | `support_tunnel.py` | Reverse SSH tunnel for remote maintenance |
@@ -56,22 +56,24 @@ systemd unit templates: `device_config/systemd/`
 
 ### Key Packages
 
-- **`mqtt_pkg/`** — Refactored MQTT layer: `runtime.py` (AWSIoTClient connection), `callbacks.py` (message handlers), `publisher.py` (state publishing), `settings.py` (topic config from .env), `provisioning.py` (claim-based Thing registration)
+- **`mqtt_pkg/`** — Vendor-neutral MQTT layer: `runtime.py` (AWSIoTClient connection), `callbacks.py` (message handlers), `publisher.py` (state publishing), `settings.py` (env loading + vendor fallback), `provisioning.py` (claim-based Thing registration)
+- **`providers/`** — Vendor provider plugins: `base.py` (MQTTProviderSettings interface), `konai/settings.py` (Konai defaults + KonaiSettings class). Factory: `load_provider()` in `__init__.py`. See `docs/vendor-change-guide.md`
 - **`sub/`** — Older subsystem modules: scheduler, notifier, rule engine, collector
 - **`wifi_config/`** — Wi-Fi provisioning via nmcli: Flask blueprint at `/local/admin/network/*`, AP bootstrap, provision state tracking
 - **`libs/`** — Utilities: `device_binding.py` (MAC binding enforcement), `edit.py` (JSON CRUD, .env editing)
-- **`device_config/`** — Raspberry Pi provisioning, .deb packaging, systemd unit rendering, deployment scripts
+- **`device_config/`** — Raspberry Pi provisioning, .deb packaging, systemd unit rendering, deployment scripts, `run_provision.py`, `update_server.sh`
 
 ### Data Flow
 
 1. Flask API ↔ Home Assistant (HTTP proxy on :8100)
-2. MQTT worker ↔ AWS IoT Core (awscrt/awsiot SDK, Konai protocol topics)
+2. MQTT worker ↔ AWS IoT Core (awscrt/awsiot SDK, vendor-neutral topics via `providers/`)
 3. Notifier → WebSocket listener → webhook calls on state change
 4. Scheduler reads `resources/schedule.json`, calls HA services on schedule
 
 ### Configuration
 
-- `.env` — All runtime config (HA host/token, MQTT topics, matterhub_id, cert paths)
+- `.env` — All runtime config (HA host/token, MQTT topics, matterhub_id, cert paths). See `.env.example` for template
+- `MATTERHUB_VENDOR` — Selects vendor provider (default: `konai`). `MQTT_*` env vars override provider defaults; `KONAI_*` legacy vars are fallback
 - `resources/*.json` — Runtime state files (devices, schedules, rules, rooms, notifications)
 - `python-dotenv` loads `.env`; use `dotenv_path='.env'` explicitly (required for .pyc compatibility)
 

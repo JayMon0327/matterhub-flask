@@ -49,6 +49,7 @@ awsCertificates/
 awsCredentialDocs/
 device_config/relay/
 codex_context.md
+matterhub-relay-operator-key.pem
 
 # Ephemeral work files (expect scripts, temp configs, etc.)
 tmp/
