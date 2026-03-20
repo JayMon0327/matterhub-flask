@@ -23,8 +23,9 @@ except ImportError:
 load_dotenv(dotenv_path='.env')
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _script_dir)
-os.chdir(_script_dir)
+_project_root = os.path.dirname(os.path.dirname(_script_dir))
+sys.path.insert(0, _project_root)
+os.chdir(_project_root)
 
 from awscrt import io, mqtt
 from awsiot import mqtt_connection_builder
