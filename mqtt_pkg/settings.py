@@ -70,6 +70,11 @@ MQTT_EVENT_DEDUP_WINDOW_SEC = max(0.0, float(
     _env_with_fallback("MQTT_EVENT_DEDUP_WINDOW_SEC", "KONAI_EVENT_DEDUP_WINDOW_SEC") or "3"
 ))
 
+# === 발행 QoS 제어 ===
+MQTT_PUBLISH_TIMEOUT_SEC = max(1, int(
+    _env_with_fallback("MQTT_PUBLISH_TIMEOUT_SEC") or "3"
+))
+
 # === 디바이스 상태 발행 ===
 MQTT_DEVICE_STATE_INTERVAL_SEC = max(10, int(
     _env_with_fallback("MQTT_DEVICE_STATE_INTERVAL_SEC") or "60"

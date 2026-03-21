@@ -116,7 +116,8 @@ def publish_bootstrap_all_states() -> None:
         if settings.MATTERHUB_ID:
             payload["hub_id"] = settings.MATTERHUB_ID
 
-        publisher.publish(payload)
+        # [임시 비활성화] Konai 토픽 발행 중단
+        # publisher.publish(payload)
         bootstrap_done = True
         count = len(data) if isinstance(data, list) else 0
         print(f"[MQTT][BOOTSTRAP] 발행 완료: 전체 {count} entities")
@@ -190,8 +191,9 @@ def publish_device_state() -> None:
             if settings.MATTERHUB_ID:
                 payload["hub_id"] = settings.MATTERHUB_ID
 
-            publisher.publish(payload)
-            print(f"[MQTT][PUBLISH] entity_changed: {entity_id} → {settings.MQTT_TOPIC_PUBLISH}")
+            # [임시 비활성화] Konai 토픽 발행 중단
+            # publisher.publish(payload)
+            # print(f"[MQTT][PUBLISH] entity_changed: {entity_id} → {settings.MQTT_TOPIC_PUBLISH}")
 
     except Exception as exc:
         print(f"상태 발행(이벤트) 실패: {exc}")
