@@ -33,17 +33,14 @@ class AWSIoTClient:
     def __init__(self) -> None:
         self.cert_path = (
             os.environ.get("MQTT_CERT_PATH")
-            or os.environ.get("KONAI_CERT_PATH")
             or settings._provider.get_cert_dir()
         )
         self.endpoint = (
             os.environ.get("MQTT_ENDPOINT")
-            or os.environ.get("KONAI_ENDPOINT")
             or settings._provider.get_endpoint()
         ).strip('"')
         self.client_id = (
             os.environ.get("MQTT_CLIENT_ID")
-            or os.environ.get("KONAI_CLIENT_ID")
             or settings._provider.get_client_id()
         ).strip('"')
 
@@ -66,9 +63,9 @@ class AWSIoTClient:
         if not has_cert:
             connection_info = self.describe_connection()
             raise FileNotFoundError(
-                "konai_certificates/cert.pem 또는 key.pem이 없습니다. "
-                "코나이 인증서를 konai_certificates/ 디렉토리에 넣어 주세요. "
-                f"(cert={connection_info['cert_file']}, key={connection_info['key_file']})"
+                f"인증서 파일이 없습니다: {connection_info['cert_file']}, {connection_info['key_file']}. "
+                "certificates/ 디렉토리에 device.pem.crt, private.pem.key를 배치하고 "
+                "cert.pem → device.pem.crt, key.pem → private.pem.key 심링크를 생성하세요."
             )
 
         event_loop_group = io.EventLoopGroup(1)

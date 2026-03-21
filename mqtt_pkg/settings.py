@@ -32,27 +32,21 @@ HASS_TOKEN = os.environ.get("hass_token")
 LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://localhost:8100")
 
 # === MQTT 토픽 (벤더 중립) ===
-# 레거시 호환: KONAI_ 접두어 환경변수도 fallback으로 읽기
 MQTT_TOPIC_SUBSCRIBE = (
-    _env_with_fallback("MQTT_TOPIC_SUBSCRIBE", "KONAI_TOPIC_REQUEST", "KONAI_TOPIC")
+    _env_with_fallback("MQTT_TOPIC_SUBSCRIBE")
     or _provider.get_topic_subscribe()
 )
 MQTT_TOPIC_PUBLISH = (
-    _env_with_fallback("MQTT_TOPIC_PUBLISH", "KONAI_TOPIC_RESPONSE", "KONAI_TOPIC")
+    _env_with_fallback("MQTT_TOPIC_PUBLISH")
     or _provider.get_topic_publish()
 )
 
-_test_topic_legacy = _strip_quotes(os.environ.get("KONAI_TEST_TOPIC"))
-MQTT_TEST_TOPIC = _env_with_fallback("MQTT_TEST_TOPIC", "KONAI_TEST_TOPIC") or ""
-MQTT_TEST_TOPIC_SUBSCRIBE = _env_with_fallback(
-    "MQTT_TEST_TOPIC_SUBSCRIBE", "KONAI_TEST_TOPIC_REQUEST"
-) or MQTT_TEST_TOPIC or _test_topic_legacy or ""
-MQTT_TEST_TOPIC_PUBLISH = _env_with_fallback(
-    "MQTT_TEST_TOPIC_PUBLISH", "KONAI_TEST_TOPIC_RESPONSE"
-) or MQTT_TEST_TOPIC or _test_topic_legacy or ""
+MQTT_TEST_TOPIC = _env_with_fallback("MQTT_TEST_TOPIC") or ""
+MQTT_TEST_TOPIC_SUBSCRIBE = _env_with_fallback("MQTT_TEST_TOPIC_SUBSCRIBE") or MQTT_TEST_TOPIC or ""
+MQTT_TEST_TOPIC_PUBLISH = _env_with_fallback("MQTT_TEST_TOPIC_PUBLISH") or MQTT_TEST_TOPIC or ""
 
 # === 센서 보고 ===
-_report_ids_raw = _env_with_fallback("MQTT_REPORT_ENTITY_IDS", "KONAI_REPORT_ENTITY_IDS")
+_report_ids_raw = _env_with_fallback("MQTT_REPORT_ENTITY_IDS")
 if not _report_ids_raw:
     _report_ids_raw = ",".join(_provider.get_default_report_entity_ids())
 _report_ids_list = [
@@ -64,10 +58,10 @@ MQTT_REPORT_ENTITY_IDS = list(dict.fromkeys(_report_ids_list))
 
 # === 이벤트 조절 ===
 MQTT_EVENT_THROTTLE_SEC = max(0.0, float(
-    _env_with_fallback("MQTT_EVENT_THROTTLE_SEC", "KONAI_EVENT_THROTTLE_SEC") or "2"
+    _env_with_fallback("MQTT_EVENT_THROTTLE_SEC") or "2"
 ))
 MQTT_EVENT_DEDUP_WINDOW_SEC = max(0.0, float(
-    _env_with_fallback("MQTT_EVENT_DEDUP_WINDOW_SEC", "KONAI_EVENT_DEDUP_WINDOW_SEC") or "3"
+    _env_with_fallback("MQTT_EVENT_DEDUP_WINDOW_SEC") or "3"
 ))
 
 # === 발행 QoS 제어 ===

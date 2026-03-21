@@ -22,7 +22,7 @@ def _append_unique_topic(topics: List[str], topic: str | None) -> None:
 
 def build_subscribe_topics() -> List[str]:
     topics: List[str] = []
-    # [임시 비활성화] Konai 토픽 구독 중단
+    # [비활성화] 외주 벤더 토픽 (Konai 등 외주 연동 시 활성화)
     # _append_unique_topic(topics, settings.MQTT_TOPIC_SUBSCRIBE)
     # _append_unique_topic(topics, settings.MQTT_TOPIC_PUBLISH)
     # _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_SUBSCRIBE)

@@ -383,23 +383,9 @@ cleanup_broken_venv() {
     fi
 }
 
-# ── 자동 부트스트랩: .env MQTT 설정 자동 감지 ──
+# ── 자동 부트스트랩: .env MQTT 설정 보장 ──
 ensure_mqtt_env() {
-    # matterhub_id에서 MQTT_CLIENT_ID 자동 설정
-    local hub_id
-    hub_id=$(grep -oP 'matterhub_id\s*=\s*"?\K[^"]+' .env 2>/dev/null || true)
-    if [ -n "$hub_id" ]; then
-        ensure_env_var "MQTT_CLIENT_ID" "\"$hub_id\""
-    fi
-
-    # 디바이스 인증서가 있으면 certificates/ 사용
-    if [ -d "$PROJECT_ROOT/certificates" ] && [ -f "$PROJECT_ROOT/certificates/device.pem.crt" ]; then
-        ensure_env_var "MQTT_CERT_PATH" '"certificates"'
-    fi
-
-    # MQTT 엔드포인트: whatsmatter-nipa AWS IoT
-    ensure_env_var "MQTT_ENDPOINT" '"a206qwcndl23az-ats.iot.ap-northeast-2.amazonaws.com"'
-
+    # 필수: matterhub 토픽 구독 활성화
     ensure_env_var "SUBSCRIBE_MATTERHUB_TOPICS" '"1"'
     ensure_env_var "MATTERHUB_VENDOR" '"konai"'
 }
