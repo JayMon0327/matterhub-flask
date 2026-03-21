@@ -77,6 +77,7 @@ class StateChangeDetector:
 
 state_detector = StateChangeDetector()
 bootstrap_done = False
+shadow_reported = False
 last_entity_publish: Dict[str, Tuple[float, str]] = {}
 
 
@@ -85,6 +86,57 @@ def _auth_headers() -> Dict[str, str]:
     if settings.HASS_TOKEN:
         headers["Authorization"] = f"Bearer {settings.HASS_TOKEN}"
     return headers
+
+
+def publish_initial_shadow_report() -> None:
+    """최초 연결 시 AWS IoT Shadow에 디바이스 상태를 1회 보고한다."""
+    global shadow_reported
+
+    if shadow_reported:
+        return
+
+    if not runtime.is_connected() or not settings.MATTERHUB_ID:
+        return
+
+    states = _fetch_ha_states()
+    if states is None:
+        return
+
+    try:
+        managed_ids = _load_managed_entity_ids()
+        devices: Dict[str, Dict[str, object]] = {}
+        for item in states:
+            if not isinstance(item, dict):
+                continue
+            entity_id = item.get("entity_id")
+            if not entity_id:
+                continue
+            if managed_ids is not None and entity_id not in managed_ids:
+                continue
+            devices[entity_id] = {
+                "state": item.get("state"),
+                "last_changed": item.get("last_changed"),
+                "attributes": item.get("attributes", {}),
+            }
+
+        shadow_payload = {
+            "state": {
+                "reported": {
+                    "hub_id": settings.MATTERHUB_ID,
+                    "ts": publisher.utc_timestamp(),
+                    "device_count": len(devices),
+                    "devices": devices,
+                },
+            },
+        }
+
+        topic = f"$aws/things/{settings.MATTERHUB_ID}/shadow/update"
+        publisher.publish(shadow_payload, response_topic=topic)
+        shadow_reported = True
+        print(f"[MQTT][SHADOW] 초기 shadow report 완료: {len(devices)}개 디바이스 → {topic}")
+
+    except Exception as exc:
+        print(f"[MQTT][SHADOW] 초기 shadow report 실패: {exc}")
 
 
 def publish_bootstrap_all_states() -> None:
