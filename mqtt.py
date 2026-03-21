@@ -22,10 +22,11 @@ def _append_unique_topic(topics: List[str], topic: str | None) -> None:
 
 def build_subscribe_topics() -> List[str]:
     topics: List[str] = []
-    _append_unique_topic(topics, settings.MQTT_TOPIC_SUBSCRIBE)
-    _append_unique_topic(topics, settings.MQTT_TOPIC_PUBLISH)
-    _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_SUBSCRIBE)
-    _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_PUBLISH)
+    # [임시 비활성화] Konai 토픽 구독 중단
+    # _append_unique_topic(topics, settings.MQTT_TOPIC_SUBSCRIBE)
+    # _append_unique_topic(topics, settings.MQTT_TOPIC_PUBLISH)
+    # _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_SUBSCRIBE)
+    # _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_PUBLISH)
     if settings.SUBSCRIBE_MATTERHUB_TOPICS and settings.MATTERHUB_ID:
         _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/git/update")
         _append_unique_topic(topics, f"matterhub/update/specific/{settings.MATTERHUB_ID}")
