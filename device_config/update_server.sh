@@ -93,6 +93,51 @@ SYSTEMD_SERVICES=(
     "matterhub-update-agent.service"
 )
 
+# ── venv / 사용자 자동 감지 ──
+ensure_venv() {
+    local venv_dir="$PROJECT_ROOT/venv"
+    if [ ! -f "$venv_dir/bin/python" ]; then
+        echo "[INFO] venv 생성 중 (--system-site-packages)..." | tee -a "$LOG_FILE"
+        python3 -m venv --system-site-packages "$venv_dir"
+        echo "[INFO] venv 생성 완료: $venv_dir" | tee -a "$LOG_FILE"
+    fi
+}
+
+detect_run_user() {
+    stat -c '%U' "$PROJECT_ROOT" 2>/dev/null || ls -ld "$PROJECT_ROOT" | awk '{print $3}'
+}
+
+# ── systemd 유닛 설치 ──
+install_systemd_units() {
+    local run_user
+    run_user="$(detect_run_user)"
+    local systemd_dir="/etc/systemd/system"
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+
+    echo "[INFO] systemd 유닛 렌더링 (user=$run_user, root=$PROJECT_ROOT)" | tee -a "$LOG_FILE"
+
+    ensure_venv
+
+    python3 "$PROJECT_ROOT/device_config/render_systemd_units.py" \
+        --project-root "$PROJECT_ROOT" \
+        --run-user "$run_user" \
+        --output-dir "$tmp_dir"
+
+    for unit_file in "$tmp_dir"/matterhub-*.service; do
+        [ -f "$unit_file" ] || continue
+        local unit_name
+        unit_name="$(basename "$unit_file")"
+        sudo install -m 0644 "$unit_file" "$systemd_dir/$unit_name"
+        echo "[INFO] 설치됨: $systemd_dir/$unit_name" | tee -a "$LOG_FILE"
+    done
+
+    rm -rf "$tmp_dir"
+
+    sudo systemctl daemon-reload
+    echo "[INFO] systemd daemon-reload 완료" | tee -a "$LOG_FILE"
+}
+
 # ── 서비스 제어 함수 ──
 stop_services() {
     echo "[INFO] 서비스 중지 시작" | tee -a "$LOG_FILE"
@@ -102,7 +147,12 @@ stop_services() {
             ;;
         pm2:*)
             local pm2_bin="${PROC_MANAGER#pm2:}"
-            "$pm2_bin" stop all 2>/dev/null || true
+            # wm- 접두사 프로세스만 삭제 (고객사 프로세스 유지)
+            "$pm2_bin" list 2>/dev/null | grep -oP 'wm-\S+' | while read -r proc; do
+                "$pm2_bin" delete "$proc" 2>/dev/null || true
+                echo "[INFO] PM2 삭제: $proc" | tee -a "$LOG_FILE"
+            done
+            "$pm2_bin" save 2>/dev/null || true
             ;;
         *)
             echo "[WARN] 프로세스 매니저 미감지 — 서비스 중지 건너뜀" | tee -a "$LOG_FILE"
@@ -118,13 +168,16 @@ restart_services() {
             sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
             ;;
         pm2:*)
-            local pm2_bin="${PROC_MANAGER#pm2:}"
-            if [ -f "$PROJECT_ROOT/startup.json" ]; then
-                "$pm2_bin" start "$PROJECT_ROOT/startup.json"
-            else
-                "$pm2_bin" restart all
-            fi
-            "$pm2_bin" save
+            # PM2→systemd 마이그레이션
+            echo "[INFO] PM2→systemd 전환 시작" | tee -a "$LOG_FILE"
+
+            # 1. systemd 유닛 설치
+            install_systemd_units
+
+            # 2. systemd 서비스 활성화 + 시작
+            sudo systemctl enable "${SYSTEMD_SERVICES[@]}" 2>/dev/null || true
+            sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
+            echo "[INFO] systemd 서비스 시작 완료" | tee -a "$LOG_FILE"
             ;;
         *)
             echo "[ERROR] 프로세스 매니저를 감지할 수 없습니다" | tee -a "$LOG_FILE"
@@ -137,31 +190,15 @@ healthcheck_services() {
     local max_wait=30
     local waited=0
     while [ $waited -lt $max_wait ]; do
-        case "$PROC_MANAGER" in
-            systemd)
-                local active_count=0
-                for svc in "${SYSTEMD_SERVICES[@]}"; do
-                    systemctl is-active --quiet "$svc" 2>/dev/null && active_count=$((active_count + 1)) || true
-                done
-                if [ $active_count -ge 2 ]; then
-                    echo "[INFO] healthcheck 통과: ${active_count}개 서비스 정상 기동" | tee -a "$LOG_FILE"
-                    return 0
-                fi
-                ;;
-            pm2:*)
-                local pm2_bin="${PROC_MANAGER#pm2:}"
-                local online
-                online=$("$pm2_bin" list 2>/dev/null | grep -c "online" || echo "0")
-                if [ "$online" -ge 2 ]; then
-                    echo "[INFO] healthcheck 통과: ${online}개 프로세스 정상 기동" | tee -a "$LOG_FILE"
-                    return 0
-                fi
-                ;;
-            *)
-                echo "[WARN] 프로세스 매니저 미감지 — healthcheck 건너뜀" | tee -a "$LOG_FILE"
-                return 0
-                ;;
-        esac
+        # PM2→systemd 전환 후이므로 항상 systemd로 체크
+        local active_count=0
+        for svc in "${SYSTEMD_SERVICES[@]}"; do
+            systemctl is-active --quiet "$svc" 2>/dev/null && active_count=$((active_count + 1)) || true
+        done
+        if [ $active_count -ge 2 ]; then
+            echo "[INFO] healthcheck 통과: ${active_count}개 서비스 정상 기동" | tee -a "$LOG_FILE"
+            return 0
+        fi
         sleep 5
         waited=$((waited + 5))
     done

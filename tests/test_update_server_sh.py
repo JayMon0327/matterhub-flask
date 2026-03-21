@@ -96,6 +96,36 @@ class UpdateServerShTest(unittest.TestCase):
             content = f.read()
         self.assertNotIn("/home/hyodol/", content)
 
+    def test_pm2_wm_prefix_selective_delete(self):
+        """PM2 분기에서 wm- 접두사 선택적 삭제 로직 존재 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("wm-", content)
+        self.assertIn("pm2_bin", content)
+        self.assertIn("delete", content)
+        # 기존 'stop all' 이 아닌 선택적 삭제여야 함
+        self.assertNotIn('"$pm2_bin" stop all', content)
+
+    def test_install_systemd_units_function(self):
+        """install_systemd_units 함수 존재 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("install_systemd_units()", content)
+        self.assertIn("render_systemd_units.py", content)
+
+    def test_ensure_venv_function(self):
+        """ensure_venv 함수 존재 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("ensure_venv()", content)
+        self.assertIn("--system-site-packages", content)
+
+    def test_detect_run_user_function(self):
+        """detect_run_user 함수 존재 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("detect_run_user()", content)
+
 
 if __name__ == "__main__":
     unittest.main()
