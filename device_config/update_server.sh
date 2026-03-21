@@ -144,6 +144,31 @@ install_systemd_units() {
     echo "[INFO] systemd daemon-reload 완료" | tee -a "$LOG_FILE"
 }
 
+# ── sudo 가용성 확인 ──
+has_sudo() {
+    sudo -n true 2>/dev/null
+}
+
+# ── PM2 프로세스 정의 (고객사 프로세스 제외) ──
+PM2_WM_PROCESSES=("wm-app" "wm-mqtt" "wm-ruleEngine" "wm-notifier")
+
+# ── PM2 전용 재시작 (sudo 없이 동작) ──
+pm2_restart_services() {
+    local pm2_bin="${PROC_MANAGER#pm2:}"
+    echo "[INFO] PM2 전용 재시작 (sudo 미사용)" | tee -a "$LOG_FILE"
+
+    for proc in "${PM2_WM_PROCESSES[@]}"; do
+        if "$pm2_bin" describe "$proc" &>/dev/null; then
+            "$pm2_bin" restart "$proc" --update-env 2>/dev/null || true
+            echo "[INFO] PM2 재시작: $proc" | tee -a "$LOG_FILE"
+        else
+            echo "[WARN] PM2 프로세스 없음 (건너뜀): $proc" | tee -a "$LOG_FILE"
+        fi
+    done
+    "$pm2_bin" save 2>/dev/null || true
+    echo "[INFO] PM2 재시작 완료" | tee -a "$LOG_FILE"
+}
+
 # ── 서비스 제어 함수 ──
 stop_services() {
     echo "[INFO] 서비스 중지 시작" | tee -a "$LOG_FILE"
@@ -153,12 +178,20 @@ stop_services() {
             ;;
         pm2:*)
             local pm2_bin="${PROC_MANAGER#pm2:}"
-            # wm- 접두사 + matter/slm-server 프로세스 삭제 (고객사 프로세스 유지)
-            "$pm2_bin" list 2>/dev/null | grep -oP '(wm-\S+|matter(?!hub)\S*|slm-server)' | while read -r proc; do
-                "$pm2_bin" delete "$proc" 2>/dev/null || true
-                echo "[INFO] PM2 삭제: $proc" | tee -a "$LOG_FILE"
-            done
-            "$pm2_bin" save 2>/dev/null || true
+            if has_sudo; then
+                # sudo 가능: systemd로 마이그레이션 예정이므로 PM2에서 삭제
+                "$pm2_bin" list 2>/dev/null | grep -oP '(wm-\S+|matter(?!hub)\S*|slm-server)' | while read -r proc; do
+                    "$pm2_bin" delete "$proc" 2>/dev/null || true
+                    echo "[INFO] PM2 삭제: $proc" | tee -a "$LOG_FILE"
+                done
+                "$pm2_bin" save 2>/dev/null || true
+            else
+                # sudo 불가: PM2 유지, stop만 수행
+                for proc in "${PM2_WM_PROCESSES[@]}"; do
+                    "$pm2_bin" stop "$proc" 2>/dev/null || true
+                    echo "[INFO] PM2 중지: $proc" | tee -a "$LOG_FILE"
+                done
+            fi
             ;;
         legacy-systemd)
             sudo systemctl stop matterhub.service 2>/dev/null || true
@@ -179,6 +212,18 @@ restart_services() {
             sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
             ;;
         pm2:*|legacy-systemd)
+            # sudo 가용성 확인: 없으면 PM2 전용 재시작으로 fallback
+            if ! has_sudo; then
+                echo "[WARN] sudo 사용 불가 — systemd 마이그레이션 건너뜀" | tee -a "$LOG_FILE"
+                if [[ "$PROC_MANAGER" == pm2:* ]]; then
+                    pm2_restart_services
+                else
+                    echo "[ERROR] legacy-systemd인데 sudo 없음 — 재시작 불가" | tee -a "$LOG_FILE"
+                    return 1
+                fi
+                return 0
+            fi
+
             echo "[INFO] PM2/legacy→systemd 전환 시작" | tee -a "$LOG_FILE"
 
             # 1. pm2 자동시작 제거
@@ -220,8 +265,30 @@ restart_services() {
 healthcheck_services() {
     local max_wait=30
     local waited=0
+
+    # PM2 fallback 모드: sudo 없이 PM2로 재시작한 경우
+    if [[ "$PROC_MANAGER" == pm2:* ]] && ! has_sudo; then
+        local pm2_bin="${PROC_MANAGER#pm2:}"
+        while [ $waited -lt $max_wait ]; do
+            local online_count=0
+            for proc in "${PM2_WM_PROCESSES[@]}"; do
+                if "$pm2_bin" describe "$proc" 2>/dev/null | grep -q 'status.*online'; then
+                    online_count=$((online_count + 1))
+                fi
+            done
+            if [ $online_count -ge 2 ]; then
+                echo "[INFO] healthcheck 통과 (PM2): ${online_count}개 프로세스 online" | tee -a "$LOG_FILE"
+                return 0
+            fi
+            sleep 5
+            waited=$((waited + 5))
+        done
+        echo "[ERROR] healthcheck 실패 (PM2): 프로세스 기동 안됨 (${max_wait}초 대기)" | tee -a "$LOG_FILE"
+        return 1
+    fi
+
+    # systemd 모드
     while [ $waited -lt $max_wait ]; do
-        # PM2→systemd 전환 후이므로 항상 systemd로 체크
         local active_count=0
         for svc in "${SYSTEMD_SERVICES[@]}"; do
             systemctl is-active --quiet "$svc" 2>/dev/null && active_count=$((active_count + 1)) || true

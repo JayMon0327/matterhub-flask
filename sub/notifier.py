@@ -4,6 +4,11 @@ import websockets
 import json
 import requests
 import os
+import sys
+
+# PM2 등에서 sub/ 디렉토리에서 실행될 때 프로젝트 루트를 sys.path에 추가
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from dotenv import load_dotenv
 from libs.device_binding import enforce_mac_binding
 
