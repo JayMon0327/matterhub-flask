@@ -1,4 +1,4 @@
-"""update_server.sh dry-run 검증 테스트."""
+"""update_server.sh 구문 및 플래그 파싱 검증 테스트."""
 
 import os
 import subprocess
@@ -48,6 +48,53 @@ class UpdateServerShTest(unittest.TestCase):
         self.assertIn("force_update", content)
         self.assertIn("update_id", content)
         self.assertIn("hub_id", content)
+
+    def test_skip_restart_flag_documented(self):
+        """--skip-restart 플래그 지원 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("--skip-restart", content)
+
+    def test_restart_only_flag_documented(self):
+        """--restart-only 플래그 지원 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("--restart-only", content)
+
+    def test_env_migration_present(self):
+        """SUBSCRIBE_MATTERHUB_TOPICS .env 마이그레이션 로직 존재"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("SUBSCRIBE_MATTERHUB_TOPICS", content)
+        self.assertIn("MATTERHUB_VENDOR", content)
+
+    def test_rollback_logic_present(self):
+        """롤백 로직 존재 확인"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("PRE_UPDATE_COMMIT", content)
+        self.assertIn("rollback", content.lower())
+
+    def test_process_manager_detection_present(self):
+        """프로세스 매니저 감지 함수 존재"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("detect_process_manager", content)
+        self.assertIn("systemd", content)
+        self.assertIn("pm2", content)
+
+    def test_status_file_output_present(self):
+        """상태 파일 출력 로직 존재"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("/tmp/update_", content)
+        self.assertIn(".status", content)
+
+    def test_no_hardcoded_hyodol_path(self):
+        """하드코딩된 /home/hyodol/ 경로가 없어야 함"""
+        with open(SCRIPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertNotIn("/home/hyodol/", content)
 
 
 if __name__ == "__main__":

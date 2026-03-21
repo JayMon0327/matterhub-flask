@@ -27,11 +27,15 @@ def _publish_response(payload: Dict[str, Any]) -> None:
 
     response_topic = f"matterhub/{matterhub_id}/update/response"
     try:
-        connection.publish(
+        pub_future, _ = connection.publish(
             topic=response_topic,
             payload=json.dumps(payload),
-            qos=mqtt.QoS.AT_MOST_ONCE,
+            qos=mqtt.QoS.AT_LEAST_ONCE,
         )
+        try:
+            pub_future.result(timeout=10)
+        except Exception as exc:
+            print(f"⚠️ PUBACK 대기 실패: {exc}")
     except Exception as exc:
         print(f"❌ 업데이트 응답 전송 중 오류: {exc}")
 
@@ -81,29 +85,61 @@ def send_error_response(message: Dict[str, Any], error_msg: str) -> None:
     print(f"❌ 에러 응답 전송: {message.get('update_id')} - {error_msg}")
 
 
+def _find_update_script() -> Optional[str]:
+    """update_server.sh 경로 탐색"""
+    for path in [
+        os.path.join(os.path.dirname(__file__), "../device_config/update_server.sh"),
+        "./device_config/update_server.sh",
+        "/srv/matterhub/device_config/update_server.sh",
+    ]:
+        resolved = os.path.abspath(path)
+        if os.path.exists(resolved):
+            return resolved
+    return None
+
+
+def _wait_for_pid(pid: int, timeout: int = 300) -> None:
+    """PID가 종료될 때까지 대기"""
+    waited = 0
+    while waited < timeout:
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return  # 프로세스 종료됨
+        except Exception:
+            return
+        time.sleep(10)
+        waited += 10
+
+
+def _read_status_file(path: str) -> Optional[Dict[str, Any]]:
+    """상태 파일 읽기"""
+    try:
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                return json.load(f)
+    except Exception as exc:
+        print(f"⚠️ 상태 파일 읽기 실패: {exc}")
+    return None
+
+
 def execute_external_update_script(
     branch: str = "master",
     force_update: bool = False,
     update_id: str = "unknown",
+    skip_restart: bool = False,
 ) -> Dict[str, Any]:
     try:
-        possible_paths = [
-            os.path.join(os.path.dirname(__file__), "../device_config/update_server.sh"),
-            "./device_config/update_server.sh",
-            "/srv/matterhub/device_config/update_server.sh",
-        ]
-
-        script_path = None
-        for path in possible_paths:
-            resolved = os.path.abspath(path)
-            if os.path.exists(resolved):
-                script_path = resolved
-                break
+        script_path = _find_update_script()
 
         if not script_path:
             return {
                 "success": False,
-                "error": f"Update script not found. Checked paths: {possible_paths}",
+                "error": "Update script not found.",
                 "timestamp": int(time.time()),
             }
 
@@ -114,18 +150,18 @@ def execute_external_update_script(
             print(f"스크립트 권한 설정 실패: {exc}")
 
         matterhub_id = settings.MATTERHUB_ID
-        print(
-            f"🚀 외부 업데이트 스크립트 실행: {script_path} "
-            f"(branch={branch}, force_update={force_update}, update_id={update_id}, hub_id={matterhub_id})"
-        )
-
         force_flag = "true" if force_update else "false"
+        skip_flag = " --skip-restart" if skip_restart else ""
         log_file = f"/tmp/update_{update_id}.log"
         cmd = (
-            f"nohup bash {script_path} {branch} {force_flag} {update_id} {matterhub_id} "
-            f"> {log_file} 2>&1 & echo $!"
+            f"nohup bash {script_path} {branch} {force_flag} {update_id} {matterhub_id}"
+            f"{skip_flag} > {log_file} 2>&1 & echo $!"
         )
-        print(f"실행 명령어: {cmd}")
+        print(
+            f"🚀 외부 업데이트 스크립트 실행: {script_path} "
+            f"(branch={branch}, force_update={force_update}, "
+            f"update_id={update_id}, hub_id={matterhub_id}, skip_restart={skip_restart})"
+        )
 
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
@@ -183,7 +219,20 @@ def execute_external_update_script(
         }
 
 
+def _launch_restart(update_id: str) -> None:
+    """서비스 재시작을 별도 프로세스로 실행 (자기 자신도 재시작됨)"""
+    script_path = _find_update_script()
+    if script_path:
+        log_file = f"/tmp/restart_{update_id}.log"
+        cmd = f"nohup bash {script_path} --restart-only > {log_file} 2>&1 &"
+        subprocess.run(cmd, shell=True)
+        print(f"🔄 서비스 재시작 프로세스 시작됨: {log_file}")
+    else:
+        print("❌ 재시작 스크립트를 찾을 수 없습니다")
+
+
 def execute_update_async(message: Dict[str, Any]) -> None:
+    """2단계 업데이트 실행: git pull → 응답 전송 → 서비스 재시작"""
     try:
         branch = message.get("branch", "master")
         force_update = bool(message.get("force_update", False))
@@ -194,37 +243,29 @@ def execute_update_async(message: Dict[str, Any]) -> None:
             f"(branch={branch}, force={force_update}, hub_id={settings.MATTERHUB_ID})"
         )
 
-        result = execute_external_update_script(branch, force_update, update_id)
+        # Phase A: git pull only (--skip-restart)
+        result = execute_external_update_script(
+            branch, force_update, update_id, skip_restart=True
+        )
         print(f"스크립트 실행 결과: {result}")
 
+        # Phase B: PID 모니터링 + 상태 파일 읽기
         if result.get("success") and result.get("pid"):
-            pid = result["pid"]
-            max_wait_time = 300
-            wait_interval = 10
-            waited_time = 0
+            _wait_for_pid(result["pid"], timeout=300)
+            status_file = f"/tmp/update_{update_id}.status"
+            status = _read_status_file(status_file)
+            if status:
+                result.update(status)
+                print(f"상태 파일 읽기 완료: {status}")
+            else:
+                print("⚠️ 상태 파일을 읽을 수 없음 — 스크립트 로그 확인 필요")
 
-            while waited_time < max_wait_time:
-                try:
-                    check_result = subprocess.run(
-                        ["ps", "-p", str(pid)],
-                        capture_output=True,
-                        text=True,
-                    )
-                    if check_result.returncode != 0:
-                        print(f"✅ 업데이트 스크립트 완료 감지 (PID: {pid})")
-                        break
-                except Exception as exc:
-                    print(f"프로세스 체크 실패: {exc}")
-
-                time.sleep(wait_interval)
-                waited_time += wait_interval
-                print(f"업데이트 대기 ({waited_time}/{max_wait_time}초)")
-
-            if waited_time >= max_wait_time:
-                print(f"업데이트 타임아웃 ({max_wait_time}초)")
-                result["timeout"] = True
-
+        # Phase C: 최종 응답 전송 (QoS 1, PUBACK 확인)
         send_final_response(message, result)
+
+        # Phase D: 서비스 재시작 (이 프로세스도 재시작됨)
+        if result.get("success"):
+            _launch_restart(update_id)
 
     except Exception as exc:
         print(f"❌ 비동기 업데이트 실행 실패: {exc}")

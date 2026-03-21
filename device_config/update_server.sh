@@ -3,45 +3,214 @@
 # ========================================
 # WhatsMatter Hub 자동 업데이트 스크립트
 # ========================================
-# 
+#
 # 사용법:
-# ./update_server.sh [branch] [force_update] [update_id] [hub_id]
-# 
+# ./update_server.sh [branch] [force_update] [update_id] [hub_id] [flags]
+#
 # 매개변수:
 #   branch: Git 브랜치 (기본값: master)
 #   force_update: 강제 업데이트 여부 (기본값: false)
 #   update_id: 업데이트 ID (기본값: unknown)
 #   hub_id: Hub ID (기본값: unknown)
 #
+# 플래그:
+#   --skip-restart: git pull만 수행하고 서비스 재시작 건너뜀
+#   --restart-only: 서비스 재시작만 수행 (git pull 건너뜀)
+#
 # 예시:
 #   ./update_server.sh master false update_20241201_143022 whatsmatter-nipa_SN-1752303557
-#   ./update_server.sh develop true update_20241201_143022 whatsmatter-nipa_SN-1752303558
+#   ./update_server.sh master false uid-001 hub-001 --skip-restart
+#   ./update_server.sh master false uid-001 hub-001 --restart-only
 # ========================================
 
-# 로그 파일 설정
-LOG_FILE="/home/hyodol/patch_matterhub.log"
+set -uo pipefail
+
+# ── 경로 자동 감지 ──
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/update.log"
+
+cd "$PROJECT_ROOT"
+
 echo "=== MQTT 자동 업데이트 시작 $(date) ===" | tee -a "$LOG_FILE"
 
-# 매개변수 처리
+# ── 매개변수 처리 ──
 BRANCH=${1:-"master"}
 FORCE_UPDATE=${2:-"false"}
 UPDATE_ID=${3:-"unknown"}
 HUB_ID=${4:-"unknown"}
+SKIP_RESTART=false
+RESTART_ONLY=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --skip-restart) SKIP_RESTART=true ;;
+        --restart-only) RESTART_ONLY=true ;;
+    esac
+done
 
 echo "[INFO] 업데이트 매개변수:" | tee -a "$LOG_FILE"
 echo "[INFO]   - 브랜치: $BRANCH" | tee -a "$LOG_FILE"
 echo "[INFO]   - 강제 업데이트: $FORCE_UPDATE" | tee -a "$LOG_FILE"
 echo "[INFO]   - 업데이트 ID: $UPDATE_ID" | tee -a "$LOG_FILE"
 echo "[INFO]   - Hub ID: $HUB_ID" | tee -a "$LOG_FILE"
+echo "[INFO]   - skip-restart: $SKIP_RESTART" | tee -a "$LOG_FILE"
+echo "[INFO]   - restart-only: $RESTART_ONLY" | tee -a "$LOG_FILE"
 
-# 📌 대상 파일 경로
-cd /home/hyodol/whatsmatter-hub-flask-server/
+# ── 프로세스 매니저 감지 ──
+detect_process_manager() {
+    # systemd 서비스 파일 존재 여부 우선 확인
+    if systemctl list-unit-files matterhub-mqtt.service &>/dev/null 2>&1; then
+        echo "systemd"
+        return
+    fi
+    # PM2 감지
+    local pm2_bin=""
+    pm2_bin="$(command -v pm2 2>/dev/null || echo "")"
+    if [ -z "$pm2_bin" ]; then
+        for candidate in /home/*/.nvm/versions/node/*/bin/pm2; do
+            [ -x "$candidate" ] && pm2_bin="$candidate" && break
+        done
+    fi
+    if [ -n "$pm2_bin" ] && "$pm2_bin" list 2>/dev/null | grep -q "wm-"; then
+        echo "pm2:$pm2_bin"
+        return
+    fi
+    echo "unknown"
+}
 
+PROC_MANAGER="$(detect_process_manager)"
+echo "[INFO] 프로세스 매니저: $PROC_MANAGER" | tee -a "$LOG_FILE"
+
+# ── systemd 서비스 목록 ──
+SYSTEMD_SERVICES=(
+    "matterhub-api.service"
+    "matterhub-mqtt.service"
+    "matterhub-rule-engine.service"
+    "matterhub-notifier.service"
+    "matterhub-update-agent.service"
+)
+
+# ── 서비스 제어 함수 ──
+stop_services() {
+    echo "[INFO] 서비스 중지 시작" | tee -a "$LOG_FILE"
+    case "$PROC_MANAGER" in
+        systemd)
+            sudo systemctl stop "${SYSTEMD_SERVICES[@]}" 2>/dev/null || true
+            ;;
+        pm2:*)
+            local pm2_bin="${PROC_MANAGER#pm2:}"
+            "$pm2_bin" stop all 2>/dev/null || true
+            ;;
+        *)
+            echo "[WARN] 프로세스 매니저 미감지 — 서비스 중지 건너뜀" | tee -a "$LOG_FILE"
+            ;;
+    esac
+}
+
+restart_services() {
+    echo "[INFO] 서비스 재시작 시작" | tee -a "$LOG_FILE"
+    case "$PROC_MANAGER" in
+        systemd)
+            sudo systemctl daemon-reload
+            sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
+            ;;
+        pm2:*)
+            local pm2_bin="${PROC_MANAGER#pm2:}"
+            if [ -f "$PROJECT_ROOT/startup.json" ]; then
+                "$pm2_bin" start "$PROJECT_ROOT/startup.json"
+            else
+                "$pm2_bin" restart all
+            fi
+            "$pm2_bin" save
+            ;;
+        *)
+            echo "[ERROR] 프로세스 매니저를 감지할 수 없습니다" | tee -a "$LOG_FILE"
+            return 1
+            ;;
+    esac
+}
+
+healthcheck_services() {
+    local max_wait=30
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        case "$PROC_MANAGER" in
+            systemd)
+                local active_count=0
+                for svc in "${SYSTEMD_SERVICES[@]}"; do
+                    systemctl is-active --quiet "$svc" 2>/dev/null && active_count=$((active_count + 1)) || true
+                done
+                if [ $active_count -ge 2 ]; then
+                    echo "[INFO] healthcheck 통과: ${active_count}개 서비스 정상 기동" | tee -a "$LOG_FILE"
+                    return 0
+                fi
+                ;;
+            pm2:*)
+                local pm2_bin="${PROC_MANAGER#pm2:}"
+                local online
+                online=$("$pm2_bin" list 2>/dev/null | grep -c "online" || echo "0")
+                if [ "$online" -ge 2 ]; then
+                    echo "[INFO] healthcheck 통과: ${online}개 프로세스 정상 기동" | tee -a "$LOG_FILE"
+                    return 0
+                fi
+                ;;
+            *)
+                echo "[WARN] 프로세스 매니저 미감지 — healthcheck 건너뜀" | tee -a "$LOG_FILE"
+                return 0
+                ;;
+        esac
+        sleep 5
+        waited=$((waited + 5))
+    done
+    echo "[ERROR] healthcheck 실패: 서비스 기동 안됨 (${max_wait}초 대기)" | tee -a "$LOG_FILE"
+    return 1
+}
+
+# ── .env 마이그레이션 ──
+ensure_env_var() {
+    local key="$1" value="$2"
+    if ! grep -q "^${key}=" .env 2>/dev/null; then
+        echo "${key}=${value}" >> .env
+        echo "[INFO] .env에 ${key} 추가" | tee -a "$LOG_FILE"
+    fi
+}
+
+# ── --restart-only 모드 ──
+if [ "$RESTART_ONLY" = "true" ]; then
+    echo "[INFO] --restart-only 모드: 서비스 재시작만 수행" | tee -a "$LOG_FILE"
+    PRE_UPDATE_COMMIT=$(git rev-parse HEAD)
+
+    restart_services
+    if ! healthcheck_services; then
+        echo "[WARN] 롤백 시작: $PRE_UPDATE_COMMIT" | tee -a "$LOG_FILE"
+        stop_services
+        git reset --hard "$PRE_UPDATE_COMMIT"
+        restart_services
+        cat > "/tmp/update_${UPDATE_ID}.rollback" << ROLLBACKEOF
+{"rollback": true, "reverted_to": "$PRE_UPDATE_COMMIT"}
+ROLLBACKEOF
+        echo "[ERROR] 롤백 완료" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+
+    echo "[INFO] --restart-only 완료" | tee -a "$LOG_FILE"
+    echo "=== MQTT 자동 업데이트 완료 (restart-only) ===" | tee -a "$LOG_FILE"
+    exit 0
+fi
+
+# ── git pull 전 현재 커밋 저장 (롤백용) ──
+PRE_UPDATE_COMMIT=$(git rev-parse HEAD)
+echo "[INFO] 현재 커밋: $PRE_UPDATE_COMMIT" | tee -a "$LOG_FILE"
+
+# ── Git 업데이트 ──
 echo "[INFO] Git 업데이트 시작" | tee -a "$LOG_FILE"
 
 # 현재 remote 설정 확인
 echo "[INFO] 현재 Git remote 설정:" | tee -a "$LOG_FILE"
-git remote -v | tee -a "$LOG_FILE"
+git remote -v 2>&1 | tee -a "$LOG_FILE"
 
 # 현재 브랜치 확인
 CURRENT_BRANCH=$(git branch --show-current)
@@ -50,228 +219,111 @@ echo "[INFO] 현재 브랜치: $CURRENT_BRANCH" | tee -a "$LOG_FILE"
 # 브랜치가 다르면 체크아웃
 if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
     echo "[INFO] 브랜치 변경: $CURRENT_BRANCH → $BRANCH" | tee -a "$LOG_FILE"
-    git checkout $BRANCH
-    if [ $? -ne 0 ]; then
+    if ! git checkout "$BRANCH"; then
         echo "[ERROR] 브랜치 체크아웃 실패: $BRANCH" | tee -a "$LOG_FILE"
         exit 1
     fi
 fi
 
-# 🛡️ Git 상태 정리 및 안전한 업데이트
-echo "[INFO] Git 상태 정리 및 안전한 업데이트 시작..." | tee -a "$LOG_FILE"
-
-# 1. .env 파일 특별 처리
+# .env 파일 보호
 if [ -f .env ]; then
     echo "[INFO] .env 파일 처리 중..." | tee -a "$LOG_FILE"
-    
-    # .env 백업
-    cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
-    
-    # .env를 Git에서 제외 (임시)
-    git update-index --assume-unchanged .env
-    
-    # .env 변경사항 되돌리기
-    git checkout -- .env
-    
-    echo "[INFO] ✅ .env 파일 처리 완료" | tee -a "$LOG_FILE"
+    cp .env ".env.backup.$(date +%Y%m%d_%H%M%S)"
+    git update-index --assume-unchanged .env 2>/dev/null || true
+    git checkout -- .env 2>/dev/null || true
+    echo "[INFO] .env 파일 처리 완료" | tee -a "$LOG_FILE"
 fi
 
-# 2. 다른 변경사항들 처리
+# 변경사항 처리
 if git diff --quiet && git diff --cached --quiet; then
-    echo "[INFO] 작업 디렉토리 깨끗함. Git pull 진행..." | tee -a "$LOG_FILE"
+    echo "[INFO] 작업 디렉토리 깨끗함" | tee -a "$LOG_FILE"
 else
-    echo "[INFO] 변경사항 발견. 정리 중..." | tee -a "$LOG_FILE"
-    
-    # 변경사항 stash
+    echo "[INFO] 변경사항 발견. stash 중..." | tee -a "$LOG_FILE"
     git stash push -m "Auto-stash before update $(date)"
     echo "[INFO] 변경사항을 stash에 저장 완료" | tee -a "$LOG_FILE"
 fi
 
-# 3. Git pull 실행
-echo "[INFO] Git pull 시작 (브랜치: $BRANCH)..." | tee -a "$LOG_FILE"
-if git pull origin $BRANCH; then
-    echo "[INFO] ✅ Git pull 성공!" | tee -a "$LOG_FILE"
-    
-    # 최신 커밋 정보 출력
-    LATEST_COMMIT=$(git log -1 --oneline)
-    echo "[INFO] 최신 커밋: $LATEST_COMMIT" | tee -a "$LOG_FILE"
-    
-    # 4. .env 보호 상태 복원
-    if [ -f .env.backup.* ]; then
-        echo "[INFO] .env 파일 보호 상태 복원 중..." | tee -a "$LOG_FILE"
-        git update-index --skip-worktree .env
-        
-        # 백업 파일 정리
-        rm -f .env.backup.*
-        echo "[INFO] ✅ .env 파일 보호 상태 복원 완료" | tee -a "$LOG_FILE"
+# Git pull 또는 강제 업데이트
+GIT_SUCCESS=false
+if [ "$FORCE_UPDATE" = "true" ]; then
+    echo "[INFO] 강제 업데이트 모드 - git reset --hard origin/$BRANCH" | tee -a "$LOG_FILE"
+    if git fetch origin "$BRANCH" && git reset --hard "origin/$BRANCH"; then
+        GIT_SUCCESS=true
+        echo "[INFO] 강제 업데이트 성공" | tee -a "$LOG_FILE"
+    else
+        echo "[ERROR] 강제 업데이트 실패" | tee -a "$LOG_FILE"
     fi
-    
-    # 5. stash된 변경사항 복원 시도
-    if git stash list | grep -q "Auto-stash before update"; then
-        echo "[INFO] stash된 변경사항 복원 시도 중..." | tee -a "$LOG_FILE"
-        
-        if git stash pop; then
-            echo "[INFO] ✅ stash된 변경사항 복원 성공" | tee -a "$LOG_FILE"
-        else
-            echo "[WARN] ⚠️ stash 복원 실패 (충돌 발생). 변경사항은 stash에 보존됨" | tee -a "$LOG_FILE"
-            git stash list | tee -a "$LOG_FILE"
-        fi
-    fi
-    
 else
-    echo "[ERROR] ❌ Git pull 실패" | tee -a "$LOG_FILE"
-    
-    # 실패 시 .env 복구
-    if [ -f .env.backup.* ]; then
-        echo "[INFO] Git pull 실패. .env 파일 복구 중..." | tee -a "$LOG_FILE"
-        cp .env.backup.* .env
-        git update-index --skip-worktree .env
-        echo "[INFO] ✅ .env 파일 복구 완료" | tee -a "$LOG_FILE"
+    echo "[INFO] Git pull 시작 (브랜치: $BRANCH)..." | tee -a "$LOG_FILE"
+    if git pull origin "$BRANCH"; then
+        GIT_SUCCESS=true
+        echo "[INFO] Git pull 성공" | tee -a "$LOG_FILE"
+    else
+        echo "[ERROR] Git pull 실패" | tee -a "$LOG_FILE"
     fi
-    
+fi
+
+# .env 복구
+LATEST_ENV_BACKUP=$(ls -t .env.backup.* 2>/dev/null | head -1)
+if [ -n "$LATEST_ENV_BACKUP" ]; then
+    cp "$LATEST_ENV_BACKUP" .env
+    git update-index --skip-worktree .env 2>/dev/null || true
+    rm -f .env.backup.*
+    echo "[INFO] .env 파일 복구 완료" | tee -a "$LOG_FILE"
+fi
+
+# stash 복원
+if git stash list 2>/dev/null | grep -q "Auto-stash before update"; then
+    echo "[INFO] stash된 변경사항 복원 시도 중..." | tee -a "$LOG_FILE"
+    if git stash pop 2>/dev/null; then
+        echo "[INFO] stash된 변경사항 복원 성공" | tee -a "$LOG_FILE"
+    else
+        echo "[WARN] stash 복원 실패 (충돌). stash에 보존됨" | tee -a "$LOG_FILE"
+    fi
+fi
+
+if [ "$GIT_SUCCESS" != "true" ]; then
+    echo "[ERROR] Git 업데이트 실패 — 종료" | tee -a "$LOG_FILE"
     exit 1
 fi
 
-# 강제 업데이트가 필요한 경우
-if [ "$FORCE_UPDATE" = "true" ]; then
-    echo "[INFO] 강제 업데이트 모드 - .env 파일 완전 보호" | tee -a "$LOG_FILE"
-    
-    # 1. .env 파일 백업
-    if [ -f .env ]; then
-        echo "[INFO] 강제 업데이트 전 .env 파일 백업..." | tee -a "$LOG_FILE"
-        cp .env .env.force_update.backup.$(date +%Y%m%d_%H%M%S)
-    fi
-    
-    # 2. .env 파일을 Git에서 완전히 제외
-    echo "[INFO] .env 파일을 Git에서 제외 중..." | tee -a "$LOG_FILE"
-    git update-index --assume-unchanged .env
-    
-    # 3. 하드 리셋 실행
-    echo "[INFO] 하드 리셋 실행 중..." | tee -a "$LOG_FILE"
-    git reset --hard origin/$BRANCH
-    
-    if [ $? -eq 0 ]; then
-        echo "[INFO] 강제 업데이트 완료" | tee -a "$LOG_FILE"
-        
-        # 4. .env 파일 복구 및 보호 설정
-        if [ -f .env.force_update.backup.* ]; then
-            echo "[INFO] .env 파일 복구 및 보호 설정 중..." | tee -a "$LOG_FILE"
-            
-            # 가장 최근 백업 파일 찾기
-            LATEST_ENV_BACKUP=$(ls -t .env.force_update.backup.* | head -1)
-            if [ -n "$LATEST_ENV_BACKUP" ]; then
-                # 백업에서 .env 복구
-                cp "$LATEST_ENV_BACKUP" .env
-                
-                # .env 파일을 Git에서 보호
-                git update-index --skip-worktree .env
-                
-                echo "[INFO] ✅ .env 파일 복구 및 보호 완료" | tee -a "$LOG_FILE"
-                
-                # 백업 파일 정리
-                rm -f .env.force_update.backup.*
-            fi
-        fi
-    else
-        echo "[ERROR] 강제 업데이트 실패" | tee -a "$LOG_FILE"
-        
-        # 실패 시 .env 복구
-        if [ -f .env.force_update.backup.* ]; then
-            echo "[INFO] 강제 업데이트 실패. .env 파일 복구 중..." | tee -a "$LOG_FILE"
-            LATEST_ENV_BACKUP=$(ls -t .env.force_update.backup.* | head -1)
-            if [ -n "$LATEST_ENV_BACKUP" ]; then
-                cp "$LATEST_ENV_BACKUP" .env
-                git update-index --skip-worktree .env
-                echo "[INFO] ✅ .env 파일 복구 완료" | tee -a "$LOG_FILE"
-            fi
-        fi
-        
-        exit 1
-    fi
+CURRENT_COMMIT=$(git rev-parse HEAD)
+LATEST_COMMIT=$(git log -1 --oneline)
+echo "[INFO] 최신 커밋: $LATEST_COMMIT" | tee -a "$LOG_FILE"
+
+# ── .env 마이그레이션: 필수 환경변수 보장 ──
+ensure_env_var "SUBSCRIBE_MATTERHUB_TOPICS" '"1"'
+ensure_env_var "MATTERHUB_VENDOR" '"konai"'
+
+# ── --skip-restart 모드: 상태 파일만 작성하고 종료 ──
+if [ "$SKIP_RESTART" = "true" ]; then
+    cat > "/tmp/update_${UPDATE_ID}.status" << STATUSEOF
+{"exit_code": 0, "commit": "$CURRENT_COMMIT", "pre_commit": "$PRE_UPDATE_COMMIT", "branch": "$BRANCH", "timestamp": $(date +%s)}
+STATUSEOF
+    echo "[INFO] 상태 파일 작성 완료 (restart 건너뜀)" | tee -a "$LOG_FILE"
+    echo "=== MQTT 자동 업데이트 완료 (skip-restart) ===" | tee -a "$LOG_FILE"
+    exit 0
 fi
 
-# 🚨 중요: Git 업데이트 완료 (MQTT 응답은 mqtt.py에서 처리)
-echo "[INFO] Git 업데이트 완료. PM2 재시작 준비 중..." | tee -a "$LOG_FILE"
+# ── 서비스 재시작 + 롤백 ──
+echo "[INFO] 서비스 재시작 준비 중..." | tee -a "$LOG_FILE"
+stop_services
+sleep 3
+restart_services
 
-# PM2 경로 설정
-PM2="/home/hyodol/.nvm/versions/node/v22.17.0/bin/pm2"
-
-echo "[INFO] PM2 프로세스 재시작 시작" | tee -a "$LOG_FILE"
-
-# 1. wm-mqtt 프로세스 중지 (자기 자신)
-echo "[INFO] wm-mqtt 중지 중..." | tee -a "$LOG_FILE"
-$PM2 stop wm-mqtt
-sleep 5
-
-# 2. wm-mqtt 프로세스 삭제
-echo "[INFO] wm-mqtt 삭제 중..." | tee -a "$LOG_FILE"
-$PM2 delete wm-mqtt
-sleep 5
-
-# 3. 다른 프로세스들도 중지 및 삭제
-echo "[INFO] 다른 프로세스들 중지 및 삭제 중..." | tee -a "$LOG_FILE"
-$PM2 delete wm-localIp
-$PM2 delete wm-notifier
-$PM2 delete wm-ruleEngine
-$PM2 delete wm-app
-sleep 10
-
-# 4. 새로운 코드로 프로세스 시작
-echo "[INFO] 새로운 코드로 프로세스 시작 중..." | tee -a "$LOG_FILE"
-cd /home/hyodol/whatsmatter-hub-flask-server
-
-# startup.json이 있는지 확인
-if [ -f "startup.json" ]; then
-    echo "[INFO] startup.json 사용하여 프로세스 시작" | tee -a "$LOG_FILE"
-    
-    $PM2 start startup.json
-    
-else
-    echo "[INFO] startup.json 없음 - 개별 프로세스 시작" | tee -a "$LOG_FILE"
-    
-    # 개별 프로세스 시작 (startup.json이 없는 경우)
-    cd /home/hyodol/whatsmatter-hub-flask-server
-    
-    # wm-mqtt 시작
-    echo "[INFO] wm-mqtt 시작 중..." | tee -a "$LOG_FILE"
-    $PM2 start mqtt.py --name wm-mqtt --interpreter python3
-    sleep 3
-    
-    # 다른 프로세스들 시작 (필요시)
-    # $PM2 start app.py --name wm-app --interpreter python3
-    # sleep 2
-fi
-
-echo "[INFO] PM2 설정 저장 중..." | tee -a "$LOG_FILE"
-$PM2 save
-
-echo "[INFO] PM2 상태 확인" | tee -a "$LOG_FILE"
-$PM2 list
-
-sleep 10
-
-$PM2 restart wm-mqtt
-
-sleep 10
-# 업데이트 완료 확인
-echo "[INFO] 업데이트 완료 확인 중..." | tee -a "$LOG_FILE"
-
-# 프로세스 상태 확인
-RUNNING_PROCESSES=$($PM2 list | grep "online" | wc -l)
-TOTAL_PROCESSES=$($PM2 list | grep -E "(wm-|online|stopped|error)" | wc -l)
-
-echo "[INFO] 프로세스 상태:" | tee -a "$LOG_FILE"
-echo "[INFO]   - 실행 중: $RUNNING_PROCESSES" | tee -a "$LOG_FILE"
-echo "[INFO]   - 전체: $TOTAL_PROCESSES" | tee -a "$LOG_FILE"
-
-if [ $RUNNING_PROCESSES -gt 0 ]; then
-    echo "[INFO] ✅ 업데이트 성공: $RUNNING_PROCESSES개 프로세스 실행 중" | tee -a "$LOG_FILE"
-else
-    echo "[WARN] ⚠️ 업데이트 완료되었지만 실행 중인 프로세스가 없음" | tee -a "$LOG_FILE"
+if ! healthcheck_services; then
+    echo "[WARN] 롤백 시작: $PRE_UPDATE_COMMIT" | tee -a "$LOG_FILE"
+    stop_services
+    git reset --hard "$PRE_UPDATE_COMMIT"
+    restart_services
+    cat > "/tmp/update_${UPDATE_ID}.rollback" << ROLLBACKEOF
+{"rollback": true, "reverted_to": "$PRE_UPDATE_COMMIT"}
+ROLLBACKEOF
+    echo "[ERROR] 롤백 완료" | tee -a "$LOG_FILE"
+    exit 1
 fi
 
 echo "[INFO] 패치 완료 $(date)" | tee -a "$LOG_FILE"
 echo "=== MQTT 자동 업데이트 완료 ===" | tee -a "$LOG_FILE"
 
-# 성공적으로 완료
 exit 0

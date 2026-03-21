@@ -102,6 +102,7 @@ class AWSIoTClient:
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
+            clean_session=False,
             keep_alive_secs=300,
             on_connection_interrupted=on_interrupted,
             on_connection_resumed=on_resumed,
