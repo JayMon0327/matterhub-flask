@@ -117,11 +117,31 @@ def log_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> None:
         print(line)
 
 
+def _ensure_cert_symlinks() -> None:
+    """certificates/ 디렉토리의 심링크 자동 생성."""
+    import os
+    cert_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certificates")
+    if not os.path.isdir(cert_dir):
+        return
+    symlink_map = {
+        "cert.pem": "device.pem.crt",
+        "key.pem": "private.pem.key",
+        "ca_cert.pem": "AmazonRootCA1.pem",
+    }
+    for link_name, target in symlink_map.items():
+        link_path = os.path.join(cert_dir, link_name)
+        target_path = os.path.join(cert_dir, target)
+        if os.path.exists(target_path) and not os.path.exists(link_path):
+            os.symlink(target, link_path)
+            print(f"[MQTT][INIT] 심링크 생성: {link_name} → {target}")
+
+
 def main() -> None:
     if not enforce_mac_binding():
         raise SystemExit(1)
 
     log_matterhub_status()
+    _ensure_cert_symlinks()
     update.start_queue_worker()
 
     aws_client = AWSIoTClient()

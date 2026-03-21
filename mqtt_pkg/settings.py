@@ -87,7 +87,7 @@ MQTT_ALERT_BATTERY_THRESHOLD = max(0, int(
 
 DEVICES_FILE_PATH = os.environ.get("devices_file_path")
 
-SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "0") == "1"
+SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "1") != "0"
 
 MATTERHUB_ID = _strip_quotes(os.environ.get("matterhub_id"))
 
