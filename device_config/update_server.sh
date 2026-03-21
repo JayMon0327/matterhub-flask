@@ -211,7 +211,8 @@ restart_services() {
     echo "[INFO] 서비스 재시작 시작" | tee -a "$LOG_FILE"
     case "$PROC_MANAGER" in
         systemd)
-            sudo systemctl daemon-reload
+            # 유닛 파일 재렌더링 (venv 상태 변경 등 반영)
+            install_systemd_units
             sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
             ;;
         pm2:*|legacy-systemd)
