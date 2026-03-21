@@ -397,18 +397,8 @@ ensure_mqtt_env() {
         ensure_env_var "MQTT_CERT_PATH" '"certificates"'
     fi
 
-    # MQTT 엔드포인트: 구 코드에서 자동 탐지
-    if ! grep -q "^MQTT_ENDPOINT=" .env 2>/dev/null; then
-        # 구 mqtt.py에서 endpoint 추출 시도
-        local old_endpoint
-        old_endpoint=$(git stash list 2>/dev/null | head -1 && git show stash@{0}:mqtt.py 2>/dev/null | grep -oP 'self\.endpoint\s*=\s*"\K[^"]+' || true)
-        if [ -n "$old_endpoint" ]; then
-            ensure_env_var "MQTT_ENDPOINT" "\"$old_endpoint\""
-        else
-            # 기본 엔드포인트 (whatsmatter-nipa AWS IoT)
-            ensure_env_var "MQTT_ENDPOINT" '"a206qwcndl23az-ats.iot.ap-northeast-2.amazonaws.com"'
-        fi
-    fi
+    # MQTT 엔드포인트: whatsmatter-nipa AWS IoT
+    ensure_env_var "MQTT_ENDPOINT" '"a206qwcndl23az-ats.iot.ap-northeast-2.amazonaws.com"'
 
     ensure_env_var "SUBSCRIBE_MATTERHUB_TOPICS" '"1"'
     ensure_env_var "MATTERHUB_VENDOR" '"konai"'
