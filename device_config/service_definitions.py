@@ -115,7 +115,9 @@ def build_exec_start(
     project_root = Path(project_root)
     if runtime_mode == "python":
         script_path = Path(script_path)
-        python_path = project_root / DEFAULT_VENV_PYTHON
+        venv_python = project_root / DEFAULT_VENV_PYTHON
+        # venv가 없으면 시스템 python3 사용
+        python_path = venv_python if venv_python.exists() else Path("/usr/bin/python3")
         target_script = project_root / script_path
         return f"{python_path} {target_script}"
     if runtime_mode == "binary":

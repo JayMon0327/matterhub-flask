@@ -104,8 +104,11 @@ ensure_venv() {
     local venv_dir="$PROJECT_ROOT/venv"
     if [ ! -f "$venv_dir/bin/python" ]; then
         echo "[INFO] venv 생성 중 (--system-site-packages)..." | tee -a "$LOG_FILE"
-        python3 -m venv --system-site-packages "$venv_dir"
-        echo "[INFO] venv 생성 완료: $venv_dir" | tee -a "$LOG_FILE"
+        if python3 -m venv --system-site-packages "$venv_dir" 2>/dev/null; then
+            echo "[INFO] venv 생성 완료: $venv_dir" | tee -a "$LOG_FILE"
+        else
+            echo "[WARN] venv 생성 실패 (python3-venv 미설치?). 시스템 Python으로 계속" | tee -a "$LOG_FILE"
+        fi
     fi
 }
 
@@ -144,9 +147,9 @@ install_systemd_units() {
     echo "[INFO] systemd daemon-reload 완료" | tee -a "$LOG_FILE"
 }
 
-# ── sudo 가용성 확인 ──
+# ── sudo 가용성 확인 (systemctl NOPASSWD 기준) ──
 has_sudo() {
-    sudo -n true 2>/dev/null
+    sudo -n systemctl --version &>/dev/null
 }
 
 # ── PM2 프로세스 정의 (고객사 프로세스 제외) ──
