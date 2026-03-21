@@ -89,7 +89,10 @@ def _find_update_script() -> Optional[str]:
     """update_server.sh 경로 탐색"""
     for path in [
         os.path.join(os.path.dirname(__file__), "../device_config/update_server.sh"),
+        os.path.join(os.path.dirname(__file__), "../update_server.sh"),  # 구형 레이아웃 (루트에 위치)
         "./device_config/update_server.sh",
+        "./update_server.sh",  # 구형 레이아웃 (루트에 위치)
+        "/opt/matterhub/device_config/update_server.sh",  # .deb 설치 경로
         "/srv/matterhub/device_config/update_server.sh",
     ]:
         resolved = os.path.abspath(path)
