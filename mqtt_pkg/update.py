@@ -277,9 +277,15 @@ def execute_update_async(message: Dict[str, Any]) -> None:
             status = _read_status_file(status_file)
             if status:
                 result.update(status)
-                print(f"상태 파일 읽기 완료: {status}")
+                # exit_code가 0이 아니면 실패로 처리
+                if status.get("exit_code", 0) != 0:
+                    result["success"] = False
+                    print(f"❌ 스크립트 실패 (exit_code={status.get('exit_code')})")
+                else:
+                    print(f"상태 파일 읽기 완료: {status}")
             else:
-                print("⚠️ 상태 파일을 읽을 수 없음 — 스크립트 로그 확인 필요")
+                result["success"] = False
+                print("❌ 상태 파일을 읽을 수 없음 — 스크립트 실패로 처리")
 
         # Phase C: 최종 응답 전송 (QoS 1, PUBACK 확인)
         send_final_response(message, result)

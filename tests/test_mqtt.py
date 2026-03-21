@@ -20,6 +20,7 @@ def load_mqtt_module(
     test_response_topic: str = "",
     matterhub_id: str | None = None,
     subscribe_matterhub_topics: bool = False,
+    matterhub_region: str | None = None,
 ):
     mqtt_pkg_module = types.ModuleType("mqtt_pkg")
     mqtt_pkg_module.__path__ = []
@@ -56,6 +57,7 @@ def load_mqtt_module(
     settings_module.MQTT_TEST_TOPIC_PUBLISH = test_response_topic
     settings_module.SUBSCRIBE_MATTERHUB_TOPICS = subscribe_matterhub_topics
     settings_module.MATTERHUB_ID = matterhub_id
+    settings_module.MATTERHUB_REGION = matterhub_region
 
     state_module = types.ModuleType("mqtt_pkg.state")
     state_module.publish_bootstrap_all_states = Mock(name="publish_bootstrap_all_states")
@@ -115,13 +117,41 @@ class MqttEntrypointTest(unittest.TestCase):
 
         self.assertEqual(
             [
-                "update/delta/dev/example",
-                "update/reported/dev/example",
-                "matterhub/hub-1/git/update",
                 "matterhub/update/specific/hub-1",
+                "matterhub/update/all",
+                "matterhub/hub-1/state-changed",
             ],
             topics,
         )
+
+    def test_build_subscribe_topics_includes_region_when_set(self) -> None:
+        module = load_mqtt_module(
+            matterhub_id="hub-1",
+            subscribe_matterhub_topics=True,
+            matterhub_region="gangnam",
+        )
+
+        topics = module.build_subscribe_topics()
+
+        self.assertEqual(
+            [
+                "matterhub/update/specific/hub-1",
+                "matterhub/update/all",
+                "matterhub/update/region/gangnam",
+                "matterhub/hub-1/state-changed",
+            ],
+            topics,
+        )
+
+    def test_build_subscribe_topics_excludes_region_when_not_set(self) -> None:
+        module = load_mqtt_module(
+            matterhub_id="hub-1",
+            subscribe_matterhub_topics=True,
+        )
+
+        topics = module.build_subscribe_topics()
+
+        self.assertNotIn("matterhub/update/region/", " ".join(topics))
 
     def test_build_startup_report_contains_connection_and_topic_summary(self) -> None:
         module = load_mqtt_module(
@@ -139,9 +169,9 @@ class MqttEntrypointTest(unittest.TestCase):
         self.assertIn("[MQTT][INIT] client_id=matterhub-client", report)
         self.assertIn("[MQTT][INIT] cert_path=konai_certificates cert=ok key=ok ca=missing", report)
         self.assertIn("[MQTT][SUBSCRIBE] setup start", report)
-        self.assertIn("[MQTT][SUBSCRIBE] count=4", report)
-        self.assertIn("[MQTT][SUBSCRIBE] topic[1]=update/delta/dev/example", report)
-        self.assertIn("[MQTT][SUBSCRIBE] topic[2]=update/reported/dev/example", report)
+        self.assertIn("[MQTT][SUBSCRIBE] count=3", report)
+        self.assertIn("[MQTT][SUBSCRIBE] topic[1]=matterhub/update/specific/hub-1", report)
+        self.assertIn("[MQTT][SUBSCRIBE] topic[2]=matterhub/update/all", report)
 
     def test_log_subscribe_results_prints_topic_statuses(self) -> None:
         module = load_mqtt_module()

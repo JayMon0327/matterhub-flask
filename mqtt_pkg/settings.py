@@ -90,6 +90,7 @@ DEVICES_FILE_PATH = os.environ.get("devices_file_path")
 SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "1") != "0"
 
 MATTERHUB_ID = _strip_quotes(os.environ.get("matterhub_id"))
+MATTERHUB_REGION = _strip_quotes(os.environ.get("MATTERHUB_REGION"))
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(BASE_DIR, ".env")

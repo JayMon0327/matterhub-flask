@@ -188,12 +188,12 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
         return
 
     matterhub_id = settings.MATTERHUB_ID
-    update_topics = []
-    if matterhub_id:
-        update_topics.append(f"matterhub/{matterhub_id}/git/update")
-        update_topics.append(f"matterhub/update/specific/{matterhub_id}")
-
-    if topic in update_topics or (matterhub_id and topic.startswith("matterhub/update/specific/")):
+    _is_update_topic = matterhub_id and (
+        topic == f"matterhub/update/specific/{matterhub_id}"
+        or topic == "matterhub/update/all"
+        or topic.startswith("matterhub/update/region/")
+    )
+    if _is_update_topic:
         if isinstance(parsed, dict):
             print(f"🚀 Git 업데이트 명령 수신: {topic}")
             update.handle_update_command(parsed)

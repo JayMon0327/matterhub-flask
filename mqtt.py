@@ -28,8 +28,10 @@ def build_subscribe_topics() -> List[str]:
     # _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_SUBSCRIBE)
     # _append_unique_topic(topics, settings.MQTT_TEST_TOPIC_PUBLISH)
     if settings.SUBSCRIBE_MATTERHUB_TOPICS and settings.MATTERHUB_ID:
-        _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/git/update")
         _append_unique_topic(topics, f"matterhub/update/specific/{settings.MATTERHUB_ID}")
+        _append_unique_topic(topics, "matterhub/update/all")
+        if settings.MATTERHUB_REGION:
+            _append_unique_topic(topics, f"matterhub/update/region/{settings.MATTERHUB_REGION}")
         _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/state-changed")
     return topics
 
