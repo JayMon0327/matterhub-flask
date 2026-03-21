@@ -201,6 +201,11 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
             print(f"❌ 업데이트 명령 파싱 실패: {payload_bytes!r}")
         return
 
+    # state-changed: 클라우드에서 상태 변경 알림 수신
+    if matterhub_id and topic == f"matterhub/{matterhub_id}/state-changed":
+        print(f"[MQTT][STATE_CHANGED] 수신: {json.dumps(parsed, ensure_ascii=False) if parsed else payload_bytes!r}")
+        return
+
     print(f"알 수 없는 토픽 수신: {topic}")
 
 

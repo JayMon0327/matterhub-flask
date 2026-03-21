@@ -30,6 +30,7 @@ def build_subscribe_topics() -> List[str]:
     if settings.SUBSCRIBE_MATTERHUB_TOPICS and settings.MATTERHUB_ID:
         _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/git/update")
         _append_unique_topic(topics, f"matterhub/update/specific/{settings.MATTERHUB_ID}")
+        _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/state-changed")
     return topics
 
 

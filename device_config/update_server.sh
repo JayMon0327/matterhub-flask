@@ -331,6 +331,102 @@ ensure_env_var() {
     fi
 }
 
+# ── 자동 부트스트랩: 인증서 심링크 생성 ──
+ensure_cert_symlinks() {
+    local cert_dir="$PROJECT_ROOT/certificates"
+    [ -d "$cert_dir" ] || return 0
+
+    # device.pem.crt → cert.pem
+    if [ -f "$cert_dir/device.pem.crt" ] && [ ! -e "$cert_dir/cert.pem" ]; then
+        ln -sf device.pem.crt "$cert_dir/cert.pem"
+        echo "[INFO] 심링크 생성: cert.pem → device.pem.crt" | tee -a "$LOG_FILE"
+    fi
+    # private.pem.key → key.pem
+    if [ -f "$cert_dir/private.pem.key" ] && [ ! -e "$cert_dir/key.pem" ]; then
+        ln -sf private.pem.key "$cert_dir/key.pem"
+        echo "[INFO] 심링크 생성: key.pem → private.pem.key" | tee -a "$LOG_FILE"
+    fi
+    # AmazonRootCA1.pem → ca_cert.pem
+    if [ -f "$cert_dir/AmazonRootCA1.pem" ] && [ ! -e "$cert_dir/ca_cert.pem" ]; then
+        ln -sf AmazonRootCA1.pem "$cert_dir/ca_cert.pem"
+        echo "[INFO] 심링크 생성: ca_cert.pem → AmazonRootCA1.pem" | tee -a "$LOG_FILE"
+    fi
+}
+
+# ── 자동 부트스트랩: NOPASSWD sudoers 설정 ──
+ensure_nopasswd_sudoers() {
+    local sudoers_file="/etc/sudoers.d/matterhub-update"
+    [ -f "$sudoers_file" ] && return 0
+    has_sudo || return 0  # 이미 sudo 가능하면 설정 불필요 확인은 위에서 함
+
+    local run_user
+    run_user="$(detect_run_user)"
+    cat > /tmp/matterhub-sudoers << SUDOEOF
+# MatterHub 업데이트 스크립트용 NOPASSWD 설정
+${run_user} ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/install, /usr/bin/systemd-run
+SUDOEOF
+    sudo install -m 0440 /tmp/matterhub-sudoers "$sudoers_file" 2>/dev/null && \
+        echo "[INFO] NOPASSWD sudoers 설정 완료: $run_user" | tee -a "$LOG_FILE" || \
+        echo "[WARN] sudoers 설정 실패 (수동 설정 필요)" | tee -a "$LOG_FILE"
+    rm -f /tmp/matterhub-sudoers
+}
+
+# ── 자동 부트스트랩: 부서진 venv 정리 ──
+cleanup_broken_venv() {
+    local venv_dir="$PROJECT_ROOT/venv"
+    if [ -d "$venv_dir" ] && [ -f "$venv_dir/bin/python" ]; then
+        # venv python이 requests를 import 할 수 있는지 확인
+        if ! "$venv_dir/bin/python" -c "import requests" 2>/dev/null; then
+            echo "[INFO] 부서진 venv 삭제" | tee -a "$LOG_FILE"
+            rm -rf "$venv_dir"
+        fi
+    fi
+}
+
+# ── 자동 부트스트랩: .env MQTT 설정 자동 감지 ──
+ensure_mqtt_env() {
+    # matterhub_id에서 MQTT_CLIENT_ID 자동 설정
+    local hub_id
+    hub_id=$(grep -oP 'matterhub_id\s*=\s*"?\K[^"]+' .env 2>/dev/null || true)
+    if [ -n "$hub_id" ]; then
+        ensure_env_var "MQTT_CLIENT_ID" "\"$hub_id\""
+    fi
+
+    # 디바이스 인증서가 있으면 certificates/ 사용
+    if [ -d "$PROJECT_ROOT/certificates" ] && [ -f "$PROJECT_ROOT/certificates/device.pem.crt" ]; then
+        ensure_env_var "MQTT_CERT_PATH" '"certificates"'
+    fi
+
+    # MQTT 엔드포인트: 구 코드에서 자동 탐지
+    if ! grep -q "^MQTT_ENDPOINT=" .env 2>/dev/null; then
+        # 구 mqtt.py에서 endpoint 추출 시도
+        local old_endpoint
+        old_endpoint=$(git stash list 2>/dev/null | head -1 && git show stash@{0}:mqtt.py 2>/dev/null | grep -oP 'self\.endpoint\s*=\s*"\K[^"]+' || true)
+        if [ -n "$old_endpoint" ]; then
+            ensure_env_var "MQTT_ENDPOINT" "\"$old_endpoint\""
+        else
+            # 기본 엔드포인트 (whatsmatter-nipa AWS IoT)
+            ensure_env_var "MQTT_ENDPOINT" '"a206qwcndl23az-ats.iot.ap-northeast-2.amazonaws.com"'
+        fi
+    fi
+
+    ensure_env_var "SUBSCRIBE_MATTERHUB_TOPICS" '"1"'
+    ensure_env_var "MATTERHUB_VENDOR" '"konai"'
+}
+
+# ── 자동 부트스트랩: 전체 실행 ──
+auto_bootstrap() {
+    echo "[INFO] 자동 부트스트랩 시작" | tee -a "$LOG_FILE"
+    ensure_cert_symlinks
+    ensure_mqtt_env
+    cleanup_broken_venv
+    # sudoers 설정은 sudo가 가능할 때만 (대화형 세션에서 첫 실행 시)
+    if has_sudo; then
+        ensure_nopasswd_sudoers
+    fi
+    echo "[INFO] 자동 부트스트랩 완료" | tee -a "$LOG_FILE"
+}
+
 # ── --restart-only 모드 ──
 if [ "$RESTART_ONLY" = "true" ]; then
     echo "[INFO] --restart-only 모드: 서비스 재시작만 수행" | tee -a "$LOG_FILE"
@@ -444,9 +540,8 @@ CURRENT_COMMIT=$(git rev-parse HEAD)
 LATEST_COMMIT=$(git log -1 --oneline)
 echo "[INFO] 최신 커밋: $LATEST_COMMIT" | tee -a "$LOG_FILE"
 
-# ── .env 마이그레이션: 필수 환경변수 보장 ──
-ensure_env_var "SUBSCRIBE_MATTERHUB_TOPICS" '"1"'
-ensure_env_var "MATTERHUB_VENDOR" '"konai"'
+# ── 자동 부트스트랩 실행: cert 심링크, .env, sudoers, venv ──
+auto_bootstrap
 
 # ── --skip-restart 모드: 상태 파일만 작성하고 종료 ──
 if [ "$SKIP_RESTART" = "true" ]; then
