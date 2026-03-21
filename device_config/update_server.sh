@@ -61,12 +61,12 @@ echo "[INFO]   - restart-only: $RESTART_ONLY" | tee -a "$LOG_FILE"
 
 # ── 프로세스 매니저 감지 ──
 detect_process_manager() {
-    # systemd 서비스 파일 존재 여부 우선 확인
+    # 1. 개별 systemd 서비스 우선 확인
     if systemctl list-unit-files matterhub-mqtt.service &>/dev/null 2>&1; then
         echo "systemd"
         return
     fi
-    # PM2 감지
+    # 2. PM2 감지 (wm-* 또는 matter 프로세스)
     local pm2_bin=""
     pm2_bin="$(command -v pm2 2>/dev/null || echo "")"
     if [ -z "$pm2_bin" ]; then
@@ -74,8 +74,14 @@ detect_process_manager() {
             [ -x "$candidate" ] && pm2_bin="$candidate" && break
         done
     fi
-    if [ -n "$pm2_bin" ] && "$pm2_bin" list 2>/dev/null | grep -q "wm-"; then
+    if [ -n "$pm2_bin" ] && "$pm2_bin" list 2>/dev/null | grep -qE 'wm-|matter'; then
         echo "pm2:$pm2_bin"
+        return
+    fi
+    # 3. 구형 단일 서비스 감지 (matterhub.service 또는 matterhub-once.service)
+    if systemctl list-unit-files matterhub.service &>/dev/null 2>&1 || \
+       systemctl list-unit-files matterhub-once.service &>/dev/null 2>&1; then
+        echo "legacy-systemd"
         return
     fi
     echo "unknown"
@@ -147,12 +153,17 @@ stop_services() {
             ;;
         pm2:*)
             local pm2_bin="${PROC_MANAGER#pm2:}"
-            # wm- 접두사 프로세스만 삭제 (고객사 프로세스 유지)
-            "$pm2_bin" list 2>/dev/null | grep -oP 'wm-\S+' | while read -r proc; do
+            # wm- 접두사 + matter/slm-server 프로세스 삭제 (고객사 프로세스 유지)
+            "$pm2_bin" list 2>/dev/null | grep -oP '(wm-\S+|matter(?!hub)\S*|slm-server)' | while read -r proc; do
                 "$pm2_bin" delete "$proc" 2>/dev/null || true
                 echo "[INFO] PM2 삭제: $proc" | tee -a "$LOG_FILE"
             done
             "$pm2_bin" save 2>/dev/null || true
+            ;;
+        legacy-systemd)
+            sudo systemctl stop matterhub.service 2>/dev/null || true
+            sudo systemctl stop matterhub-once.service 2>/dev/null || true
+            echo "[INFO] 구형 서비스 중지" | tee -a "$LOG_FILE"
             ;;
         *)
             echo "[WARN] 프로세스 매니저 미감지 — 서비스 중지 건너뜀" | tee -a "$LOG_FILE"
@@ -167,14 +178,34 @@ restart_services() {
             sudo systemctl daemon-reload
             sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
             ;;
-        pm2:*)
-            # PM2→systemd 마이그레이션
-            echo "[INFO] PM2→systemd 전환 시작" | tee -a "$LOG_FILE"
+        pm2:*|legacy-systemd)
+            echo "[INFO] PM2/legacy→systemd 전환 시작" | tee -a "$LOG_FILE"
 
-            # 1. systemd 유닛 설치
+            # 1. pm2 자동시작 제거
+            if [[ "$PROC_MANAGER" == pm2:* ]]; then
+                local pm2_bin="${PROC_MANAGER#pm2:}"
+                echo "[INFO] PM2 startup 서비스 비활성화" | tee -a "$LOG_FILE"
+                # pm2-{username}.service 비활성화
+                for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
+                    sudo systemctl stop "$svc" 2>/dev/null || true
+                    sudo systemctl disable "$svc" 2>/dev/null || true
+                    echo "[INFO] 비활성화: $svc" | tee -a "$LOG_FILE"
+                done
+            fi
+
+            # 2. 구형 단일 서비스 비활성화
+            for legacy_svc in matterhub.service matterhub-once.service; do
+                if systemctl list-unit-files "$legacy_svc" &>/dev/null 2>&1; then
+                    sudo systemctl disable "$legacy_svc" 2>/dev/null || true
+                    sudo systemctl stop "$legacy_svc" 2>/dev/null || true
+                    echo "[INFO] 구형 $legacy_svc 비활성화" | tee -a "$LOG_FILE"
+                fi
+            done
+
+            # 3. systemd 유닛 설치
             install_systemd_units
 
-            # 2. systemd 서비스 활성화 + 시작
+            # 4. systemd 서비스 활성화 + 시작
             sudo systemctl enable "${SYSTEMD_SERVICES[@]}" 2>/dev/null || true
             sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
             echo "[INFO] systemd 서비스 시작 완료" | tee -a "$LOG_FILE"
