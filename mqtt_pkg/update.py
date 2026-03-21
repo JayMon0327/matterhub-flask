@@ -323,11 +323,67 @@ def process_update_queue() -> None:
             update_queue.task_done()
 
 
+_SET_ENV_ALLOWED_KEYS = frozenset({
+    "MATTERHUB_REGION",
+    "SUBSCRIBE_MATTERHUB_TOPICS",
+    "MQTT_EVENT_THROTTLE_SEC",
+    "MQTT_EVENT_DEDUP_WINDOW_SEC",
+    "MQTT_DEVICE_STATE_INTERVAL_SEC",
+    "MQTT_ALERT_CHECK_INTERVAL_SEC",
+    "MQTT_ALERT_BATTERY_THRESHOLD",
+})
+
+
+def _handle_set_env(message: Dict[str, Any]) -> None:
+    """원격 .env 설정 변경 처리. 허용된 키만 수정 가능."""
+    update_id = message.get("update_id", "unknown")
+    key = message.get("key", "").strip()
+    value = message.get("value", "").strip()
+
+    if not key or not value:
+        send_error_response(message, "key and value are required")
+        return
+
+    if key not in _SET_ENV_ALLOWED_KEYS:
+        send_error_response(message, f"key '{key}' is not allowed. allowed: {sorted(_SET_ENV_ALLOWED_KEYS)}")
+        return
+
+    try:
+        settings._persist_env_value(key, f'"{value}"')
+        os.environ[key] = value
+
+        # MATTERHUB_REGION은 인메모리 값도 갱신
+        if key == "MATTERHUB_REGION":
+            settings.MATTERHUB_REGION = value
+
+        restart = bool(message.get("restart", False))
+        result = {
+            "success": True,
+            "message": f"{key} set to {value}" + (" (restarting)" if restart else ""),
+            "update_id": update_id,
+            "restart": restart,
+            "timestamp": int(time.time()),
+        }
+        send_final_response(message, result)
+        print(f"✅ set_env 완료: {key}={value}")
+
+        if restart:
+            _launch_restart(update_id)
+
+    except Exception as exc:
+        print(f"❌ set_env 실패: {exc}")
+        send_error_response(message, str(exc))
+
+
 def handle_update_command(message: Dict[str, Any]) -> None:
     try:
         command = message.get("command")
         update_id = message.get("update_id", "unknown")
         print(f"📥 업데이트 명령 수신: command={command}, update_id={update_id}")
+
+        if command == "set_env":
+            _handle_set_env(message)
+            return
 
         send_immediate_response(message, status="processing")
 

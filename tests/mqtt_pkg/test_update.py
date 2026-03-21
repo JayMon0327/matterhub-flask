@@ -77,5 +77,103 @@ class HandleUpdateCommandTest(unittest.TestCase):
         self.assertIn("boom", args[0][1])
 
 
+class SetEnvCommandTest(unittest.TestCase):
+    """set_env 명령 처리 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_updates_allowed_key(self, mock_runtime, mock_settings, mock_send_final):
+        mock_settings.MATTERHUB_ID = "test-hub"
+        mock_settings.MATTERHUB_REGION = None
+        mock_settings._persist_env_value = MagicMock()
+
+        from mqtt_pkg.update import handle_update_command
+
+        message = {
+            "command": "set_env",
+            "update_id": "region-001",
+            "key": "MATTERHUB_REGION",
+            "value": "gangnam",
+        }
+
+        handle_update_command(message)
+
+        mock_settings._persist_env_value.assert_called_once_with("MATTERHUB_REGION", '"gangnam"')
+        mock_send_final.assert_called_once()
+        result = mock_send_final.call_args[0][1]
+        self.assertTrue(result["success"])
+        self.assertEqual(mock_settings.MATTERHUB_REGION, "gangnam")
+
+    @patch("mqtt_pkg.update._launch_restart")
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_with_restart(self, mock_runtime, mock_settings, mock_send_final, mock_restart):
+        mock_settings.MATTERHUB_ID = "test-hub"
+        mock_settings.MATTERHUB_REGION = None
+        mock_settings._persist_env_value = MagicMock()
+
+        from mqtt_pkg.update import handle_update_command
+
+        message = {
+            "command": "set_env",
+            "update_id": "region-002",
+            "key": "MATTERHUB_REGION",
+            "value": "gangnam",
+            "restart": True,
+        }
+
+        handle_update_command(message)
+
+        result = mock_send_final.call_args[0][1]
+        self.assertTrue(result["restart"])
+        mock_restart.assert_called_once_with("region-002")
+
+    @patch("mqtt_pkg.update.send_error_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_rejects_disallowed_key(self, mock_runtime, mock_settings, mock_send_err):
+        mock_settings.MATTERHUB_ID = "test-hub"
+
+        from mqtt_pkg.update import handle_update_command
+
+        message = {
+            "command": "set_env",
+            "update_id": "bad-001",
+            "key": "hass_token",
+            "value": "stolen",
+        }
+
+        handle_update_command(message)
+
+        mock_send_err.assert_called_once()
+        self.assertIn("not allowed", mock_send_err.call_args[0][1])
+
+    @patch("mqtt_pkg.update.send_error_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_rejects_empty_key(self, mock_runtime, mock_settings, mock_send_err):
+        mock_settings.MATTERHUB_ID = "test-hub"
+
+        from mqtt_pkg.update import handle_update_command
+
+        message = {
+            "command": "set_env",
+            "update_id": "empty-001",
+            "key": "",
+            "value": "gangnam",
+        }
+
+        handle_update_command(message)
+
+        mock_send_err.assert_called_once()
+        self.assertIn("required", mock_send_err.call_args[0][1])
+
+
 if __name__ == "__main__":
     unittest.main()
