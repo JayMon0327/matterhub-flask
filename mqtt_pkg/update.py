@@ -223,15 +223,33 @@ def execute_external_update_script(
 
 
 def _launch_restart(update_id: str) -> None:
-    """서비스 재시작을 별도 프로세스로 실행 (자기 자신도 재시작됨)"""
+    """서비스 재시작을 별도 프로세스로 실행 (자기 자신도 재시작됨)
+
+    PM2 cgroup에서 탈출하기 위해 systemd-run --scope 사용.
+    PM2 서비스가 stop되면 cgroup 내 모든 프로세스가 kill되므로,
+    restart 스크립트는 반드시 별도 scope에서 실행해야 함.
+    """
     script_path = _find_update_script()
-    if script_path:
-        log_file = f"/tmp/restart_{update_id}.log"
+    if not script_path:
+        print("❌ 재시작 스크립트를 찾을 수 없습니다")
+        return
+
+    log_file = f"/tmp/restart_{update_id}.log"
+
+    # systemd-run으로 PM2 cgroup에서 독립 실행 (sudo NOPASSWD 필요)
+    cmd = (
+        f"sudo systemd-run --scope --unit=matterhub-update-restart "
+        f"bash {script_path} --restart-only > {log_file} 2>&1 &"
+    )
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        # systemd-run 실패 시 (sudo 불가 등) nohup fallback
+        print(f"⚠️ systemd-run 실패 ({result.stderr.strip()}), nohup fallback")
         cmd = f"nohup bash {script_path} --restart-only > {log_file} 2>&1 &"
         subprocess.run(cmd, shell=True)
-        print(f"🔄 서비스 재시작 프로세스 시작됨: {log_file}")
-    else:
-        print("❌ 재시작 스크립트를 찾을 수 없습니다")
+
+    print(f"🔄 서비스 재시작 프로세스 시작됨: {log_file}")
 
 
 def execute_update_async(message: Dict[str, Any]) -> None:

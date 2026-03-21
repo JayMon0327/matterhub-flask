@@ -229,19 +229,7 @@ restart_services() {
 
             echo "[INFO] PM2/legacy→systemd 전환 시작" | tee -a "$LOG_FILE"
 
-            # 1. pm2 자동시작 제거
-            if [[ "$PROC_MANAGER" == pm2:* ]]; then
-                local pm2_bin="${PROC_MANAGER#pm2:}"
-                echo "[INFO] PM2 startup 서비스 비활성화" | tee -a "$LOG_FILE"
-                # pm2-{username}.service 비활성화
-                for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
-                    sudo systemctl stop "$svc" 2>/dev/null || true
-                    sudo systemctl disable "$svc" 2>/dev/null || true
-                    echo "[INFO] 비활성화: $svc" | tee -a "$LOG_FILE"
-                done
-            fi
-
-            # 2. 구형 단일 서비스 비활성화
+            # 1. 구형 단일 서비스 비활성화 (PM2 서비스는 아직 유지)
             for legacy_svc in matterhub.service matterhub-once.service; do
                 if systemctl list-unit-files "$legacy_svc" &>/dev/null 2>&1; then
                     sudo systemctl disable "$legacy_svc" 2>/dev/null || true
@@ -250,13 +238,39 @@ restart_services() {
                 fi
             done
 
-            # 3. systemd 유닛 설치
+            # 2. systemd 유닛 설치 (PM2가 아직 살아있는 상태에서)
             install_systemd_units
 
-            # 4. systemd 서비스 활성화 + 시작
+            # 3. systemd 서비스 활성화 + 시작
             sudo systemctl enable "${SYSTEMD_SERVICES[@]}" 2>/dev/null || true
             sudo systemctl restart "${SYSTEMD_SERVICES[@]}"
             echo "[INFO] systemd 서비스 시작 완료" | tee -a "$LOG_FILE"
+
+            # 4. systemd 서비스 정상 확인 후 PM2 정리
+            sleep 3
+            local systemd_ok=0
+            for svc in "${SYSTEMD_SERVICES[@]}"; do
+                systemctl is-active --quiet "$svc" 2>/dev/null && systemd_ok=$((systemd_ok + 1)) || true
+            done
+            if [ $systemd_ok -ge 2 ]; then
+                echo "[INFO] systemd 서비스 정상($systemd_ok개) — PM2 정리 시작" | tee -a "$LOG_FILE"
+                if [[ "$PROC_MANAGER" == pm2:* ]]; then
+                    local pm2_bin="${PROC_MANAGER#pm2:}"
+                    # PM2에서 wm-* 프로세스만 삭제 (고객사 프로세스 유지)
+                    "$pm2_bin" list 2>/dev/null | grep -oP '(wm-\S+|matter(?!hub)\S*|slm-server)' | while read -r proc; do
+                        "$pm2_bin" delete "$proc" 2>/dev/null || true
+                        echo "[INFO] PM2 삭제: $proc" | tee -a "$LOG_FILE"
+                    done
+                    "$pm2_bin" save 2>/dev/null || true
+                    # PM2 startup 서비스 비활성화 (disable만, stop은 하지 않음 — 고객사 프로세스 유지)
+                    for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
+                        sudo systemctl disable "$svc" 2>/dev/null || true
+                        echo "[INFO] PM2 서비스 disable: $svc" | tee -a "$LOG_FILE"
+                    done
+                fi
+            else
+                echo "[WARN] systemd 서비스 불안정($systemd_ok개) — PM2 유지" | tee -a "$LOG_FILE"
+            fi
             ;;
         *)
             echo "[ERROR] 프로세스 매니저를 감지할 수 없습니다" | tee -a "$LOG_FILE"
