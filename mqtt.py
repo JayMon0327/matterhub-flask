@@ -139,7 +139,6 @@ def main() -> None:
         f"success={success_count} failed={failed_count} status={overall_status}"
     )
 
-    state.publish_initial_shadow_report()
     state.publish_bootstrap_all_states()
     state.publish_device_states_bulk()
     state.check_and_publish_alerts()
