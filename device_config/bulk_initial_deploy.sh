@@ -134,38 +134,26 @@ chmod 0440 /etc/sudoers.d/matterhub-update'
         fi
     " 2>/dev/null
 
-    # 4. update_server.sh 실행 (--skip-restart: git pull + bootstrap만)
-    echo "[$port] bootstrap 실행..."
-    device_ssh "$port" "cd ~/$PROJECT_DIR && bash device_config/update_server.sh $DEPLOY_BRANCH false initial-deploy-\$(date +%s) unknown --skip-restart" 2>/dev/null
+    # 4. update_server.sh 실행 (bootstrap + systemd 마이그레이션 포함)
+    echo "[$port] update_server.sh 실행..."
+    device_ssh "$port" "cd ~/$PROJECT_DIR && bash device_config/update_server.sh $DEPLOY_BRANCH false initial-deploy-\$(date +%s) unknown" 2>/dev/null
 
-    # 5. PM2 재시작 (NVM PATH 포함)
-    echo "[$port] PM2 재시작..."
-    device_ssh "$port" "
-        export PATH=\$(find /home/$DEVICE_USER/.nvm/versions/node -maxdepth 2 -name bin -type d 2>/dev/null | head -1):\$PATH
-        cd ~/$PROJECT_DIR
-        pm2 restart wm-mqtt --update-env 2>/dev/null || pm2 start mqtt.py --name wm-mqtt --interpreter python3 --cwd ~/$PROJECT_DIR 2>/dev/null
-        pm2 restart wm-app --update-env 2>/dev/null || pm2 start app.py --name wm-app --interpreter python3 --cwd ~/$PROJECT_DIR 2>/dev/null
-        pm2 restart wm-ruleEngine --update-env 2>/dev/null || pm2 start sub/ruleEngine.py --name wm-ruleEngine --interpreter python3 --cwd ~/$PROJECT_DIR 2>/dev/null
-        pm2 restart wm-notifier --update-env 2>/dev/null || pm2 start sub/notifier.py --name wm-notifier --interpreter python3 --cwd ~/$PROJECT_DIR 2>/dev/null
-        pm2 save 2>/dev/null
-    " 2>/dev/null
-
-    # 6. 검증
+    # 5. 검증
     echo "[$port] 검증..."
     local verify
     verify=$(device_ssh "$port" "
-        export PATH=\$(find /home/$DEVICE_USER/.nvm/versions/node -maxdepth 2 -name bin -type d 2>/dev/null | head -1):\$PATH
         cd ~/$PROJECT_DIR
         COMMIT=\$(git log --oneline -1)
-        MQTT_STATUS=\$(pm2 describe wm-mqtt 2>/dev/null | grep -o 'online' | head -1)
+        MQTT_STATUS=\$(systemctl is-active matterhub-mqtt 2>/dev/null || echo inactive)
+        API_STATUS=\$(systemctl is-active matterhub-api 2>/dev/null || echo inactive)
         HUB_ID=\$(grep -oP 'matterhub_id\s*=\s*\"?\K[^\"]+' .env 2>/dev/null)
         SUBSCRIBE=\$(grep SUBSCRIBE_MATTERHUB_TOPICS .env 2>/dev/null | grep -o '1')
-        echo \"commit=\$COMMIT mqtt=\$MQTT_STATUS hub_id=\$HUB_ID subscribe=\$SUBSCRIBE\"
+        echo \"commit=\$COMMIT mqtt=\$MQTT_STATUS api=\$API_STATUS hub_id=\$HUB_ID subscribe=\$SUBSCRIBE\"
     " 2>/dev/null)
 
     echo "[$port] $verify"
 
-    if echo "$verify" | grep -q "mqtt=online"; then
+    if echo "$verify" | grep -q "mqtt=active"; then
         status="OK"
     else
         status="WARN"

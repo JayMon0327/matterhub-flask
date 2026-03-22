@@ -400,6 +400,13 @@ auto_bootstrap() {
     if has_sudo; then
         ensure_nopasswd_sudoers
     fi
+    # systemd 마이그레이션 (멱등성: 이미 설치되어 있으면 skip)
+    local migrate_script="$PROJECT_ROOT/device_config/migrate_pm2_to_systemd.sh"
+    if [ -f "$migrate_script" ] && has_sudo; then
+        echo "[INFO] systemd 마이그레이션 스크립트 실행" | tee -a "$LOG_FILE"
+        bash "$migrate_script" 2>&1 | tee -a "$LOG_FILE" || \
+            echo "[WARN] systemd 마이그레이션 실패 (PM2 fallback 유지)" | tee -a "$LOG_FILE"
+    fi
     echo "[INFO] 자동 부트스트랩 완료" | tee -a "$LOG_FILE"
 }
 
@@ -516,8 +523,12 @@ CURRENT_COMMIT=$(git rev-parse HEAD)
 LATEST_COMMIT=$(git log -1 --oneline)
 echo "[INFO] 최신 커밋: $LATEST_COMMIT" | tee -a "$LOG_FILE"
 
-# ── 자동 부트스트랩 실행: cert 심링크, .env, sudoers, venv ──
+# ── 자동 부트스트랩 실행: cert 심링크, .env, sudoers, venv, systemd 마이그레이션 ──
 auto_bootstrap
+
+# 마이그레이션 후 프로세스 매니저 재감지 (PM2→systemd 전환 반영)
+PROC_MANAGER="$(detect_process_manager)"
+echo "[INFO] 프로세스 매니저 (부트스트랩 후): $PROC_MANAGER" | tee -a "$LOG_FILE"
 
 # ── --skip-restart 모드: 상태 파일만 작성하고 종료 ──
 if [ "$SKIP_RESTART" = "true" ]; then
