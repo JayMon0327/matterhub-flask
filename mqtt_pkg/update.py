@@ -46,7 +46,7 @@ def send_immediate_response(message: Dict[str, Any], status: str = "processing")
         "update_id": message.get("update_id"),
         "hub_id": matterhub_id,
         "timestamp": int(time.time()),
-        "command": "git_update",
+        "command": message.get("command", "git_update"),
         "status": status,
         "message": f"Update command received and {status}",
     }
@@ -60,7 +60,7 @@ def send_final_response(message: Dict[str, Any], result: Dict[str, Any]) -> None
         "update_id": message.get("update_id"),
         "hub_id": matterhub_id,
         "timestamp": int(time.time()),
-        "command": "git_update",
+        "command": message.get("command", "git_update"),
         "status": "success" if result.get("success") else "failed",
         "result": result,
     }
@@ -77,7 +77,7 @@ def send_error_response(message: Dict[str, Any], error_msg: str) -> None:
         "update_id": message.get("update_id"),
         "hub_id": matterhub_id,
         "timestamp": int(time.time()),
-        "command": "git_update",
+        "command": message.get("command", "git_update"),
         "status": "failed",
         "error": error_msg,
     }
