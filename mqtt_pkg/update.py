@@ -307,15 +307,23 @@ def process_update_queue() -> None:
             with update_queue_lock:
                 is_processing_update = True
 
-            print(f"업데이트 큐 처리: {message.get('update_id')}")
-            execute_update_async(message)
+            command = message.get("command")
+            print(f"업데이트 큐 처리: command={command}, update_id={message.get('update_id')}")
+
+            if command == "set_env":
+                _handle_set_env(message)
+            elif command == "bundle_update":
+                _handle_bundle_update(message)
+            elif command == "bundle_check":
+                _handle_bundle_check(message)
+            else:
+                # git_update (default)
+                send_immediate_response(message, status="processing")
+                execute_update_async(message)
 
             with update_queue_lock:
                 is_processing_update = False
-
             update_queue.task_done()
-            print(f"✅ 큐 업데이트 완료: {message.get('update_id')}")
-
         except Exception as exc:
             print(f"❌ 큐 처리 중 오류: {exc}")
             with update_queue_lock:
@@ -442,28 +450,10 @@ def handle_update_command(message: Dict[str, Any]) -> None:
         command = message.get("command")
         update_id = message.get("update_id", "unknown")
         print(f"📥 업데이트 명령 수신: command={command}, update_id={update_id}")
-
-        if command == "set_env":
-            _handle_set_env(message)
-            return
-
-        if command == "bundle_update":
-            _handle_bundle_update(message)
-            return
-
-        if command == "bundle_check":
-            _handle_bundle_check(message)
-            return
-
-        # 기존 git_update 로직 (default)
-        send_immediate_response(message, status="processing")
-
         update_queue.put(message)
         print(f"📋 업데이트 큐에 추가됨: {update_id}")
-
     except Exception as exc:
-        print(f"❌ Git 업데이트 실패: {exc}")
-        send_error_response(message, str(exc))
+        print(f"❌ 업데이트 명령 큐 추가 실패: {exc}")
 
 
 def start_queue_worker() -> threading.Thread:

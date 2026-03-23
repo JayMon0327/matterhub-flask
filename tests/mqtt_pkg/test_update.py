@@ -30,10 +30,9 @@ class HandleUpdateCommandTest(unittest.TestCase):
     def setUpClass(cls):
         _ensure_real_mqtt_pkg()
 
-    @patch("mqtt_pkg.update.send_immediate_response")
     @patch("mqtt_pkg.update.runtime")
     @patch("mqtt_pkg.update.settings")
-    def test_enqueues_message(self, mock_settings, mock_runtime, mock_send_imm):
+    def test_enqueues_message(self, mock_settings, mock_runtime):
         mock_settings.MATTERHUB_ID = "test-hub"
         from mqtt_pkg.update import handle_update_command, update_queue
 
@@ -49,32 +48,26 @@ class HandleUpdateCommandTest(unittest.TestCase):
 
         handle_update_command(message)
 
-        # immediate response가 호출되어야 함
-        mock_send_imm.assert_called_once_with(message, status="processing")
-
         # 큐에 메시지가 들어가야 함
         self.assertFalse(update_queue.empty())
         queued = update_queue.get_nowait()
         self.assertEqual(queued["update_id"], "test-update-001")
 
-    @patch("mqtt_pkg.update.send_error_response")
-    @patch("mqtt_pkg.update.send_immediate_response", side_effect=Exception("boom"))
     @patch("mqtt_pkg.update.runtime")
     @patch("mqtt_pkg.update.settings")
-    def test_sends_error_on_exception(
-        self, mock_settings, mock_runtime, mock_send_imm, mock_send_err
-    ):
+    def test_enqueues_all_commands(self, mock_settings, mock_runtime):
+        """set_env, bundle_update, bundle_check도 큐에 들어가야 함"""
         mock_settings.MATTERHUB_ID = "test-hub"
-        from mqtt_pkg.update import handle_update_command
+        from mqtt_pkg.update import handle_update_command, update_queue
 
-        message = {"command": "git_update", "update_id": "fail-001"}
+        # 큐 비우기
+        while not update_queue.empty():
+            update_queue.get_nowait()
 
-        handle_update_command(message)
+        for cmd in ["set_env", "bundle_update", "bundle_check", "git_update"]:
+            handle_update_command({"command": cmd, "update_id": f"{cmd}-001"})
 
-        mock_send_err.assert_called_once()
-        args = mock_send_err.call_args
-        self.assertEqual(args[0][0], message)
-        self.assertIn("boom", args[0][1])
+        self.assertEqual(update_queue.qsize(), 4)
 
 
 class SetEnvCommandTest(unittest.TestCase):
@@ -92,7 +85,7 @@ class SetEnvCommandTest(unittest.TestCase):
         mock_settings.MATTERHUB_REGION = None
         mock_settings._persist_env_value = MagicMock()
 
-        from mqtt_pkg.update import handle_update_command
+        from mqtt_pkg.update import _handle_set_env
 
         message = {
             "command": "set_env",
@@ -101,7 +94,7 @@ class SetEnvCommandTest(unittest.TestCase):
             "value": "gangnam",
         }
 
-        handle_update_command(message)
+        _handle_set_env(message)
 
         mock_settings._persist_env_value.assert_called_once_with("MATTERHUB_REGION", '"gangnam"')
         mock_send_final.assert_called_once()
@@ -118,7 +111,7 @@ class SetEnvCommandTest(unittest.TestCase):
         mock_settings.MATTERHUB_REGION = None
         mock_settings._persist_env_value = MagicMock()
 
-        from mqtt_pkg.update import handle_update_command
+        from mqtt_pkg.update import _handle_set_env
 
         message = {
             "command": "set_env",
@@ -128,7 +121,7 @@ class SetEnvCommandTest(unittest.TestCase):
             "restart": True,
         }
 
-        handle_update_command(message)
+        _handle_set_env(message)
 
         result = mock_send_final.call_args[0][1]
         self.assertTrue(result["restart"])
@@ -140,7 +133,7 @@ class SetEnvCommandTest(unittest.TestCase):
     def test_set_env_rejects_disallowed_key(self, mock_runtime, mock_settings, mock_send_err):
         mock_settings.MATTERHUB_ID = "test-hub"
 
-        from mqtt_pkg.update import handle_update_command
+        from mqtt_pkg.update import _handle_set_env
 
         message = {
             "command": "set_env",
@@ -149,7 +142,7 @@ class SetEnvCommandTest(unittest.TestCase):
             "value": "stolen",
         }
 
-        handle_update_command(message)
+        _handle_set_env(message)
 
         mock_send_err.assert_called_once()
         self.assertIn("not allowed", mock_send_err.call_args[0][1])
@@ -160,7 +153,7 @@ class SetEnvCommandTest(unittest.TestCase):
     def test_set_env_rejects_empty_key(self, mock_runtime, mock_settings, mock_send_err):
         mock_settings.MATTERHUB_ID = "test-hub"
 
-        from mqtt_pkg.update import handle_update_command
+        from mqtt_pkg.update import _handle_set_env
 
         message = {
             "command": "set_env",
@@ -169,7 +162,7 @@ class SetEnvCommandTest(unittest.TestCase):
             "value": "gangnam",
         }
 
-        handle_update_command(message)
+        _handle_set_env(message)
 
         mock_send_err.assert_called_once()
         self.assertIn("required", mock_send_err.call_args[0][1])
@@ -210,8 +203,8 @@ class BundleUpdateCommandTest(unittest.TestCase):
                 "sha256": "abc123",
             }
 
-            from mqtt_pkg.update import handle_update_command
-            handle_update_command(message)
+            from mqtt_pkg.update import _handle_bundle_update
+            _handle_bundle_update(message)
 
             mock_send_imm.assert_called_once_with(message, status="downloading")
             mock_send_final.assert_called_once()
@@ -228,14 +221,14 @@ class BundleUpdateCommandTest(unittest.TestCase):
     ):
         mock_settings.MATTERHUB_ID = "test-hub"
 
-        from mqtt_pkg.update import handle_update_command
+        from mqtt_pkg.update import _handle_bundle_update
 
         message = {
             "command": "bundle_update",
             "update_id": "bundle-002",
         }
 
-        handle_update_command(message)
+        _handle_bundle_update(message)
 
         mock_send_err.assert_called_once()
         self.assertIn("url is required", mock_send_err.call_args[0][1])
@@ -274,8 +267,8 @@ class BundleCheckCommandTest(unittest.TestCase):
                 "update_id": "check-001",
             }
 
-            from mqtt_pkg.update import handle_update_command
-            handle_update_command(message)
+            from mqtt_pkg.update import _handle_bundle_check
+            _handle_bundle_check(message)
 
             mock_send_imm.assert_called_once_with(message, status="processing")
             mock_send_final.assert_called_once()
