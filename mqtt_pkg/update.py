@@ -375,6 +375,68 @@ def _handle_set_env(message: Dict[str, Any]) -> None:
         send_error_response(message, str(exc))
 
 
+def _handle_bundle_update(message: Dict[str, Any]) -> None:
+    """URL에서 번들 다운로드 → inbox에 저장. 적용은 update_agent 서비스가 수행."""
+    import update_agent
+
+    update_id = message.get("update_id", "unknown")
+    url = message.get("url", "").strip()
+    sha256_hint = message.get("sha256", "").strip()
+
+    if not url:
+        send_error_response(message, "url is required for bundle_update")
+        return
+
+    send_immediate_response(message, status="downloading")
+
+    try:
+        config = update_agent.load_config()
+        dest = update_agent.download_bundle(url, config.inbox_dir, sha256_hint=sha256_hint)
+        inbox_bundles = update_agent.list_inbox(config.inbox_dir)
+
+        result = {
+            "success": True,
+            "message": f"Bundle delivered to inbox: {dest.name}",
+            "update_id": update_id,
+            "bundle_name": dest.name,
+            "bundle_size": dest.stat().st_size,
+            "inbox_pending": len(inbox_bundles),
+            "timestamp": int(time.time()),
+        }
+        send_final_response(message, result)
+        print(f"✅ bundle_update 완료: {dest.name} -> inbox ({len(inbox_bundles)}개 대기)")
+
+    except Exception as exc:
+        print(f"❌ bundle_update 실패: {exc}")
+        send_error_response(message, str(exc))
+
+
+def _handle_bundle_check(message: Dict[str, Any]) -> None:
+    """inbox 상태 확인 후 응답. 다운로드/적용 없이 현재 상태만 보고."""
+    import update_agent
+
+    send_immediate_response(message, status="processing")
+
+    try:
+        config = update_agent.load_config()
+        inbox_bundles = update_agent.list_inbox(config.inbox_dir)
+
+        result = {
+            "success": True,
+            "message": f"{len(inbox_bundles)} bundle(s) pending in inbox",
+            "update_id": message.get("update_id", "unknown"),
+            "inbox_pending": len(inbox_bundles),
+            "bundles": inbox_bundles,
+            "timestamp": int(time.time()),
+        }
+        send_final_response(message, result)
+        print(f"✅ bundle_check 완료: {len(inbox_bundles)}개 대기")
+
+    except Exception as exc:
+        print(f"❌ bundle_check 실패: {exc}")
+        send_error_response(message, str(exc))
+
+
 def handle_update_command(message: Dict[str, Any]) -> None:
     try:
         command = message.get("command")
@@ -385,6 +447,15 @@ def handle_update_command(message: Dict[str, Any]) -> None:
             _handle_set_env(message)
             return
 
+        if command == "bundle_update":
+            _handle_bundle_update(message)
+            return
+
+        if command == "bundle_check":
+            _handle_bundle_check(message)
+            return
+
+        # 기존 git_update 로직 (default)
         send_immediate_response(message, status="processing")
 
         update_queue.put(message)
