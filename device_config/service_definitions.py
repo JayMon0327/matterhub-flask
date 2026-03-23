@@ -47,6 +47,21 @@ API_HARDENING_DIRECTIVES: tuple[str, ...] = tuple(
 
 
 
+# update-agent는 root로 실행 → CapabilityBoundingSet= (빈값)은
+# root의 모든 capability를 제거하여 파일 접근 실패를 유발함.
+# 필요한 capability만 명시적으로 허용.
+UPDATE_AGENT_HARDENING_DIRECTIVES: tuple[str, ...] = (
+    "PrivateTmp=true",
+    "ProtectSystem=false",
+    "ProtectControlGroups=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelModules=true",
+    "LockPersonality=true",
+    "RestrictRealtime=true",
+    "UMask=0077",
+)
+
+
 SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
     ServiceDefinition(
         service_name="matterhub-api",
@@ -88,7 +103,7 @@ SERVICE_DEFINITIONS: tuple[ServiceDefinition, ...] = (
         description="MatterHub Update Agent",
         script_path=Path("update_agent.py"),
         run_user_override="root",
-        hardening_directives=DEFAULT_HARDENING_DIRECTIVES,
+        hardening_directives=UPDATE_AGENT_HARDENING_DIRECTIVES,
     ),
 )
 
