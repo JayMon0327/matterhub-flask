@@ -107,7 +107,8 @@ ensure_venv() {
         if python3 -m venv --system-site-packages "$venv_dir" 2>/dev/null; then
             echo "[INFO] venv 생성 완료: $venv_dir" | tee -a "$LOG_FILE"
         else
-            echo "[WARN] venv 생성 실패 (python3-venv 미설치?). 시스템 Python으로 계속" | tee -a "$LOG_FILE"
+            echo "[WARN] venv 생성 실패 (python3-venv 미설치?). 부서진 venv 삭제, 시스템 Python으로 계속" | tee -a "$LOG_FILE"
+            rm -rf "$venv_dir"
         fi
     fi
 }

@@ -84,14 +84,29 @@ RUN_USER="$(detect_run_user)"
 log "[INFO] 실행 유저: $RUN_USER"
 
 # ── venv 확인/생성 ──
+cleanup_broken_venv() {
+    local venv_dir="$PROJECT_ROOT/venv"
+    if [ -d "$venv_dir" ] && [ -f "$venv_dir/bin/python" ]; then
+        if ! "$venv_dir/bin/python" -c "import requests" 2>/dev/null; then
+            log "[INFO] 부서진 venv 삭제 ($venv_dir)"
+            rm -rf "$venv_dir"
+        fi
+    elif [ -d "$venv_dir" ] && [ ! -f "$venv_dir/bin/python" ]; then
+        log "[INFO] 불완전한 venv 삭제"
+        rm -rf "$venv_dir"
+    fi
+}
+
 ensure_venv() {
     local venv_dir="$PROJECT_ROOT/venv"
+    cleanup_broken_venv
     if [ ! -f "$venv_dir/bin/python" ]; then
         log "[INFO] venv 생성 중 (--system-site-packages)..."
         if python3 -m venv --system-site-packages "$venv_dir" 2>/dev/null; then
             log "[INFO] venv 생성 완료"
         else
-            log "[WARN] venv 생성 실패. 시스템 python3 사용"
+            log "[WARN] venv 생성 실패 — 부서진 venv 삭제, 시스템 python3 사용"
+            rm -rf "$venv_dir"
         fi
     fi
 }
