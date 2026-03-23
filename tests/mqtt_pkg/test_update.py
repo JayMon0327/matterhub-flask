@@ -175,5 +175,115 @@ class SetEnvCommandTest(unittest.TestCase):
         self.assertIn("required", mock_send_err.call_args[0][1])
 
 
+class BundleUpdateCommandTest(unittest.TestCase):
+    """bundle_update 명령 처리 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update.send_immediate_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_bundle_update_downloads_and_responds(
+        self, mock_runtime, mock_settings, mock_send_imm, mock_send_final
+    ):
+        mock_settings.MATTERHUB_ID = "test-hub"
+
+        mock_ua = MagicMock()
+        mock_config = MagicMock()
+        mock_config.inbox_dir = Path("/tmp/fake-inbox")
+        mock_dest = MagicMock()
+        mock_dest.name = "bundle-v1.2.tar.gz"
+        mock_dest.stat.return_value.st_size = 12345
+
+        mock_ua.load_config.return_value = mock_config
+        mock_ua.download_bundle.return_value = mock_dest
+        mock_ua.list_inbox.return_value = [{"name": "bundle-v1.2.tar.gz", "size": 12345, "mtime": 1000}]
+
+        with patch.dict("sys.modules", {"update_agent": mock_ua}):
+            message = {
+                "command": "bundle_update",
+                "update_id": "bundle-001",
+                "url": "https://s3.example.com/bundle-v1.2.tar.gz",
+                "sha256": "abc123",
+            }
+
+            from mqtt_pkg.update import handle_update_command
+            handle_update_command(message)
+
+            mock_send_imm.assert_called_once_with(message, status="downloading")
+            mock_send_final.assert_called_once()
+            result = mock_send_final.call_args[0][1]
+            self.assertTrue(result["success"])
+            self.assertEqual("bundle-v1.2.tar.gz", result["bundle_name"])
+            self.assertEqual(1, result["inbox_pending"])
+
+    @patch("mqtt_pkg.update.send_error_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_bundle_update_rejects_missing_url(
+        self, mock_runtime, mock_settings, mock_send_err
+    ):
+        mock_settings.MATTERHUB_ID = "test-hub"
+
+        from mqtt_pkg.update import handle_update_command
+
+        message = {
+            "command": "bundle_update",
+            "update_id": "bundle-002",
+        }
+
+        handle_update_command(message)
+
+        mock_send_err.assert_called_once()
+        self.assertIn("url is required", mock_send_err.call_args[0][1])
+
+
+class BundleCheckCommandTest(unittest.TestCase):
+    """bundle_check 명령 처리 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update.send_immediate_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_bundle_check_returns_inbox_status(
+        self, mock_runtime, mock_settings, mock_send_imm, mock_send_final
+    ):
+        mock_settings.MATTERHUB_ID = "test-hub"
+
+        mock_ua = MagicMock()
+        mock_config = MagicMock()
+        mock_config.inbox_dir = Path("/tmp/fake-inbox")
+        fake_bundles = [
+            {"name": "a.tar.gz", "size": 100, "mtime": 1000},
+            {"name": "b.tar.gz", "size": 200, "mtime": 2000},
+        ]
+
+        mock_ua.load_config.return_value = mock_config
+        mock_ua.list_inbox.return_value = fake_bundles
+
+        with patch.dict("sys.modules", {"update_agent": mock_ua}):
+            message = {
+                "command": "bundle_check",
+                "update_id": "check-001",
+            }
+
+            from mqtt_pkg.update import handle_update_command
+            handle_update_command(message)
+
+            mock_send_imm.assert_called_once_with(message, status="processing")
+            mock_send_final.assert_called_once()
+            result = mock_send_final.call_args[0][1]
+            self.assertTrue(result["success"])
+            self.assertEqual(2, result["inbox_pending"])
+            self.assertEqual(2, len(result["bundles"]))
+
+
 if __name__ == "__main__":
     unittest.main()

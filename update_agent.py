@@ -9,7 +9,7 @@ import tarfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 try:
     from dotenv import load_dotenv
@@ -237,6 +237,56 @@ def process_once(config: UpdateAgentConfig, runner: Runner = _default_runner) ->
             print(f"[UPDATE_AGENT][FAIL] apply rc={rc} -> {archived}")
             overall_rc = rc
     return overall_rc
+
+
+def download_bundle(url: str, inbox_dir: Path, sha256_hint: str = "", timeout: int = 120) -> Path:
+    """URL에서 번들 다운로드 → inbox_dir에 저장 → 파일 경로 반환.
+
+    sha256_hint가 주어지면 .sha256 사이드카 파일도 함께 생성한다.
+    URL 끝에 .sha256 파일이 있으면 자동으로 다운로드 시도한다.
+    """
+    import urllib.request
+
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일명 추출
+    filename = url.rsplit("/", 1)[-1] if "/" in url else ""
+    if not filename or not filename.endswith(".tar.gz"):
+        filename = f"bundle_{int(time.time())}.tar.gz"
+
+    dest = inbox_dir / filename
+
+    print(f"[UPDATE_AGENT] downloading bundle: {url} -> {dest}")
+    urllib.request.urlretrieve(url, str(dest))
+    print(f"[UPDATE_AGENT] download complete: {dest} ({dest.stat().st_size} bytes)")
+
+    # SHA256 사이드카 처리
+    sidecar = _sha256_path(dest)
+    if sha256_hint:
+        sidecar.write_text(sha256_hint + "\n", encoding="utf-8")
+        print(f"[UPDATE_AGENT] sha256 sidecar written from hint: {sidecar}")
+    else:
+        # URL+".sha256" 에서 사이드카 다운로드 시도
+        try:
+            urllib.request.urlretrieve(url + ".sha256", str(sidecar))
+            print(f"[UPDATE_AGENT] sha256 sidecar downloaded: {sidecar}")
+        except Exception:
+            pass  # 사이드카 없어도 OK (require_sha256=False가 기본)
+
+    return dest
+
+
+def list_inbox(inbox_dir: Path) -> list[dict[str, Any]]:
+    """inbox 디렉토리의 번들 목록 반환 (상태 확인용)."""
+    bundles = discover_bundles(inbox_dir)
+    result = []
+    for b in bundles:
+        result.append({
+            "name": b.name,
+            "size": b.stat().st_size,
+            "mtime": int(b.stat().st_mtime),
+        })
+    return result
 
 
 def run_forever(config: UpdateAgentConfig, runner: Runner = _default_runner) -> int:

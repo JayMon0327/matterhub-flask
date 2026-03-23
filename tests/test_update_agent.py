@@ -8,9 +8,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from unittest.mock import patch, MagicMock
+
 from update_agent import (
     UpdateAgentConfig,
     discover_bundles,
+    download_bundle,
+    list_inbox,
     load_config,
     process_once,
     verify_bundle,
@@ -188,6 +192,98 @@ class UpdateAgentTest(unittest.TestCase):
             self.assertEqual(4, rc)
             self.assertEqual(0, called["count"])
             self.assertEqual(1, len(list((root / "failed").glob("*.tar.gz"))))
+
+
+class DownloadBundleTest(unittest.TestCase):
+    """download_bundle 함수 검증"""
+
+    @patch("urllib.request.urlretrieve")
+    def test_download_saves_file_to_inbox(self, mock_urlretrieve):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = Path(temp_dir) / "inbox"
+            url = "https://s3.example.com/bundles/matterhub-v1.2.tar.gz"
+
+            def fake_urlretrieve(remote_url, local_path):
+                Path(local_path).write_bytes(b"fake-bundle-data")
+
+            mock_urlretrieve.side_effect = fake_urlretrieve
+
+            dest = download_bundle(url, inbox)
+
+            self.assertTrue(inbox.exists())
+            self.assertEqual("matterhub-v1.2.tar.gz", dest.name)
+            self.assertEqual(b"fake-bundle-data", dest.read_bytes())
+            # 번들 다운로드 + sha256 사이드카 시도 = 2번 호출
+            self.assertEqual(2, mock_urlretrieve.call_count)
+
+    @patch("urllib.request.urlretrieve")
+    def test_download_writes_sha256_sidecar_from_hint(self, mock_urlretrieve):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = Path(temp_dir) / "inbox"
+            url = "https://s3.example.com/bundles/bundle.tar.gz"
+
+            def fake_urlretrieve(remote_url, local_path):
+                Path(local_path).write_bytes(b"data")
+
+            mock_urlretrieve.side_effect = fake_urlretrieve
+
+            dest = download_bundle(url, inbox, sha256_hint="abc123def456")
+
+            sidecar = dest.with_name(f"{dest.name}.sha256")
+            self.assertTrue(sidecar.exists())
+            self.assertEqual("abc123def456", sidecar.read_text(encoding="utf-8").strip())
+            # sha256 힌트가 있으면 사이드카 다운로드 시도 안 함 → 1번만 호출
+            self.assertEqual(1, mock_urlretrieve.call_count)
+
+    @patch("urllib.request.urlretrieve")
+    def test_download_generates_fallback_filename_for_non_tar_gz_url(self, mock_urlretrieve):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = Path(temp_dir) / "inbox"
+            url = "https://s3.example.com/bundles/download?token=abc"
+
+            def fake_urlretrieve(remote_url, local_path):
+                Path(local_path).write_bytes(b"data")
+
+            mock_urlretrieve.side_effect = fake_urlretrieve
+
+            dest = download_bundle(url, inbox)
+
+            self.assertTrue(dest.name.startswith("bundle_"))
+            self.assertTrue(dest.name.endswith(".tar.gz"))
+
+
+class ListInboxTest(unittest.TestCase):
+    """list_inbox 함수 검증"""
+
+    def test_list_inbox_returns_bundle_info(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = Path(temp_dir)
+            bundle = inbox / "test.tar.gz"
+            _create_bundle(bundle)
+
+            result = list_inbox(inbox)
+
+            self.assertEqual(1, len(result))
+            self.assertEqual("test.tar.gz", result[0]["name"])
+            self.assertIn("size", result[0])
+            self.assertIn("mtime", result[0])
+            self.assertGreater(result[0]["size"], 0)
+
+    def test_list_inbox_returns_empty_for_missing_dir(self):
+        result = list_inbox(Path("/nonexistent/path/inbox"))
+        self.assertEqual([], result)
+
+    def test_list_inbox_ignores_non_tar_gz_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = Path(temp_dir)
+            (inbox / "readme.txt").write_text("hello", encoding="utf-8")
+            bundle = inbox / "real.tar.gz"
+            _create_bundle(bundle)
+
+            result = list_inbox(inbox)
+
+            self.assertEqual(1, len(result))
+            self.assertEqual("real.tar.gz", result[0]["name"])
 
 
 if __name__ == "__main__":
