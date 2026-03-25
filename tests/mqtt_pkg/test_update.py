@@ -77,10 +77,11 @@ class SetEnvCommandTest(unittest.TestCase):
     def setUpClass(cls):
         _ensure_real_mqtt_pkg()
 
+    @patch("mqtt_pkg.update._launch_restart")
     @patch("mqtt_pkg.update.send_final_response")
     @patch("mqtt_pkg.update.settings")
     @patch("mqtt_pkg.update.runtime")
-    def test_set_env_updates_allowed_key(self, mock_runtime, mock_settings, mock_send_final):
+    def test_set_env_updates_allowed_key(self, mock_runtime, mock_settings, mock_send_final, mock_restart):
         mock_settings.MATTERHUB_ID = "test-hub"
         mock_settings.MATTERHUB_REGION = None
         mock_settings._persist_env_value = MagicMock()
@@ -276,6 +277,108 @@ class BundleCheckCommandTest(unittest.TestCase):
             self.assertTrue(result["success"])
             self.assertEqual(2, result["inbox_pending"])
             self.assertEqual(2, len(result["bundles"]))
+
+
+class SetEnvRegionAutoRestartTest(unittest.TestCase):
+    """MATTERHUB_REGION 변경 시 자동 재시작 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update._launch_restart")
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_region_forces_restart(self, mock_runtime, mock_settings, mock_send_final, mock_restart):
+        """MATTERHUB_REGION 변경 시 restart=False여도 _launch_restart 호출"""
+        mock_settings.MATTERHUB_ID = "test-hub"
+        mock_settings.MATTERHUB_REGION = None
+        mock_settings._persist_env_value = MagicMock()
+
+        from mqtt_pkg.update import _handle_set_env
+
+        message = {
+            "command": "set_env",
+            "update_id": "region-auto-001",
+            "key": "MATTERHUB_REGION",
+            "value": "gangnam",
+            # restart 없음 (기본값 False)
+        }
+
+        _handle_set_env(message)
+
+        mock_restart.assert_called_once_with("region-auto-001")
+
+    @patch("mqtt_pkg.update._launch_restart")
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_non_region_key_no_forced_restart(self, mock_runtime, mock_settings, mock_send_final, mock_restart):
+        """MATTERHUB_REGION 외 키 변경 시 restart 강제 안됨"""
+        mock_settings.MATTERHUB_ID = "test-hub"
+        mock_settings._persist_env_value = MagicMock()
+
+        from mqtt_pkg.update import _handle_set_env
+
+        message = {
+            "command": "set_env",
+            "update_id": "throttle-001",
+            "key": "MQTT_EVENT_THROTTLE_SEC",
+            "value": "10",
+            # restart 없음
+        }
+
+        _handle_set_env(message)
+
+        mock_restart.assert_not_called()
+
+
+class ResponsePhaseFieldTest(unittest.TestCase):
+    """응답 메시지에 phase 필드 포함 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update._publish_response")
+    @patch("mqtt_pkg.update.settings")
+    def test_immediate_response_has_ack_phase(self, mock_settings, mock_publish):
+        mock_settings.MATTERHUB_ID = "test-hub"
+        from mqtt_pkg.update import send_immediate_response
+
+        send_immediate_response({"update_id": "test-001", "command": "git_update"}, status="processing")
+
+        payload = mock_publish.call_args[0][0]
+        self.assertEqual(payload["phase"], "ack")
+        self.assertEqual(payload["status"], "processing")
+
+    @patch("mqtt_pkg.update._publish_response")
+    @patch("mqtt_pkg.update.settings")
+    def test_final_response_has_result_phase(self, mock_settings, mock_publish):
+        mock_settings.MATTERHUB_ID = "test-hub"
+        from mqtt_pkg.update import send_final_response
+
+        send_final_response(
+            {"update_id": "test-002", "command": "git_update"},
+            {"success": True},
+        )
+
+        payload = mock_publish.call_args[0][0]
+        self.assertEqual(payload["phase"], "result")
+        self.assertEqual(payload["status"], "success")
+
+    @patch("mqtt_pkg.update._publish_response")
+    @patch("mqtt_pkg.update.settings")
+    def test_error_response_has_result_phase(self, mock_settings, mock_publish):
+        mock_settings.MATTERHUB_ID = "test-hub"
+        from mqtt_pkg.update import send_error_response
+
+        send_error_response({"update_id": "test-003", "command": "git_update"}, "something broke")
+
+        payload = mock_publish.call_args[0][0]
+        self.assertEqual(payload["phase"], "result")
+        self.assertEqual(payload["status"], "failed")
 
 
 if __name__ == "__main__":

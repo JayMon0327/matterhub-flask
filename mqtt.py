@@ -177,7 +177,7 @@ def main() -> None:
             connection_check_counter += 1
             if connection_check_counter >= 12:
                 runtime.check_mqtt_connection(
-                    topics,
+                    build_subscribe_topics(),
                     callbacks.mqtt_callback,
                     lambda: aws_client,
                 )

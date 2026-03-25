@@ -91,6 +91,7 @@ SUBSCRIBE_MATTERHUB_TOPICS = os.environ.get("SUBSCRIBE_MATTERHUB_TOPICS", "1") !
 
 MATTERHUB_ID = _strip_quotes(os.environ.get("matterhub_id"))
 MATTERHUB_REGION = _strip_quotes(os.environ.get("MATTERHUB_REGION"))
+SUDO_PASSWORD = _strip_quotes(os.environ.get("SUDO_PASSWORD", ""))
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
