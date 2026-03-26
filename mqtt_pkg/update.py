@@ -233,29 +233,81 @@ _RESTART_SERVICES = (
 )
 
 
+def _find_render_script() -> Optional[str]:
+    """render_systemd_units.py 경로 탐색"""
+    for path in [
+        os.path.join(os.path.dirname(__file__), "../device_config/render_systemd_units.py"),
+        "./device_config/render_systemd_units.py",
+        "/opt/matterhub/device_config/render_systemd_units.py",
+        "/srv/matterhub/device_config/render_systemd_units.py",
+    ]:
+        resolved = os.path.abspath(path)
+        if os.path.exists(resolved):
+            return resolved
+    return None
+
+
+def _build_restart_script(sudo_pw: str, svc_list: str, log_file: str) -> str:
+    """서비스 재시작 bash 스크립트 생성.
+
+    systemd 유닛이 미설치된 장비(bare process)에서도 동작하도록,
+    유닛 존재 여부를 확인 후 없으면 render_systemd_units.py로 설치한다.
+    """
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    render_script = _find_render_script()
+
+    def _sudo(command: str) -> str:
+        if sudo_pw:
+            return f'echo "{sudo_pw}" | sudo -S {command}'
+        return f"sudo {command}"
+
+    lines = ["sleep 2"]
+
+    # systemd 유닛 존재 확인 → 없으면 설치
+    if render_script:
+        lines.append(
+            f"if ! systemctl list-unit-files matterhub-mqtt.service 2>/dev/null "
+            f"| grep -q matterhub-mqtt; then"
+        )
+        lines.append(f'  echo "[INFO] systemd 유닛 미설치 — 자동 설치 시작"')
+        lines.append(f'  RUN_USER=$(stat -c "%U" "{project_root}" 2>/dev/null '
+                     f'|| ls -ld "{project_root}" | awk \'{{print $3}}\')')
+        lines.append(f'  TMP_DIR=$(mktemp -d)')
+        lines.append(
+            f"  python3 {render_script} "
+            f'--project-root "{project_root}" '
+            f'--run-user "$RUN_USER" '
+            f'--output-dir "$TMP_DIR"'
+        )
+        lines.append('  for f in "$TMP_DIR"/matterhub-*.service; do')
+        lines.append('    [ -f "$f" ] || continue')
+        install_cmd = _sudo('install -m 0644 "$f" /etc/systemd/system/"$(basename "$f")"')
+        lines.append(f"    {install_cmd}")
+        lines.append("  done")
+        lines.append(f'  rm -rf "$TMP_DIR"')
+        lines.append(f"  {_sudo('systemctl daemon-reload')}")
+        lines.append(f"  {_sudo(f'systemctl enable {svc_list}')} 2>/dev/null || true")
+        lines.append(f'  echo "[INFO] systemd 유닛 설치 완료"')
+        lines.append(f"fi")
+
+    lines.append(f"{_sudo(f'systemctl restart {svc_list}')}")
+
+    return " && ".join(lines)
+
+
 def _launch_restart(update_id: str) -> None:
     """서비스 재시작을 별도 프로세스로 실행 (자기 자신도 재시작됨)
 
     setsid로 새 세션을 생성하여 systemd cgroup kill을 회피.
     sleep 2로 응답 전송 완료 후 재시작.
+    systemd 유닛 미설치 시 자동으로 render → install → enable 후 재시작.
     """
     log_file = f"/tmp/restart_{update_id}.log"
     sudo_pw = settings.SUDO_PASSWORD
     svc_list = " ".join(_RESTART_SERVICES)
 
-    if sudo_pw:
-        cmd = (
-            f"setsid bash -c '"
-            f"sleep 2 && echo \"{sudo_pw}\" | sudo -S systemctl restart {svc_list}"
-            f"' > {log_file} 2>&1 &"
-        )
-    else:
-        # NOPASSWD sudo 가정
-        cmd = (
-            f"setsid bash -c '"
-            f"sleep 2 && sudo systemctl restart {svc_list}"
-            f"' > {log_file} 2>&1 &"
-        )
+    restart_script = _build_restart_script(sudo_pw, svc_list, log_file)
+    cmd = f"setsid bash -c '{restart_script}' > {log_file} 2>&1 &"
 
     subprocess.run(cmd, shell=True)
     print(f"🔄 서비스 재시작 프로세스 시작됨: {log_file}")

@@ -334,6 +334,56 @@ class SetEnvRegionAutoRestartTest(unittest.TestCase):
         mock_restart.assert_not_called()
 
 
+class LaunchRestartTest(unittest.TestCase):
+    """_launch_restart / _build_restart_script 검증"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update.settings")
+    def test_launch_restart_uses_sudo_password(self, mock_settings):
+        """SUDO_PASSWORD 설정 시 sudo -S 방식 사용"""
+        mock_settings.SUDO_PASSWORD = "mypassword"
+        from mqtt_pkg.update import _build_restart_script
+        script = _build_restart_script("mypassword", "matterhub-mqtt matterhub-api", "/tmp/test.log")
+        self.assertIn("sudo -S", script)
+        self.assertIn("mypassword", script)
+
+    @patch("mqtt_pkg.update.settings")
+    def test_launch_restart_nopasswd_fallback(self, mock_settings):
+        """SUDO_PASSWORD 미설정 시 NOPASSWD sudo 사용"""
+        mock_settings.SUDO_PASSWORD = ""
+        from mqtt_pkg.update import _build_restart_script
+        script = _build_restart_script("", "matterhub-mqtt matterhub-api", "/tmp/test.log")
+        self.assertIn("sudo systemctl restart", script)
+        self.assertNotIn("sudo -S", script)
+
+    @patch("mqtt_pkg.update._find_render_script")
+    @patch("mqtt_pkg.update.settings")
+    def test_build_restart_script_includes_unit_install(self, mock_settings, mock_find):
+        """render_systemd_units.py 발견 시 유닛 설치 로직 포함"""
+        mock_settings.SUDO_PASSWORD = "pw123"
+        mock_find.return_value = "/opt/matterhub/device_config/render_systemd_units.py"
+        from mqtt_pkg.update import _build_restart_script
+        script = _build_restart_script("pw123", "matterhub-mqtt", "/tmp/test.log")
+        self.assertIn("systemctl list-unit-files", script)
+        self.assertIn("render_systemd_units.py", script)
+        self.assertIn("systemctl enable", script)
+        self.assertIn("daemon-reload", script)
+
+    @patch("mqtt_pkg.update._find_render_script")
+    @patch("mqtt_pkg.update.settings")
+    def test_build_restart_script_skips_install_when_no_render_script(self, mock_settings, mock_find):
+        """render_systemd_units.py 미발견 시 유닛 설치 로직 미포함"""
+        mock_settings.SUDO_PASSWORD = ""
+        mock_find.return_value = None
+        from mqtt_pkg.update import _build_restart_script
+        script = _build_restart_script("", "matterhub-mqtt", "/tmp/test.log")
+        self.assertNotIn("render_systemd_units.py", script)
+        self.assertIn("sudo systemctl restart", script)
+
+
 class ResponsePhaseFieldTest(unittest.TestCase):
     """응답 메시지에 phase 필드 포함 검증"""
 
