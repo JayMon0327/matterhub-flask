@@ -94,7 +94,10 @@ relay_ssh() {
 device_ssh() {
     local port="$1"
     shift
-    relay_ssh "ssh -p $port -i $DEVICE_KEY_ON_RELAY -o StrictHostKeyChecking=no -o ConnectTimeout=15 ${DEVICE_USER}@localhost '$*'"
+    # 중첩 인용부호 충돌 방지: heredoc으로 명령 전달
+    relay_ssh "ssh -p $port -i $DEVICE_KEY_ON_RELAY -o StrictHostKeyChecking=no -o ConnectTimeout=15 ${DEVICE_USER}@localhost bash -s" <<EOF
+$*
+EOF
 }
 
 # ── 재시도 포함 디바이스 SSH ──
@@ -150,8 +153,9 @@ deploy_one() {
             return 1
         fi
 
-        # 2. git fetch + reset (120초 타임아웃)
-        echo "[$port] git fetch + reset..."
+        # 2. stash/untracked 정리 + git fetch + reset (120초 타임아웃)
+        echo "[$port] git 정리 + fetch + reset..."
+        device_ssh "$port" "cd ~/$PROJECT_DIR && git stash drop 2>/dev/null; git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null" 2>/dev/null
         if ! device_ssh "$port" "cd ~/$PROJECT_DIR && timeout 120 git fetch origin $DEPLOY_BRANCH 2>&1 && git reset --hard origin/$DEPLOY_BRANCH 2>&1" 2>/dev/null; then
             echo "[FAIL] $port: git fetch/reset 실패"
             echo "$port    git fetch/reset 실패" >> "$RESULT_DIR/failed.txt"
@@ -163,14 +167,10 @@ deploy_one() {
         echo "[$port] sudoers 설정..."
         device_ssh "$port" "
             if [ ! -f /etc/sudoers.d/matterhub-update ]; then
-                echo '$SUDO_PASS' | sudo -S bash -c 'cat > /etc/sudoers.d/matterhub-update << SUDOEOF
-# MatterHub 업데이트 스크립트용 NOPASSWD 설정
-$DEVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/install, /usr/bin/systemd-run
-SUDOEOF
-chmod 0440 /etc/sudoers.d/matterhub-update'
-                echo 'sudoers OK'
+                echo ${SUDO_PASS} | sudo -S bash -c 'echo \"${DEVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/install, /usr/bin/systemd-run\" > /etc/sudoers.d/matterhub-update && chmod 0440 /etc/sudoers.d/matterhub-update'
+                echo sudoers OK
             else
-                echo 'sudoers already exists'
+                echo sudoers already exists
             fi
         " 2>/dev/null
 
