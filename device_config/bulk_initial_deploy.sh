@@ -153,15 +153,21 @@ deploy_one() {
             return 1
         fi
 
-        # 2. stash/untracked 정리 + git fetch + reset (120초 타임아웃)
-        echo "[$port] git 정리 + fetch + reset..."
+        # 2. resources/ 백업 + stash/untracked 정리 + git fetch + reset (120초 타임아웃)
+        echo "[$port] resources/ 백업 + git 정리 + fetch + reset..."
+        local res_backup="/tmp/matterhub_resources_backup_${port}"
+        device_ssh "$port" "cd ~/$PROJECT_DIR && if [ -d resources ]; then rm -rf $res_backup; cp -a resources $res_backup; echo resources_backed_up; fi" 2>/dev/null
         device_ssh "$port" "cd ~/$PROJECT_DIR && git stash drop 2>/dev/null; git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null" 2>/dev/null
         if ! device_ssh "$port" "cd ~/$PROJECT_DIR && timeout 120 git fetch origin $DEPLOY_BRANCH 2>&1 && git reset --hard origin/$DEPLOY_BRANCH 2>&1" 2>/dev/null; then
             echo "[FAIL] $port: git fetch/reset 실패"
+            # resources/ 복원 (실패 시에도)
+            device_ssh "$port" "cd ~/$PROJECT_DIR && if [ -d $res_backup ]; then mkdir -p resources; cp -a $res_backup/. resources/; rm -rf $res_backup; echo resources_restored; fi" 2>/dev/null
             echo "$port    git fetch/reset 실패" >> "$RESULT_DIR/failed.txt"
             echo "$port,FAIL_GIT,,,," >> "$RESULT_DIR/results.csv"
             return 1
         fi
+        # resources/ 복원 (성공 시)
+        device_ssh "$port" "cd ~/$PROJECT_DIR && if [ -d $res_backup ]; then mkdir -p resources; cp -a $res_backup/. resources/; rm -rf $res_backup; echo resources_restored; fi" 2>/dev/null
 
         # 3. NOPASSWD sudoers 설정
         echo "[$port] sudoers 설정..."

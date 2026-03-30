@@ -34,6 +34,27 @@ LOG_FILE="$LOG_DIR/update.log"
 
 cd "$PROJECT_ROOT"
 
+# ── resources/ 백업/복원 ──
+RESOURCES_BACKUP_DIR=""
+
+backup_resources() {
+    local res_dir="$PROJECT_ROOT/resources"
+    [ -d "$res_dir" ] || return 0
+    RESOURCES_BACKUP_DIR="$(mktemp -d /tmp/matterhub_resources_backup.XXXXXX)"
+    cp -a "$res_dir/." "$RESOURCES_BACKUP_DIR/"
+    echo "[INFO] resources/ 백업 완료 → $RESOURCES_BACKUP_DIR" | tee -a "$LOG_FILE"
+}
+
+restore_resources() {
+    [ -n "$RESOURCES_BACKUP_DIR" ] && [ -d "$RESOURCES_BACKUP_DIR" ] || return 0
+    local res_dir="$PROJECT_ROOT/resources"
+    mkdir -p "$res_dir"
+    cp -a "$RESOURCES_BACKUP_DIR/." "$res_dir/"
+    rm -rf "$RESOURCES_BACKUP_DIR"
+    RESOURCES_BACKUP_DIR=""
+    echo "[INFO] resources/ 복원 완료" | tee -a "$LOG_FILE"
+}
+
 echo "=== MQTT 자동 업데이트 시작 $(date) ===" | tee -a "$LOG_FILE"
 
 # ── 매개변수 처리 ──
@@ -420,7 +441,9 @@ if [ "$RESTART_ONLY" = "true" ]; then
     if ! healthcheck_services; then
         echo "[WARN] 롤백 시작: $PRE_UPDATE_COMMIT" | tee -a "$LOG_FILE"
         stop_services
+        backup_resources
         git reset --hard "$PRE_UPDATE_COMMIT"
+        restore_resources
         restart_services
         cat > "/tmp/update_${UPDATE_ID}.rollback" << ROLLBACKEOF
 {"rollback": true, "reverted_to": "$PRE_UPDATE_COMMIT"}
@@ -457,6 +480,9 @@ if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
         exit 1
     fi
 fi
+
+# resources/ 백업 (git 작업 전)
+backup_resources
 
 # .env 파일 보호
 if [ -f .env ]; then
@@ -505,6 +531,9 @@ if [ -n "$LATEST_ENV_BACKUP" ]; then
     echo "[INFO] .env 파일 복구 완료" | tee -a "$LOG_FILE"
 fi
 
+# resources/ 복원 (git 작업 후)
+restore_resources
+
 # stash 복원
 if git stash list 2>/dev/null | grep -q "Auto-stash before update"; then
     echo "[INFO] stash된 변경사항 복원 시도 중..." | tee -a "$LOG_FILE"
@@ -550,7 +579,9 @@ restart_services
 if ! healthcheck_services; then
     echo "[WARN] 롤백 시작: $PRE_UPDATE_COMMIT" | tee -a "$LOG_FILE"
     stop_services
+    backup_resources
     git reset --hard "$PRE_UPDATE_COMMIT"
+    restore_resources
     restart_services
     cat > "/tmp/update_${UPDATE_ID}.rollback" << ROLLBACKEOF
 {"rollback": true, "reverted_to": "$PRE_UPDATE_COMMIT"}
