@@ -242,15 +242,21 @@ cleanup_pm2() {
         "$pm2_bin" save 2>/dev/null || true
     fi
 
-    # PM2 startup 서비스 disable (stop은 하지 않음 — Hyodol 프로세스 유지)
-    for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
-        if [ "$DRY_RUN" = "true" ]; then
-            log "[DRY-RUN] systemctl disable: $svc"
-        else
-            sudo systemctl disable "$svc" 2>/dev/null || true
-            log "[INFO] PM2 서비스 disable: $svc"
-        fi
-    done
+    # PM2 startup 서비스 disable — 고객사 프로세스가 남아있으면 건너뜀
+    local remaining_count
+    remaining_count=$("$pm2_bin" jlist 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+    if [ "$remaining_count" -gt 0 ] 2>/dev/null; then
+        log "[INFO] PM2에 고객사 프로세스 남아있음($remaining_count개) — startup 서비스 유지"
+    else
+        for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
+            if [ "$DRY_RUN" = "true" ]; then
+                log "[DRY-RUN] systemctl disable: $svc"
+            else
+                sudo systemctl disable "$svc" 2>/dev/null || true
+                log "[INFO] PM2 서비스 disable: $svc"
+            fi
+        done
+    fi
 
     log "[INFO] PM2 정리 완료"
 }

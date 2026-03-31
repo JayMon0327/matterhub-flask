@@ -285,11 +285,17 @@ restart_services() {
                         echo "[INFO] PM2 삭제: $proc" | tee -a "$LOG_FILE"
                     done
                     "$pm2_bin" save 2>/dev/null || true
-                    # PM2 startup 서비스 비활성화 (disable만, stop은 하지 않음 — 고객사 프로세스 유지)
-                    for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
-                        sudo systemctl disable "$svc" 2>/dev/null || true
-                        echo "[INFO] PM2 서비스 disable: $svc" | tee -a "$LOG_FILE"
-                    done
+                    # PM2 startup 서비스 비활성화 — 고객사 프로세스가 남아있으면 건너뜀
+                    local remaining_count
+                    remaining_count=$("$pm2_bin" jlist 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+                    if [ "$remaining_count" -gt 0 ] 2>/dev/null; then
+                        echo "[INFO] PM2에 고객사 프로세스 남아있음($remaining_count개) — startup 서비스 유지" | tee -a "$LOG_FILE"
+                    else
+                        for svc in $(systemctl list-unit-files 'pm2-*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
+                            sudo systemctl disable "$svc" 2>/dev/null || true
+                            echo "[INFO] PM2 서비스 disable: $svc" | tee -a "$LOG_FILE"
+                        done
+                    fi
                 fi
             else
                 echo "[WARN] systemd 서비스 불안정($systemd_ok개) — PM2 유지" | tee -a "$LOG_FILE"

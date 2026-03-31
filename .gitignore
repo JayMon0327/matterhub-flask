@@ -51,6 +51,9 @@ device_config/relay/
 codex_context.md
 matterhub-relay-operator-key.pem
 
+# PM2 ecosystem config (Hyodol 등 고객사 프로세스)
+start.json
+
 # Ephemeral work files (expect scripts, temp configs, etc.)
 tmp/
 
