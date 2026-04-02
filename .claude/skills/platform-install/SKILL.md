@@ -10,6 +10,8 @@ allowed-tools: Bash, Read, Edit, Write, Grep, Glob
 
 라즈베리파이에 MatterHub 플랫폼을 설치한다. 전체 절차의 상세 내용은 [플레이북](../../../docs/operations/raspi-server-setup-playbook.md)의 "스킬 1" 섹션 참조.
 
+> **SD카드 대량 복제 워크플로우**: `/platform-base-image` (공통 설치) → SD카드 복제 → `/platform-activate` (장비별 활성화)
+
 > **OTBR 방식**: 로컬 소스 빌드 → systemd 서비스. Docker OTBR은 D-Bus/BLE/mDNS 공유 문제로
 > Thread 커미셔닝이 실패하는 케이스가 있어 사용하지 않는다.
 
