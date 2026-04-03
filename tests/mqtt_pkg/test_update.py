@@ -384,6 +384,122 @@ class LaunchRestartTest(unittest.TestCase):
         self.assertIn("sudo systemctl restart", script)
 
 
+class UpdateIdValidationTest(unittest.TestCase):
+    """update_id 검증 및 중복 방지 테스트"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update.send_error_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_rejects_missing_update_id(self, mock_runtime, mock_settings, mock_send_err):
+        """update_id 없는 git_update → 에러 응답, 큐 비어있음"""
+        mock_settings.MATTERHUB_ID = "test-hub"
+        from mqtt_pkg.update import handle_update_command, update_queue
+
+        while not update_queue.empty():
+            update_queue.get_nowait()
+
+        handle_update_command({"command": "git_update"})
+
+        mock_send_err.assert_called_once()
+        self.assertIn("update_id is required", mock_send_err.call_args[0][1])
+        self.assertTrue(update_queue.empty())
+
+    @patch("mqtt_pkg.update.send_immediate_response")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_rejects_duplicate_update_id(self, mock_runtime, mock_settings, mock_send_imm):
+        """동일 update_id 2회 → 첫 번째 큐 진입, 두 번째 duplicate ACK"""
+        mock_settings.MATTERHUB_ID = "test-hub"
+        from mqtt_pkg.update import handle_update_command, update_queue, _recent_update_ids, _recent_ids_lock
+
+        while not update_queue.empty():
+            update_queue.get_nowait()
+        with _recent_ids_lock:
+            _recent_update_ids.clear()
+
+        msg = {"command": "git_update", "update_id": "dup-test-001"}
+        handle_update_command(msg)
+        handle_update_command(msg)
+
+        # 첫 번째만 큐에 들어감
+        self.assertEqual(update_queue.qsize(), 1)
+        # 두 번째는 duplicate ACK
+        mock_send_imm.assert_called_once_with(msg, status="duplicate")
+
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_set_env_without_update_id_still_queued(self, mock_runtime, mock_settings):
+        """set_env는 update_id 없어도 큐 진입"""
+        mock_settings.MATTERHUB_ID = "test-hub"
+        from mqtt_pkg.update import handle_update_command, update_queue
+
+        while not update_queue.empty():
+            update_queue.get_nowait()
+
+        handle_update_command({"command": "set_env", "key": "MATTERHUB_REGION", "value": "test"})
+
+        self.assertFalse(update_queue.empty())
+
+
+class RollbackDetectionTest(unittest.TestCase):
+    """롤백 감지 테스트"""
+
+    @classmethod
+    def setUpClass(cls):
+        _ensure_real_mqtt_pkg()
+
+    @patch("mqtt_pkg.update._launch_restart")
+    @patch("mqtt_pkg.update.send_final_response")
+    @patch("mqtt_pkg.update._wait_for_pid")
+    @patch("mqtt_pkg.update.execute_external_update_script")
+    @patch("mqtt_pkg.update.settings")
+    @patch("mqtt_pkg.update.runtime")
+    def test_rollback_detection_in_response(
+        self, mock_runtime, mock_settings, mock_exec, mock_wait, mock_send_final, mock_restart
+    ):
+        """rollback 파일 존재 시 result에 rollback=True, success=False"""
+        import json
+        import tempfile
+        mock_settings.MATTERHUB_ID = "test-hub"
+
+        update_id = "rollback-test-001"
+
+        # status 파일: 스크립트 성공
+        status_file = f"/tmp/update_{update_id}.status"
+        with open(status_file, "w") as f:
+            json.dump({"exit_code": 0, "pre_commit": "abc123full"}, f)
+
+        # rollback 파일 생성
+        rollback_file = f"/tmp/update_{update_id}.rollback"
+        with open(rollback_file, "w") as f:
+            json.dump({"rollback": True, "reverted_to": "def456full"}, f)
+
+        mock_exec.return_value = {"success": True, "pid": 12345}
+
+        from mqtt_pkg.update import execute_update_async
+
+        message = {"command": "git_update", "update_id": update_id, "branch": "master"}
+
+        try:
+            execute_update_async(message)
+
+            mock_send_final.assert_called_once()
+            result = mock_send_final.call_args[0][1]
+            self.assertTrue(result.get("rollback"))
+            self.assertEqual(result.get("reverted_to"), "def456full")
+            self.assertFalse(result.get("success"))
+        finally:
+            for f in [status_file, rollback_file]:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+
+
 class ResponsePhaseFieldTest(unittest.TestCase):
     """응답 메시지에 phase 필드 포함 검증"""
 

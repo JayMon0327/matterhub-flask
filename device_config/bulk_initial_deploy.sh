@@ -157,7 +157,7 @@ deploy_one() {
         echo "[$port] resources/ 백업 + git 정리 + fetch + reset..."
         local res_backup="/tmp/matterhub_resources_backup_${port}"
         device_ssh "$port" "cd ~/$PROJECT_DIR && if [ -d resources ]; then rm -rf $res_backup; cp -a resources $res_backup; echo resources_backed_up; fi" 2>/dev/null
-        device_ssh "$port" "cd ~/$PROJECT_DIR && if [ -f start.json ]; then cp start.json /tmp/start.json.bak_${port}; fi; git stash drop 2>/dev/null; git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null; if [ -f /tmp/start.json.bak_${port} ]; then cp /tmp/start.json.bak_${port} start.json; fi" 2>/dev/null
+        device_ssh "$port" "cd ~/$PROJECT_DIR && if [ -f .env ]; then cp .env /tmp/.env.bak_${port}; fi; if [ -f start.json ]; then cp start.json /tmp/start.json.bak_${port}; fi; git stash drop 2>/dev/null; git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null; if [ -f /tmp/.env.bak_${port} ]; then cp /tmp/.env.bak_${port} .env; rm -f /tmp/.env.bak_${port}; fi; if [ -f /tmp/start.json.bak_${port} ]; then cp /tmp/start.json.bak_${port} start.json; fi" 2>/dev/null
         if ! device_ssh "$port" "cd ~/$PROJECT_DIR && timeout 120 git fetch origin $DEPLOY_BRANCH 2>&1 && git reset --hard origin/$DEPLOY_BRANCH 2>&1" 2>/dev/null; then
             echo "[FAIL] $port: git fetch/reset 실패"
             # resources/ 복원 (실패 시에도)

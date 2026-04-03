@@ -6,6 +6,7 @@ import queue
 import subprocess
 import threading
 import time
+from collections import deque
 from typing import Any, Dict, Optional
 
 from awscrt import mqtt
@@ -16,6 +17,9 @@ from . import runtime, settings
 update_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 update_queue_lock = threading.Lock()
 is_processing_update = False
+
+_recent_update_ids: deque = deque(maxlen=50)
+_recent_ids_lock = threading.Lock()
 
 
 def _publish_response(payload: Dict[str, Any]) -> None:
@@ -320,6 +324,22 @@ def execute_update_async(message: Dict[str, Any]) -> None:
         force_update = bool(message.get("force_update", False))
         update_id = message.get("update_id", "unknown")
 
+        # .env 존재 확인
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        env_path = os.path.join(project_root, ".env")
+        env_missing = not os.path.exists(env_path)
+        if env_missing:
+            print("[UPDATE][WARN] .env 파일 없음 — 업데이트 후 설정 누락 가능")
+
+        # pre_commit 캡처 (update_server.sh status 파일의 fallback)
+        try:
+            pre_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, cwd=project_root
+            ).stdout.strip() or "unknown"
+        except Exception:
+            pre_commit = "unknown"
+
         print(
             f"백그라운드 업데이트 시작: {update_id} "
             f"(branch={branch}, force={force_update}, hub_id={settings.MATTERHUB_ID})"
@@ -347,6 +367,30 @@ def execute_update_async(message: Dict[str, Any]) -> None:
             else:
                 result["success"] = False
                 print("❌ 상태 파일을 읽을 수 없음 — 스크립트 실패로 처리")
+
+        # pre_commit fallback (status 파일에 없을 때만 사용)
+        result.setdefault("pre_commit", pre_commit)
+
+        # 롤백 감지 (현재 --skip-restart 모드에서는 미생성, 향후 활용을 위한 선행 인프라)
+        rollback_file = f"/tmp/update_{update_id}.rollback"
+        rollback_info = _read_status_file(rollback_file)
+        if rollback_info:
+            result["rollback"] = True
+            result["reverted_to"] = rollback_info.get("reverted_to", "unknown")
+            result["success"] = False
+            print(f"⚠️ 롤백 감지: {rollback_info}")
+
+        # 응답에 env_missing, commit hash 추가
+        if env_missing:
+            result["env_missing"] = True
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, cwd=project_root
+            ).stdout.strip()
+        except Exception:
+            commit = "unknown"
+        result["commit"] = commit
 
         # Phase C: 최종 응답 전송 (QoS 1, PUBACK 확인)
         send_final_response(message, result)
@@ -512,8 +556,25 @@ def _handle_bundle_check(message: Dict[str, Any]) -> None:
 def handle_update_command(message: Dict[str, Any]) -> None:
     try:
         command = message.get("command")
-        update_id = message.get("update_id", "unknown")
+        update_id = (message.get("update_id") or "").strip()
+
+        # git_update는 update_id 필수
+        if command in (None, "git_update") and not update_id:
+            print("❌ update_id 누락 — 업데이트 거부")
+            send_error_response(message, "update_id is required for git_update")
+            return
+
         print(f"📥 업데이트 명령 수신: command={command}, update_id={update_id}")
+
+        # 중복 update_id 방지
+        if update_id:
+            with _recent_ids_lock:
+                if update_id in _recent_update_ids:
+                    print(f"⚠️ 중복 update_id: {update_id}")
+                    send_immediate_response(message, status="duplicate")
+                    return
+                _recent_update_ids.append(update_id)
+
         update_queue.put(message)
         print(f"📋 업데이트 큐에 추가됨: {update_id}")
     except Exception as exc:
