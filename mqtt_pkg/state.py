@@ -229,7 +229,7 @@ def publish_device_states_bulk() -> None:
         return
 
     managed_ids = _load_managed_entity_ids()
-    devices: Dict[str, Dict[str, object]] = {}
+    devices: List[Dict[str, object]] = []
     for item in states:
         if not isinstance(item, dict):
             continue
@@ -238,11 +238,12 @@ def publish_device_states_bulk() -> None:
             continue
         if managed_ids is not None and entity_id not in managed_ids:
             continue
-        devices[entity_id] = {
+        devices.append({
+            "entity_id": entity_id,
             "state": item.get("state"),
             "last_changed": item.get("last_changed"),
             "attributes": item.get("attributes", {}),
-        }
+        })
 
     if not devices:
         return
@@ -401,7 +402,7 @@ def check_and_publish_alerts() -> None:
         print(f"[MQTT][ALERT] 실패: {exc}")
 
 
-def _publish_devices_with_chunking(topic: str, devices: Dict[str, Dict[str, object]]) -> None:
+def _publish_devices_with_chunking(topic: str, devices: List[Dict[str, object]]) -> None:
     payload = {
         "hub_id": settings.MATTERHUB_ID,
         "ts": publisher.utc_timestamp(),
@@ -415,18 +416,17 @@ def _publish_devices_with_chunking(topic: str, devices: Dict[str, Dict[str, obje
         return
 
     # 청크 분할
-    entity_ids = list(devices.keys())
-    avg_size = len(serialized) / len(entity_ids)
+    avg_size = len(serialized) / len(devices)
     per_chunk = max(1, int((max_bytes - 500) / avg_size))
 
-    chunks = [entity_ids[i:i + per_chunk] for i in range(0, len(entity_ids), per_chunk)]
+    chunks = [devices[i:i + per_chunk] for i in range(0, len(devices), per_chunk)]
     total = len(chunks)
-    for idx, chunk_ids in enumerate(chunks, start=1):
+    for idx, chunk_devices in enumerate(chunks, start=1):
         chunk_payload = {
             "hub_id": settings.MATTERHUB_ID,
             "ts": publisher.utc_timestamp(),
             "chunk": idx,
             "total_chunks": total,
-            "devices": {eid: devices[eid] for eid in chunk_ids},
+            "devices": chunk_devices,
         }
         publisher.publish(chunk_payload, response_topic=topic)

@@ -33,6 +33,7 @@ def build_subscribe_topics() -> List[str]:
         if settings.MATTERHUB_REGION:
             _append_unique_topic(topics, f"matterhub/update/region/{settings.MATTERHUB_REGION}")
         _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/state-changed")
+        _append_unique_topic(topics, f"matterhub/{settings.MATTERHUB_ID}/api")
     return topics
 
 

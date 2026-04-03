@@ -89,7 +89,9 @@ class TestPublishDeviceStatesBulk(unittest.TestCase):
             self.assertIn("hub_id", payload)
             self.assertIn("ts", payload)
             self.assertIn("devices", payload)
-            device = payload["devices"]["sensor.temp"]
+            self.assertIsInstance(payload["devices"], list)
+            device = payload["devices"][0]
+            self.assertEqual(device["entity_id"], "sensor.temp")
             self.assertEqual(device["state"], "on")
             self.assertIn("last_changed", device)
             self.assertIn("attributes", device)
@@ -108,9 +110,11 @@ class TestPublishDeviceStatesBulk(unittest.TestCase):
                 self._patch_publish() as mock_pub, patch("builtins.print"):
             self.state.publish_device_states_bulk()
             payload = mock_pub.call_args[0][0]
-            self.assertIn("light.a", payload["devices"])
-            self.assertIn("sensor.c", payload["devices"])
-            self.assertNotIn("light.b", payload["devices"])
+            self.assertIsInstance(payload["devices"], list)
+            device_ids = [d["entity_id"] for d in payload["devices"]]
+            self.assertIn("light.a", device_ids)
+            self.assertIn("sensor.c", device_ids)
+            self.assertNotIn("light.b", device_ids)
 
     def test_publishes_all_without_devices_json(self):
         ha_states = _make_ha_states(["light.a", "light.b", "sensor.c"])

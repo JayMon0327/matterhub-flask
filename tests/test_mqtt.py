@@ -120,6 +120,7 @@ class MqttEntrypointTest(unittest.TestCase):
                 "matterhub/update/specific/hub-1",
                 "matterhub/update/all",
                 "matterhub/hub-1/state-changed",
+                "matterhub/hub-1/api",
             ],
             topics,
         )
@@ -139,6 +140,7 @@ class MqttEntrypointTest(unittest.TestCase):
                 "matterhub/update/all",
                 "matterhub/update/region/gangnam",
                 "matterhub/hub-1/state-changed",
+                "matterhub/hub-1/api",
             ],
             topics,
         )
@@ -169,7 +171,7 @@ class MqttEntrypointTest(unittest.TestCase):
         self.assertIn("[MQTT][INIT] client_id=matterhub-client", report)
         self.assertIn("[MQTT][INIT] cert_path=konai_certificates cert=ok key=ok ca=missing", report)
         self.assertIn("[MQTT][SUBSCRIBE] setup start", report)
-        self.assertIn("[MQTT][SUBSCRIBE] count=3", report)
+        self.assertIn("[MQTT][SUBSCRIBE] count=4", report)
         self.assertIn("[MQTT][SUBSCRIBE] topic[1]=matterhub/update/specific/hub-1", report)
         self.assertIn("[MQTT][SUBSCRIBE] topic[2]=matterhub/update/all", report)
 

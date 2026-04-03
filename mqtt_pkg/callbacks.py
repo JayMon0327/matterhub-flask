@@ -45,9 +45,21 @@ def handle_states_request(
                 )
                 return
 
+            # 페이로드에 response_topic이 있으면 우선 사용
+            payload_response_topic = message.get("response_topic")
+            if payload_response_topic and str(payload_response_topic).strip():
+                response_topic = str(payload_response_topic).strip()
+
             entity = message.get("entity_id")
             if entity is not None and str(entity).strip():
                 entity_id = str(entity).strip()
+            elif not entity_id:
+                # endpoint 필드에서 entity_id 추출 (예: "/states/light.living_room")
+                endpoint = message.get("endpoint", "")
+                if isinstance(endpoint, str) and endpoint.startswith("/states/"):
+                    parsed_id = endpoint[len("/states/"):].strip()
+                    if parsed_id:
+                        entity_id = parsed_id
 
         headers: Dict[str, str] = {}
         if settings.HASS_TOKEN:
@@ -64,6 +76,9 @@ def handle_states_request(
                     payload = {
                         "type": "query_response_single",
                         "correlation_id": correlation_id,
+                        "request_id": correlation_id,
+                        "endpoint": f"/states/{entity_id}",
+                        "status": response.status_code,
                         "ts": timestamp,
                         "data": data,
                     }
@@ -114,6 +129,9 @@ def handle_states_request(
             payload = {
                 "type": "query_response_all",
                 "correlation_id": correlation_id,
+                "request_id": correlation_id,
+                "endpoint": "/states",
+                "status": response.status_code,
                 "ts": timestamp,
                 "data": response.json(),
             }
@@ -164,6 +182,14 @@ def mqtt_callback(topic: str, payload: bytes, **kwargs: Any) -> None:
             return
         print(f"[MQTT][REQUEST] 수신: {topic}")
         handle_states_request(payload_bytes, response_topic=settings.MQTT_TOPIC_PUBLISH)
+        return
+
+    # matterhub/{hub_id}/api 전용 API 요청 토픽
+    api_topic = f"matterhub/{settings.MATTERHUB_ID}/api" if settings.MATTERHUB_ID else None
+    if api_topic and topic == api_topic:
+        print(f"[MQTT][REQUEST] API 수신: {topic}")
+        default_response_topic = f"matterhub/{settings.MATTERHUB_ID}/api/response"
+        handle_states_request(payload_bytes, response_topic=default_response_topic)
         return
 
     if topic == settings.MQTT_TOPIC_PUBLISH and settings.MQTT_TOPIC_PUBLISH != settings.MQTT_TOPIC_SUBSCRIBE:
