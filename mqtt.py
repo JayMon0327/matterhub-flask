@@ -4,6 +4,8 @@ import socket
 import time
 from typing import Callable, Dict, Iterable, List, Optional
 
+import requests
+
 from libs.device_binding import enforce_mac_binding
 from mqtt_pkg import callbacks, runtime, settings, state, test_subscriber, update
 from mqtt_pkg.runtime import AWSIoTClient
@@ -130,6 +132,21 @@ def _wait_for_network(timeout_per_check: int = 3, interval: int = 10) -> None:
             time.sleep(interval)
 
 
+def _wait_for_api(timeout_per_check: int = 2, interval: int = 5) -> None:
+    """로컬 API(matterhub-api)가 응답할 때까지 대기."""
+    api_url = f"{settings.LOCAL_API_BASE}/local/api/states"
+    while True:
+        try:
+            resp = requests.get(api_url, timeout=timeout_per_check)
+            if resp.status_code in (200, 401):
+                print("[MQTT][INIT] api_ready=true")
+                return
+        except Exception:
+            pass
+        print(f"[MQTT][INIT] api_ready=false retry_after={interval}s")
+        time.sleep(interval)
+
+
 def _connect_with_service_retry(aws_client: AWSIoTClient) -> object:
     """connect_mqtt()를 서비스 레벨에서 무한 재시도 (서비스가 crash하지 않도록)."""
     attempt = 0
@@ -159,6 +176,7 @@ def main() -> None:
     topics = build_subscribe_topics()
     log_startup_report(aws_client, topics)
     _wait_for_network()
+    _wait_for_api()
     connection = _connect_with_service_retry(aws_client)
     runtime.set_connection(connection)
 
