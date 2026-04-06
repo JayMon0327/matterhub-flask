@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import socket
 import time
 from typing import Callable, Dict, Iterable, List, Optional
 
 from libs.device_binding import enforce_mac_binding
 from mqtt_pkg import callbacks, runtime, settings, state, test_subscriber, update
 from mqtt_pkg.runtime import AWSIoTClient
+
+CONNECTION_CHECK_INTERVAL = 6  # 5초 × 6 = 30초마다 연결 상태 확인
 
 
 def log_matterhub_status() -> None:
@@ -115,6 +118,36 @@ def log_startup_report(aws_client: AWSIoTClient, topics: Iterable[str]) -> None:
         print(line)
 
 
+def _wait_for_network(timeout_per_check: int = 3, interval: int = 10) -> None:
+    """네트워크 연결 가능할 때까지 대기 (부팅 직후 네트워크 미준비 대응)."""
+    while True:
+        try:
+            socket.create_connection(("8.8.8.8", 53), timeout=timeout_per_check)
+            print("[MQTT][INIT] network_ready=true")
+            return
+        except OSError:
+            print(f"[MQTT][INIT] network_ready=false retry_after={interval}s")
+            time.sleep(interval)
+
+
+def _connect_with_service_retry(aws_client: AWSIoTClient) -> object:
+    """connect_mqtt()를 서비스 레벨에서 무한 재시도 (서비스가 crash하지 않도록)."""
+    attempt = 0
+    base_delay = 10
+    max_delay = 120
+    while True:
+        try:
+            return aws_client.connect_mqtt()
+        except Exception as exc:
+            attempt += 1
+            delay = min(base_delay * (2 ** min(attempt - 1, 6)), max_delay)
+            print(
+                f"[MQTT][CONNECT] service_retry attempt={attempt} "
+                f"error={type(exc).__name__} next_retry={delay}s"
+            )
+            time.sleep(delay)
+
+
 def main() -> None:
     if not enforce_mac_binding():
         raise SystemExit(1)
@@ -125,7 +158,8 @@ def main() -> None:
     aws_client = AWSIoTClient()
     topics = build_subscribe_topics()
     log_startup_report(aws_client, topics)
-    connection = aws_client.connect_mqtt()
+    _wait_for_network()
+    connection = _connect_with_service_retry(aws_client)
     runtime.set_connection(connection)
 
     print(f"[MQTT][INIT] matterhub_id={settings.MATTERHUB_ID or '(미설정)'}")
@@ -145,9 +179,13 @@ def main() -> None:
     try:
         connection_check_counter = 0
         while True:
+            # 연결 끊김 감지 시 즉시 재연결 시도
+            if not runtime.is_connected():
+                connection_check_counter = CONNECTION_CHECK_INTERVAL
+
             state.publish_device_state()
             connection_check_counter += 1
-            if connection_check_counter >= 12:
+            if connection_check_counter >= CONNECTION_CHECK_INTERVAL:
                 runtime.check_mqtt_connection(
                     topics,
                     callbacks.mqtt_callback,

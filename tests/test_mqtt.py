@@ -165,5 +165,55 @@ class MqttEntrypointTest(unittest.TestCase):
         )
 
 
+class MqttConnectionRetryTest(unittest.TestCase):
+    """Phase 1: 초기 연결 안정성 강화 테스트."""
+
+    def test_wait_for_network_succeeds_immediately(self) -> None:
+        module = load_mqtt_module()
+        with patch("socket.create_connection") as mock_conn:
+            mock_conn.return_value = Mock()
+            module._wait_for_network(timeout_per_check=1, interval=1)
+            mock_conn.assert_called_once()
+
+    def test_wait_for_network_retries_on_failure(self) -> None:
+        module = load_mqtt_module()
+        with patch("socket.create_connection") as mock_conn, \
+             patch("time.sleep") as mock_sleep:
+            mock_conn.side_effect = [OSError, OSError, Mock()]
+            module._wait_for_network(timeout_per_check=1, interval=1)
+            self.assertEqual(mock_conn.call_count, 3)
+            self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_connect_with_service_retry_succeeds_after_failures(self) -> None:
+        module = load_mqtt_module()
+        mock_client = Mock()
+        mock_connection = object()
+        mock_client.connect_mqtt.side_effect = [
+            TimeoutError("try 1"),
+            TimeoutError("try 2"),
+            mock_connection,
+        ]
+        with patch("time.sleep"):
+            result = module._connect_with_service_retry(mock_client)
+        self.assertIs(result, mock_connection)
+        self.assertEqual(mock_client.connect_mqtt.call_count, 3)
+
+    def test_connect_with_service_retry_exponential_backoff(self) -> None:
+        module = load_mqtt_module()
+        mock_client = Mock()
+        mock_client.connect_mqtt.side_effect = [
+            TimeoutError("1"),
+            TimeoutError("2"),
+            TimeoutError("3"),
+            object(),
+        ]
+        with patch("time.sleep") as mock_sleep:
+            module._connect_with_service_retry(mock_client)
+        delays = [call.args[0] for call in mock_sleep.call_args_list]
+        self.assertEqual(delays[0], 10)   # 10 * 2^0
+        self.assertEqual(delays[1], 20)   # 10 * 2^1
+        self.assertEqual(delays[2], 40)   # 10 * 2^2
+
+
 if __name__ == "__main__":
     unittest.main()

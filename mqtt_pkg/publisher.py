@@ -16,16 +16,20 @@ def konai_timestamp() -> str:
 
 def publish(payload: Dict[str, Any], response_topic: Optional[str] = None) -> None:
     connection = runtime.get_connection()
-    if connection is None:
-        print("❌ Konai publish 실패: MQTT 연결이 설정되지 않았습니다.")
-        return
-
     target_topic = response_topic or settings.KONAI_TOPIC_RESPONSE
-    if not target_topic:
-        print("❌ Konai publish 실패: 대상 토픽을 확인할 수 없습니다.")
+    payload_type = payload.get("type", "(미설정)")
+
+    if connection is None or not runtime.is_connected():
+        reason = "no_connection" if connection is None else "disconnected"
+        print(
+            f"[MQTT][PUBLISH][SKIP] topic={target_topic or '(없음)'} "
+            f"type={payload_type} reason={reason}"
+        )
         return
 
-    payload_type = payload.get("type", "(미설정)")
+    if not target_topic:
+        print(f"[MQTT][PUBLISH][SKIP] type={payload_type} reason=no_topic")
+        return
     try:
         publish_result = connection.publish(
             topic=target_topic,

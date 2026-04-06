@@ -15,8 +15,12 @@ SUBSCRIBED_TOPICS: set[str] = set()
 global_mqtt_connection: Optional[mqtt.Connection] = None
 is_connected_flag: bool = False
 reconnect_attempts: int = 0
-MAX_RECONNECT_ATTEMPTS = 5
-RECONNECT_DELAY = 30  # seconds
+_pending_resubscribe: bool = False
+
+# 재연결 설정: 무한 재시도 + 점진적 백오프
+RECONNECT_BACKOFF_THRESHOLD = 5   # 이 횟수까지는 즉시 재시도
+RECONNECT_BASE_DELAY = 10         # 백오프 시작 대기(초)
+RECONNECT_MAX_DELAY = 300         # 최대 대기(초, 5분)
 
 
 def _certificate_paths(cert_path: str) -> tuple[str, str, str]:
@@ -75,17 +79,26 @@ class AWSIoTClient:
                 topics = ", ".join(sorted(SUBSCRIBED_TOPICS))
                 print(f"[MQTT][CONNECT][INTERRUPTED] subscribed_topics={topics}")
             print(
-                f"[MQTT][CONNECT] reconnect_attempt={reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS}"
+                f"[MQTT][CONNECT] reconnect_attempt={reconnect_attempts + 1}"
             )
 
         def on_resumed(connection, return_code, session_present, **kwargs):
+            global _pending_resubscribe
             mark_connected(return_code == 0)
             if return_code == 0:
                 reset_reconnect_attempts()
-                print(
-                    "[MQTT][CONNECT][OK] resumed "
-                    f"return_code={return_code} session_present={session_present}"
-                )
+                if not session_present:
+                    _pending_resubscribe = True
+                    print(
+                        "[MQTT][CONNECT][OK] resumed "
+                        f"return_code={return_code} session_present={session_present} "
+                        "resubscribe_pending=true"
+                    )
+                else:
+                    print(
+                        "[MQTT][CONNECT][OK] resumed "
+                        f"return_code={return_code} session_present={session_present}"
+                    )
             else:
                 print(f"[MQTT][CONNECT][FAIL] resumed return_code={return_code}")
 
@@ -95,7 +108,7 @@ class AWSIoTClient:
             pri_key_filepath=key_file,
             client_bootstrap=client_bootstrap,
             client_id=self.client_id,
-            keep_alive_secs=300,
+            keep_alive_secs=30,
             on_connection_interrupted=on_interrupted,
             on_connection_resumed=on_resumed,
         )
@@ -215,22 +228,50 @@ def summarize_resubscribe_results(results: Dict[str, bool]) -> tuple[int, int]:
     return success_count, failed_count
 
 
+def needs_resubscribe() -> bool:
+    """SDK on_connection_resumed에서 session_present=False 시 설정된 플래그 확인."""
+    return _pending_resubscribe
+
+
+def clear_resubscribe_flag() -> None:
+    global _pending_resubscribe
+    _pending_resubscribe = False
+
+
 def check_mqtt_connection(
     topics: Iterable[str],
     callback: Callable,
     client_factory: Optional[Callable[[], AWSIoTClient]] = None,
 ) -> bool:
-    """Ensure MQTT connection is alive, reconnecting and resubscribing if necessary."""
+    """Ensure MQTT connection is alive, reconnecting and resubscribing if necessary.
+
+    재연결 실패 시 포기하지 않고 점진적 백오프로 계속 재시도한다.
+    """
+    # SDK 자동 재연결 후 session이 없으면 resubscribe 필요
+    if needs_resubscribe() and is_connected():
+        clear_resubscribe_flag()
+        print("[MQTT][RECONNECT] resubscribe after session loss")
+        resubscribe_results = resubscribe(list(topics), callback)
+        log_resubscribe_results(resubscribe_results)
+        return True
+
     if is_connected():
         reset_reconnect_attempts()
         return True
 
-    print(f"[MQTT][RECONNECT] attempt={reconnect_attempts + 1}/{MAX_RECONNECT_ATTEMPTS}")
-    if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-        print("[MQTT][RECONNECT][FAIL] reason=max_attempts_exceeded")
-        return False
-
     increase_reconnect_attempt()
+
+    # 점진적 백오프: threshold 초과 시 대기
+    if reconnect_attempts > RECONNECT_BACKOFF_THRESHOLD:
+        backoff_exp = reconnect_attempts - RECONNECT_BACKOFF_THRESHOLD
+        delay = min(RECONNECT_BASE_DELAY * (2 ** (backoff_exp - 1)), RECONNECT_MAX_DELAY)
+        print(
+            f"[MQTT][RECONNECT] attempt={reconnect_attempts} "
+            f"backoff_delay={delay}s"
+        )
+        time.sleep(delay)
+    else:
+        print(f"[MQTT][RECONNECT] attempt={reconnect_attempts}")
 
     connection = get_connection()
     if connection:

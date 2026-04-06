@@ -77,6 +77,16 @@ class StateChangeDetector:
 state_detector = StateChangeDetector()
 konai_bootstrap_done = False
 konai_last_entity_publish: Dict[str, Tuple[float, str]] = {}
+_last_disconnected_log: float = 0.0
+
+
+def _log_disconnected_once(caller: str) -> None:
+    """연결 끊김 시 30초에 1번만 로그 출력 (로그 폭주 방지)."""
+    global _last_disconnected_log
+    now = time.time()
+    if now - _last_disconnected_log >= 30:
+        print(f"[MQTT][{caller}][SKIP] reason=disconnected")
+        _last_disconnected_log = now
 
 
 def _auth_headers() -> Dict[str, str]:
@@ -93,6 +103,7 @@ def publish_bootstrap_all_states() -> None:
         return
 
     if not runtime.is_connected():
+        _log_disconnected_once("BOOTSTRAP")
         return
 
     try:
@@ -128,6 +139,7 @@ def publish_device_state() -> None:
     global konai_last_entity_publish
 
     if not runtime.is_connected():
+        _log_disconnected_once("ENTITY_CHANGED")
         return
 
     try:
@@ -160,12 +172,8 @@ def publish_device_state() -> None:
                 last_ts, last_val = last_info
                 if now - last_ts < settings.KONAI_EVENT_THROTTLE_SEC:
                     continue
-                if (
-                    settings.KONAI_EVENT_DEDUP_WINDOW_SEC > 0
-                    and (now - last_ts) < settings.KONAI_EVENT_DEDUP_WINDOW_SEC
-                    and last_val == state_str
-                ):
-                    continue
+                if last_val == state_str:
+                    continue  # 상태 변화 없으면 skip (부팅 후 최초 1회는 last_info 없어 발행됨)
 
             konai_last_entity_publish[entity_id] = (now, state_str)
             payload = {
