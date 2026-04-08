@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 import time
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -77,7 +79,10 @@ class StateChangeDetector:
 state_detector = StateChangeDetector()
 konai_bootstrap_done = False
 konai_last_entity_publish: Dict[str, Tuple[float, str]] = {}
+konai_last_entity_state: Dict[str, str] = {}  # state 값만 저장 (변화 감지용)
 _last_disconnected_log: float = 0.0
+_periodic_counter: int = 0
+_PERIODIC_INTERVAL: int = 6  # 5초 × 6 = 30초마다 주기적 발행
 
 
 def _log_disconnected_once(caller: str) -> None:
@@ -136,7 +141,7 @@ def publish_bootstrap_all_states() -> None:
 
 
 def publish_device_state() -> None:
-    global konai_last_entity_publish
+    global konai_last_entity_state, _periodic_counter
 
     if not runtime.is_connected():
         _log_disconnected_once("ENTITY_CHANGED")
@@ -149,6 +154,7 @@ def publish_device_state() -> None:
             timeout=10,
         )
         if response.status_code != 200:
+            print(f"[MQTT][POLL] status={response.status_code} entities=0")
             return
 
         states = response.json()
@@ -160,35 +166,162 @@ def publish_device_state() -> None:
                     if entity_id:
                         state_map[str(entity_id)] = item
 
+        # 매칭된 entity 수 계산 + 로그
+        matched_count = sum(1 for eid in settings.KONAI_REPORT_ENTITY_IDS if eid in state_map)
+        print(f"[MQTT][POLL] status=200 entities={matched_count}")
+
+        # 주기적 발행 카운터
+        _periodic_counter += 1
+        is_periodic = _periodic_counter >= _PERIODIC_INTERVAL
+
+        now = time.time()
+        periodic_published = 0
+
         for entity_id in settings.KONAI_REPORT_ENTITY_IDS:
             state_entry = state_map.get(entity_id)
             if not state_entry:
                 continue
 
-            state_str = json.dumps(state_entry, sort_keys=True, ensure_ascii=False)
-            last_info = konai_last_entity_publish.get(entity_id)
-            now = time.time()
-            if last_info:
-                last_ts, last_val = last_info
-                if now - last_ts < settings.KONAI_EVENT_THROTTLE_SEC:
-                    continue
-                if last_val == state_str:
-                    continue  # 상태 변화 없으면 skip (부팅 후 최초 1회는 last_info 없어 발행됨)
+            # 주기적 발행 (30초마다 무조건)
+            # 변화 감지는 WebSocket(start_ha_websocket_listener)이 담당
+            if is_periodic:
+                payload = {
+                    "type": "periodic_state",
+                    "correlation_id": None,
+                    "event_id": f"periodic-{int(now * 1000)}-{entity_id.replace('.', '_')}",
+                    "ts": publisher.konai_timestamp(),
+                    "entity_id": entity_id,
+                    "state": state_entry,
+                }
+                if settings.MATTERHUB_ID:
+                    payload["hub_id"] = settings.MATTERHUB_ID
+                publisher.publish(payload)
+                periodic_published += 1
 
-            konai_last_entity_publish[entity_id] = (now, state_str)
-            payload = {
-                "type": "entity_changed",
-                "correlation_id": None,
-                "event_id": f"evt-{int(now * 1000)}-{entity_id.replace('.', '_')}",
-                "ts": publisher.konai_timestamp(),
-                "entity_id": entity_id,
-                "state": state_entry,
-            }
-            if settings.MATTERHUB_ID:
-                payload["hub_id"] = settings.MATTERHUB_ID
-
-            publisher.publish(payload)
-            print(f"코나이 entity_changed: {entity_id} → {settings.KONAI_TOPIC_RESPONSE}")
+        if is_periodic:
+            _periodic_counter = 0
+            print(f"[MQTT][PERIODIC] {periodic_published} entities 발행 완료")
 
     except Exception as exc:
-        print(f"상태 발행(이벤트) 실패: {exc}")
+        print(f"상태 발행 실패: {exc}")
+
+
+# ==============================================================================
+# HA WebSocket 기반 실시간 state_changed 감지
+# ==============================================================================
+
+_ws_thread: Optional[threading.Thread] = None
+_ws_running: bool = False
+
+
+def _publish_entity_changed_from_event(
+    entity_id: str,
+    new_state: Dict[str, Any],
+    old_state: Optional[Dict[str, Any]],
+) -> None:
+    """WebSocket state_changed 이벤트에서 entity_changed 발행."""
+    if not runtime.is_connected():
+        return
+
+    old_val = old_state.get("state", "") if old_state else "(init)"
+    new_val = new_state.get("state", "")
+
+    now = time.time()
+    payload = {
+        "type": "entity_changed",
+        "correlation_id": None,
+        "event_id": f"ws-{int(now * 1000)}-{entity_id.replace('.', '_')}",
+        "ts": publisher.konai_timestamp(),
+        "entity_id": entity_id,
+        "state": new_state,
+    }
+    if settings.MATTERHUB_ID:
+        payload["hub_id"] = settings.MATTERHUB_ID
+
+    publisher.publish(payload)
+    print(f"[MQTT][WS][ENTITY_CHANGED] {entity_id} {old_val}→{new_val}")
+
+
+async def _ha_websocket_loop() -> None:
+    """HA WebSocket에 연결하여 state_changed 이벤트를 실시간 수신."""
+    try:
+        import websockets
+    except ImportError:
+        print("[MQTT][WS] websockets 패키지 미설치, WebSocket 감지 비활성화")
+        return
+
+    ha_host = (settings.HA_HOST or "http://127.0.0.1:8123").replace("http://", "").replace("https://", "")
+    ws_url = f"ws://{ha_host}/api/websocket"
+    token = settings.HASS_TOKEN
+    report_ids = set(settings.KONAI_REPORT_ENTITY_IDS)
+
+    while _ws_running:
+        try:
+            async with websockets.connect(ws_url) as ws:
+                # 1. auth
+                msg = json.loads(await ws.recv())
+                if msg.get("type") != "auth_required":
+                    print(f"[MQTT][WS] 예상치 못한 메시지: {msg.get('type')}")
+                    continue
+
+                await ws.send(json.dumps({"type": "auth", "access_token": token}))
+                msg = json.loads(await ws.recv())
+                if msg.get("type") != "auth_ok":
+                    print(f"[MQTT][WS] 인증 실패: {msg}")
+                    await asyncio.sleep(10)
+                    continue
+
+                # 2. subscribe state_changed
+                await ws.send(json.dumps({
+                    "id": 1,
+                    "type": "subscribe_events",
+                    "event_type": "state_changed",
+                }))
+                msg = json.loads(await ws.recv())
+                if not msg.get("success"):
+                    print(f"[MQTT][WS] 구독 실패: {msg}")
+                    await asyncio.sleep(10)
+                    continue
+
+                print(f"[MQTT][WS] connected entity_filter={len(report_ids)}")
+
+                # 3. 이벤트 수신 루프
+                async for raw in ws:
+                    if not _ws_running:
+                        break
+                    msg = json.loads(raw)
+                    if msg.get("type") != "event":
+                        continue
+                    data = msg.get("event", {}).get("data", {})
+                    entity_id = data.get("entity_id", "")
+                    if entity_id not in report_ids:
+                        continue
+                    new_state = data.get("new_state")
+                    old_state = data.get("old_state")
+                    if new_state is None:
+                        continue
+                    _publish_entity_changed_from_event(entity_id, new_state, old_state)
+
+        except Exception as exc:
+            if _ws_running:
+                print(f"[MQTT][WS] 연결 끊김: {type(exc).__name__}, 5초 후 재연결")
+                await asyncio.sleep(5)
+
+
+def _ws_thread_target() -> None:
+    """WebSocket 리스너를 별도 스레드에서 asyncio로 실행."""
+    asyncio.run(_ha_websocket_loop())
+
+
+def start_ha_websocket_listener() -> None:
+    """HA WebSocket state_changed 리스너를 백그라운드 스레드로 시작."""
+    global _ws_thread, _ws_running
+
+    if not settings.HASS_TOKEN:
+        print("[MQTT][WS] hass_token 미설정, WebSocket 감지 비활성화")
+        return
+
+    _ws_running = True
+    _ws_thread = threading.Thread(target=_ws_thread_target, daemon=True, name="ha-ws-listener")
+    _ws_thread.start()
+    print("[MQTT][WS] 리스너 스레드 시작됨")

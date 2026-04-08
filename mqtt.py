@@ -192,6 +192,7 @@ def main() -> None:
     )
 
     state.publish_bootstrap_all_states()
+    state.start_ha_websocket_listener()
     test_subscriber.start_konai_test_subscriber_if_enabled()
 
     try:
