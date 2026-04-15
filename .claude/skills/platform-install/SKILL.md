@@ -233,7 +233,8 @@ sudo netfilter-persistent save 2>/dev/null || sudo ip6tables-save | sudo tee /et
 ```
 
 > 이 수정이 없으면 WiFi Matter 기기 커미셔닝 시 PASE handshake 타임아웃 발생.
-> 별도 스크립트: `device_config/fix_otbr_mdns_conflict.sh` (위 내용 + 검증 포함)
+> **주의**: 재부팅 시 Docker/OTBR가 체인을 flush하여 규칙 소실 가능. systemd 서비스로 영구화 권장.
+> 상세: `docs/troubleshooting/2026년 04월 3주/wifi-matter-mdns-commissioning-failure.md`
 
 ---
 

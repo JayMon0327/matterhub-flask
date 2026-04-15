@@ -75,6 +75,9 @@ sudo ip6tables -L INPUT -n | grep -q 5353 || {
 }
 ```
 
+> **주의**: 재부팅 시 Docker/OTBR가 ip6tables 체인을 flush하여 규칙이 소실될 수 있음.
+> systemd 서비스(`matterhub-ip6tables-mdns.service`)로 영구화 권장. 상세: `docs/troubleshooting/2026년 04월 3주/wifi-matter-mdns-commissioning-failure.md`
+
 ---
 
 ### 병렬 구간: 2-1a OTBR 시작 + 2-1b Docker 컨테이너 기동
@@ -235,7 +238,7 @@ curl -s http://127.0.0.1:8123/api/config/config_entries/entry \
 | /dev/ttyACM0 vs ttyACM1 | USB 포트 위치가 장비마다 다름 | 2-0에서 확인 후 `/etc/default/otbr-agent` 수정 |
 | sshpass 접속 실패 | 비밀번호 `!` 특수문자 | expect 사용 |
 | Thread 초기화 후 detached/channel 11 | OTBR 자동 시작 시 기본 dataset 적용 | `thread stop` + `ifconfig down` 후 dataset 재설정 |
-| ip6tables 규칙 재부팅 후 소실 | iptables-persistent 설치 실패 또는 save 미실행 | 2-0에서 확인 후 재적용 |
+| ip6tables 규칙 재부팅 후 소실 | Docker/OTBR가 부팅 시 체인 flush | systemd 서비스로 영구화 (`matterhub-ip6tables-mdns.service`) |
 | SSH 호스트 키 충돌 | 같은 IP에 새 SD카드 | `ssh-keygen -R` + `ssh-keyscan` |
 | Matter 등록 시 abort 응답 | OTBR 등록 시 자동 포함됨 | 정상 동작, 통합 목록에서 확인 |
 | expect + sudo + tail 조합 실패 | tail 버퍼링으로 sudo 프롬프트 누락 | sudo 명령은 tail 없이 실행, 스크립트 파일 사용 권장 |
