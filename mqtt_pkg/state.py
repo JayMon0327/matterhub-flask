@@ -297,16 +297,36 @@ class DeviceAlertPublisher:
                     continue
                 current = str(item.get("state", ""))
                 self._prev_states[entity_id] = current
-                if current == "unavailable":
-                    self._alerted.setdefault(entity_id, set()).add("UNAVAILABLE")
                 attrs = item.get("attributes", {})
                 battery = _extract_battery(attrs)
+                if current == "unavailable":
+                    self._alerted.setdefault(entity_id, set()).add("UNAVAILABLE")
+                    # SEED publish — Lambda가 멱등 처리
+                    self._publish_alert(
+                        entity_id=entity_id,
+                        alert_type="UNAVAILABLE",
+                        prev_state="unknown",
+                        current_state=current,
+                        battery=battery,
+                        attributes=attrs,
+                        source="seed",
+                    )
                 if (
                     settings.MQTT_ALERT_BATTERY_THRESHOLD > 0
                     and battery is not None
                     and battery <= settings.MQTT_ALERT_BATTERY_THRESHOLD
                 ):
                     self._alerted.setdefault(entity_id, set()).add("BATTERY_EMPTY")
+                    # SEED publish — Lambda가 멱등 처리
+                    self._publish_alert(
+                        entity_id=entity_id,
+                        alert_type="BATTERY_EMPTY",
+                        prev_state="unknown",
+                        current_state=current,
+                        battery=battery,
+                        attributes=attrs,
+                        source="seed",
+                    )
             self._initialized = True
             self._last_check = time.time()
             print(f"[MQTT][ALERT] 초기화 완료: {len(self._prev_states)}개 엔티티, "
@@ -342,6 +362,15 @@ class DeviceAlertPublisher:
                     )
                     self._alerted.setdefault(entity_id, set()).add("UNAVAILABLE")
             elif current != "unavailable" and "UNAVAILABLE" in alerted_set:
+                # 복구 publish
+                self._publish_alert(
+                    entity_id=entity_id,
+                    alert_type="UNAVAILABLE_RESOLVED",
+                    prev_state="unavailable",
+                    current_state=current,
+                    battery=battery,
+                    attributes=attrs,
+                )
                 alerted_set.discard("UNAVAILABLE")
 
             # BATTERY_EMPTY 감지
@@ -359,6 +388,14 @@ class DeviceAlertPublisher:
                         self._alerted.setdefault(entity_id, set()).add("BATTERY_EMPTY")
                 else:
                     if "BATTERY_EMPTY" in alerted_set:
+                        self._publish_alert(
+                            entity_id=entity_id,
+                            alert_type="BATTERY_RESTORED",
+                            prev_state="empty",
+                            current_state=current,
+                            battery=battery,
+                            attributes=attrs,
+                        )
                         alerted_set.discard("BATTERY_EMPTY")
 
             self._prev_states[entity_id] = current
@@ -373,6 +410,7 @@ class DeviceAlertPublisher:
         current_state: str,
         battery: Optional[int],
         attributes: dict,
+        source: str = "live",
     ) -> None:
         topic = f"matterhub/{settings.MATTERHUB_ID}/event/device_alerts"
         payload = {
@@ -387,9 +425,10 @@ class DeviceAlertPublisher:
                 "friendly_name": attributes.get("friendly_name", ""),
                 "device_class": attributes.get("device_class", ""),
             },
+            "source": source,
         }
         publisher.publish(payload, response_topic=topic)
-        print(f"[MQTT][ALERT] {alert_type}: {entity_id} ({prev_state} → {current_state}) → {topic}")
+        print(f"[MQTT][ALERT] {alert_type}: {entity_id} ({prev_state} → {current_state}) [{source}] → {topic}")
 
 
 _alert_publisher = DeviceAlertPublisher()

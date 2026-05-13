@@ -200,7 +200,7 @@ class TestDeviceAlertPublisher(unittest.TestCase):
         return patch.object(self.state.settings, "MQTT_ALERT_CHECK_INTERVAL_SEC", sec)
 
     def test_init_no_alert_published(self):
-        """초기화 시 이미 unavailable인 디바이스에 대해 알림 미발행"""
+        """초기화 시 이미 unavailable인 디바이스에 대해 SEED 알림 발행"""
         states = [
             _make_ha_state("light.a", "unavailable"),
             _make_ha_state("light.b", "on"),
@@ -209,7 +209,12 @@ class TestDeviceAlertPublisher(unittest.TestCase):
                 self._patch_ha_states(states), self._patch_devices_file(None), \
                 self._patch_publish() as mock_pub, patch("builtins.print"):
             self.pub.check_and_publish()
-            mock_pub.assert_not_called()
+            # unavailable인 light.a에 대해 seed publish 1건
+            self.assertEqual(mock_pub.call_count, 1)
+            payload = mock_pub.call_args[0][0]
+            self.assertEqual(payload["source"], "seed")
+            self.assertEqual(payload["alert_type"], "UNAVAILABLE")
+            self.assertEqual(payload["entity_id"], "light.a")
             # unavailable인 것은 _alerted에 seed됨
             self.assertIn("UNAVAILABLE", self.pub._alerted.get("light.a", set()))
             self.assertNotIn("light.b", self.pub._alerted)
@@ -272,16 +277,17 @@ class TestDeviceAlertPublisher(unittest.TestCase):
                 self.pub.check_and_publish()
             self.assertEqual(mock_pub.call_count, 1)
             self.pub._last_check = 0
-            # 복구
+            # 복구 → UNAVAILABLE_RESOLVED publish
             with self._patch_ha_states(recovered):
                 self.pub.check_and_publish()
-            self.assertEqual(mock_pub.call_count, 1)  # 복구 시 알림 아님
+            self.assertEqual(mock_pub.call_count, 2)
+            self.assertEqual(mock_pub.call_args[0][0]["alert_type"], "UNAVAILABLE_RESOLVED")
             self.assertNotIn("UNAVAILABLE", self.pub._alerted.get("light.a", set()))
             self.pub._last_check = 0
-            # 재전환
+            # 재전환 → UNAVAILABLE publish
             with self._patch_ha_states(unavail):
                 self.pub.check_and_publish()
-            self.assertEqual(mock_pub.call_count, 2)
+            self.assertEqual(mock_pub.call_count, 3)
 
     def test_battery_empty_alert(self):
         """battery=0 시 BATTERY_EMPTY 알림 발행"""
