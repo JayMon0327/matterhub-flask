@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import random
+import threading
 import time
 from typing import Callable, Dict, Iterable, Optional, Sequence
 
@@ -25,6 +27,46 @@ def _certificate_paths(cert_path: str) -> tuple[str, str, str]:
     key_file = os.path.join(normalized_cert_path, "key.pem")
     ca_file = os.path.join(normalized_cert_path, "ca_cert.pem")
     return cert_file, key_file, ca_file
+
+
+def _hub_offline_payload() -> str:
+    return json.dumps({
+        'hub_id': settings.MATTERHUB_ID,
+        'alert_type': 'HUB_OFFLINE',
+        'entity_id': settings.MATTERHUB_ID,
+        'ts': int(time.time()),
+        'source': 'lwt',
+    }, ensure_ascii=False)
+
+
+def _hub_online_payload() -> str:
+    return json.dumps({
+        'hub_id': settings.MATTERHUB_ID,
+        'alert_type': 'HUB_ONLINE',
+        'entity_id': settings.MATTERHUB_ID,
+        'ts': int(time.time()),
+        'source': 'live',
+    }, ensure_ascii=False)
+
+
+HUB_STATUS_GRACE_SECONDS = 10.0
+
+
+def _hub_status_topic() -> str:
+    return f"matterhub/{settings.MATTERHUB_ID}/event/hub_status"
+
+
+def _publish_hub_online(connection: 'mqtt.Connection') -> None:
+    """Connect 후 10초 grace 뒤 HUB_ONLINE 발행. Lambda가 HUB_OFFLINE을 RESOLVE 처리."""
+    try:
+        connection.publish(
+            topic=_hub_status_topic(),
+            payload=_hub_online_payload(),
+            qos=mqtt.QoS.AT_LEAST_ONCE,
+        )
+        print(f"[MQTT][HUB_ONLINE] published topic={_hub_status_topic()}")
+    except Exception as exc:
+        print(f"[MQTT][HUB_ONLINE] publish failed: {exc}")
 
 
 class AWSIoTClient:
@@ -109,6 +151,14 @@ class AWSIoTClient:
         if os.path.exists(ca_path):
             mtls_kw["ca_filepath"] = ca_path
 
+        if settings.MATTERHUB_ID:
+            mtls_kw['will'] = mqtt.Will(
+                topic=_hub_status_topic(),
+                qos=mqtt.QoS.AT_LEAST_ONCE,
+                payload=_hub_offline_payload().encode('utf-8'),
+                retain=False,
+            )
+
         mqtt_conn = mqtt_connection_builder.mtls_from_path(**mtls_kw)
 
         max_retries = 5
@@ -127,6 +177,12 @@ class AWSIoTClient:
                 connect_future = mqtt_conn.connect()
                 connect_future.result(timeout=10)
                 print("[MQTT][CONNECT][OK] connected to broker")
+                if settings.MATTERHUB_ID:
+                    threading.Timer(
+                        HUB_STATUS_GRACE_SECONDS,
+                        _publish_hub_online,
+                        args=(mqtt_conn,),
+                    ).start()
                 set_connection(mqtt_conn)
                 mark_connected(True)
                 reset_reconnect_attempts()
